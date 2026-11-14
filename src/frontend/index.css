@@ -8305,6 +8305,46 @@ button.agent-ref-offer:hover {
   gap: 0.2rem;
 }
 
+/* A message sent while the agent was at work: the user's bubble, dashed
+   until it is sent, with what it waits for and "Send now" under its words. */
+.agent-msg.user.agent-waiting {
+  border-style: dashed;
+  background: none;
+  color: var(--text-2);
+}
+
+.agent-waiting-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.15rem 0.55rem;
+  margin-top: 0.3rem;
+  color: var(--text-3);
+  font-size: 0.6875rem;
+  white-space: normal;
+}
+
+.agent-waiting-send {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.agent-waiting-send:hover {
+  text-decoration: underline;
+}
+
+.agent-waiting-send:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
 /* The pane's answer to /help: over the box, where the "/" popup opens. */
 .agent-help {
   position: absolute;

@@ -204,6 +204,13 @@ export const MAX_IMAGES_PER_MESSAGE = 10;
  */
 export const MAX_OPEN_SESSIONS = 5;
 
+/**
+ * Messages that may wait for a turn to end at once
+ * (specs/agents/agent-pane.feature.md "A message sent while the agent works
+ * waits for the turn").
+ */
+export const MAX_WAITING_MESSAGES = 10;
+
 /** An image as the pane sends it: the bytes, base64. */
 export interface ImageUpload {
   mediaType: ImageMediaType;
@@ -257,6 +264,14 @@ export type ChatEventBody =
   /** What the pane sent — echoed from the request, never from a replay.
       `refs` are the files that went with it, as the agent was told them. */
   | { kind: "user"; id: string; text: string; images?: ChatImage[]; refs?: string[] }
+  /** What the pane sent while a turn was under way: it waits for the turn to
+      end, shown at the foot of the transcript, and is sent as the `user`
+      event with the same id (specs/agents/agent-pane.feature.md "A message
+      sent while the agent works waits for the turn"). The log drops it once
+      that `user` event, or its `unqueued`, is in. */
+  | { kind: "queued"; id: string; text: string; images?: ChatImage[]; refs?: string[] }
+  /** A waiting message the user took back before it was sent. */
+  | { kind: "unqueued"; id: string }
   /** `parentToolUseId` on a delta: the subagent call it streams under, when
       the agent says so before the message is whole. */
   | { kind: "text_delta"; messageId: string; index: number; text: string; parentToolUseId?: string | null }
@@ -322,6 +337,8 @@ export type AgentOutput = Exclude<
     kind:
       | "status"
       | "user"
+      | "queued"
+      | "unqueued"
       | "permission_request"
       | "permission_resolved"
       | "mode"

@@ -75,12 +75,15 @@ import {
   shouldFollow,
   sourceNeedsAttention,
   tabOrder,
+  takesMessages,
   usableAgents,
   useAgentChat,
   useAgentChoices,
   useFolderInfo,
   useTranscriptView,
   viewRows,
+  waitingMessages,
+  waitingState,
   worktreeTooltip,
   withLocalCommands,
   writeAgentFollow,
@@ -102,6 +105,7 @@ import {
   type TranscriptItem,
   type TranscriptView,
   type ViewRow,
+  type WaitingMessage,
 } from "./agentChat";
 import { MAX_IMAGES_PER_MESSAGE, MAX_OPEN_SESSIONS } from "../server/agentTypes";
 import type { ChatAccount, ChatImage, ImageUpload } from "../server/agentTypes";
@@ -1310,6 +1314,10 @@ function Transcript({
   };
   const answer = (a: Answer) =>
     void agentChat.answer(session.meta.id, a).catch((e: Error) => toast.error(e.message));
+  // Messages sent while the agent worked: under everything else until the
+  // turn ends, or "Send now" stops it for one of them.
+  const waiting = waitingMessages(session.transcript);
+  const fail = (e: Error) => toast.error(e.message);
   return (
     <div
       className="agent-transcript"
@@ -1323,6 +1331,16 @@ function Transcript({
         <p className="agent-note">{statusLabel(session.meta.status, agent)}</p>
       )}
       <TranscriptRows rows={rows} view={view} agent={agent} onAnswer={answer} openSettings={openSettings} />
+      {waiting.map((message) => (
+        <WaitingRow
+          key={message.id}
+          message={message}
+          status={session.meta.status}
+          agent={agent}
+          onSendNow={() => void agentChat.sendNow(session.meta.id, message.id).catch(fail)}
+          onRemove={() => void agentChat.unqueue(session.meta.id, message.id).catch(fail)}
+        />
+      ))}
       {session.connection === "reconnecting" && (
         <p className="agent-note" data-level="error">
           Connection lost — reconnecting…
@@ -1389,18 +1407,7 @@ export function TranscriptRow({
     case "user":
       return (
         <div className="agent-msg user">
-          {item.images && item.images.length > 0 && <MessageImages images={item.images} />}
-          {item.text}
-          {item.refs && item.refs.length > 0 && (
-            <div className="agent-msg-refs" aria-label="Context">
-              {item.refs.map((path) => (
-                <span key={path} title={path}>
-                  <FileText size={11} aria-hidden="true" />
-                  {refLabel(path)}
-                </span>
-              ))}
-            </div>
-          )}
+          <UserMessage message={item} />
         </div>
       );
     case "assistant":
@@ -1481,6 +1488,72 @@ export function TranscriptRow({
         </p>
       );
   }
+}
+
+/** What a user's message bubble holds: its images, its words, and the files
+    it went with. */
+function UserMessage({ message }: { message: { text: string; images?: ChatImage[]; refs?: string[] } }) {
+  return (
+    <>
+      {message.images && message.images.length > 0 && <MessageImages images={message.images} />}
+      {message.text}
+      {message.refs && message.refs.length > 0 && (
+        <div className="agent-msg-refs" aria-label="Context">
+          {message.refs.map((path) => (
+            <span key={path} title={path}>
+              <FileText size={11} aria-hidden="true" />
+              {refLabel(path)}
+            </span>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+/**
+ * A message sent while the agent was at work (specs/agents/agent-pane
+ * .feature.md "A message sent while the agent works waits for the turn"):
+ * the user's bubble, dashed while it waits, with what it waits for, "Send
+ * now" — which stops the turn and sends it — and a button to take it back.
+ * Exported so tests can render one on its own.
+ */
+export function WaitingRow({
+  message,
+  status,
+  agent,
+  onSendNow,
+  onRemove,
+}: {
+  message: WaitingMessage;
+  status: ChatStatus;
+  agent: AgentDescriptor;
+  onSendNow: () => void;
+  onRemove: () => void;
+}) {
+  const state = waitingState(status, agent);
+  return (
+    <div className="agent-msg user agent-waiting" role="group" aria-label="Message waiting to be sent">
+      <UserMessage message={message} />
+      <div className="agent-waiting-foot">
+        <span>{state.label}</span>
+        {state.sendNow && (
+          <Tooltip label={state.hint}>
+            <button type="button" className="agent-waiting-send" onClick={onSendNow}>
+              Send now
+            </button>
+          </Tooltip>
+        )}
+        {!isFinalStatus(status) && (
+          <Tooltip label="Remove this message — it is not sent">
+            <button type="button" className="agent-ref-btn" aria-label="Remove waiting message" onClick={onRemove}>
+              <X size={11} aria-hidden="true" />
+            </button>
+          </Tooltip>
+        )}
+      </div>
+    </div>
+  );
 }
 
 /** The images a message carried; one opens full size over the pane, and a
@@ -1815,7 +1888,8 @@ export function ComposerBox({
   commands: SessionState["commands"];
   placeholder: string;
   disabled: boolean;
-  /** Whether a message may go now (the agent is not mid-turn). */
+  /** Whether a message may go now: a session that is ready, or one at work,
+      where it waits for the turn to end. */
   canSend: boolean;
   hint: string;
   /** The bar's left side: the folder (and the agent, before a session). */
@@ -2182,9 +2256,9 @@ function Composer({
       : status === "starting"
         ? `${who} is starting…`
         : status === "running"
-          ? `${who} is working — Stop to send something else`
+          ? `${who} is working — Enter queues a message for when this turn ends`
           : status === "awaiting_input"
-            ? `Answer ${who}'s request above`
+            ? `Answer ${who}'s request above — a message sent now waits for the turn`
             : "This session has ended — start a new one from the session menu";
   const shown = sessionFolder(meta);
   // A session in the folder itself names the branch the folder has checked
@@ -2249,7 +2323,7 @@ function Composer({
       commands={session.commands}
       placeholder={final ? "Session ended" : `Message ${who}, or type / for a command`}
       disabled={final}
-      canSend={status === "idle"}
+      canSend={takesMessages(status)}
       hint={hint}
       left={left}
       right={right}
