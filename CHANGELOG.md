@@ -4,6 +4,12 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.273 — 2026-11-13
+
+- An agent plugin switched on in one window is offered in every open window's pane ([#456](https://github.com/SpecDriven/specdriven-app/pull/456))
+- Opening Updates, Settings or Plugins shows a hidden editor pane, so the page is not stuck behind the coding agent ([#455](https://github.com/SpecDriven/specdriven-app/pull/455))
+- Each session tab shows its agent's icon, with the status dot on its corner ([#454](https://github.com/SpecDriven/specdriven-app/pull/454))
+
 ## v0.1.272 — 2026-11-13
 
 - Initialize marketplace…: an empty repository becomes a plugin marketplace; the SpecDriven one can't be removed ([#453](https://github.com/SpecDriven/specdriven-app/pull/453))
