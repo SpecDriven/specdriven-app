@@ -116,3 +116,45 @@ test("an agent's sign-in change has every open page re-read the agents", async (
     await reader.cancel();
   }
 });
+
+test("an agent that comes or goes has every open page re-read the agents, once per change", async () => {
+  // Codex switched on in one window: the pane in another offered Claude
+  // alone until a reload, as nothing told it the agents had changed.
+  const { handleApi } = await import("../src/server/api");
+  const { agents } = await import("../src/plugins/host/agents");
+  const res = (await handleApi(new Request("http://x/api/plugins/events")))!;
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  const events: string[] = [];
+  const reading = (async () => {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) return;
+      const chunk = decoder.decode(value);
+      if (!chunk.startsWith(":")) events.push(chunk); // heartbeats aside
+    }
+  })().catch(() => {});
+  // What arrived in a while after the change.
+  const settled = async (ms = 600) => {
+    await Bun.sleep(ms);
+    return events.splice(0);
+  };
+  expect(await settled(50)).toEqual([]);
+  const changed = `data: {"type":"changed"}\n\n`;
+  let dispose: (() => void) | undefined;
+  try {
+    dispose = agents.register(fakeProvider({ id: "arrives-test" }).provider) as () => void;
+    expect(await settled()).toEqual([changed]);
+    // An update's remount: gone and back at once is one re-read.
+    dispose();
+    dispose = agents.register(fakeProvider({ id: "arrives-test" }).provider) as () => void;
+    expect(await settled()).toEqual([changed]);
+    dispose();
+    dispose = undefined;
+    expect(await settled()).toEqual([changed]);
+  } finally {
+    dispose?.();
+    await reader.cancel();
+    await reading;
+  }
+});
