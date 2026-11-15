@@ -17,9 +17,6 @@ name: Release
 #   attestation naming this workflow and commit), checked with
 #   `gh attestation verify`.
 #
-# Prebuilt Windows installers are not part of every release: they take
-# minutes where this takes seconds. release-windows.yml builds them on
-# request and publishes them as a release of their own, windows-v<version>.
 # See README.md "Versioning" and "Distribution".
 
 on:
@@ -96,8 +93,7 @@ jobs:
 
       # A release that already exists is not overwritten: re-running on the
       # same tag fails, on purpose. --latest, because /releases/latest is how
-      # the installers and the app find the newest version, and a
-      # windows-v<version> release must never take that place.
+      # the installers and the app find the newest version.
       #
       # The body starts with what changed: the version's section of
       # CHANGELOG.md, which `bun run bump` wrote into the release commit
@@ -115,11 +111,10 @@ jobs:
             echo "CHANGELOG.md has no section for v$VERSION; cut releases with \`bun run bump\`" >&2
             exit 1
           fi
-          install="$(printf '%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s' \
+          install="$(printf '%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s' \
             "Source snapshot of $GITHUB_REPOSITORY at v$VERSION ($GITHUB_SHA)." \
             "**Install:** \`curl -fsSL https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/install.sh | sh\` downloads \`specdriven-$VERSION-src.zip\`, checks the signature on \`SHASUMS256.txt\` and the zip's checksum against it, unpacks it under \`~/.specdriven/app\`, builds it and starts it. It offers to install [Bun](https://bun.sh) first if the machine has none." \
             "**Install on Windows** (PowerShell): \`irm https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/install.ps1 | iex\` does the same under \`%USERPROFILE%\\.specdriven\\app\`, adds SpecDriven to the Start menu and starts it." \
-            "**Windows installer:** prebuilt installers that need neither Bun nor a build are published on request as a release of their own, \`windows-v$VERSION\`, when there is one; see [Releases](https://github.com/$GITHUB_REPOSITORY/releases)." \
             "**To review the source before it runs:** download \`specdriven-$VERSION-src.zip\`, \`SHASUMS256.txt\` and \`SHASUMS256.txt.sig\`, verify them as below, and unzip it yourself." \
             "**To verify this release by hand:** \`gh attestation verify specdriven-$VERSION-src.zip --repo $GITHUB_REPOSITORY\` checks GitHub's build provenance (this workflow, this commit). Offline, \`SHASUMS256.txt.sig\` is an SSH signature by the SpecDriven release key, \`release@specdriven.app\`; with the key the installers embed in a one-line \`allowed_signers\` file, \`ssh-keygen -Y verify -f allowed_signers -I release@specdriven.app -n specdriven-release -s SHASUMS256.txt.sig < SHASUMS256.txt\`, then \`sha256sum -c SHASUMS256.txt\`. The steps are spelled out in [docs/installation.md](https://github.com/$GITHUB_REPOSITORY/blob/v$VERSION/docs/installation.md)." \
             "SpecDriven is built with [Bun](https://bun.sh): \`bun install --frozen-lockfile\`, then \`bun run start\` for the web app or \`bun run build:desktop\` for the desktop installer." \
