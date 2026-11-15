@@ -26,3 +26,28 @@ test("src/server/pages.ts loads first without reaching back into the plugin host
   expect(run.stderr).not.toContain("before initialization");
   expect(run.code).toBe(0);
 });
+
+// The storage core's Promise facades run on Effect services built in
+// src/server/persistence. The facades import that folder; nothing in it may
+// import a facade back, or whichever of them a process loads first would see
+// the others half-initialized. Each facade is tried as the first import.
+for (const facade of [
+  "src/server/fsx.ts",
+  "src/server/automerge/store.ts",
+  "src/server/state.ts",
+  "src/server/tokenStore.ts",
+  "src/server/secrets.ts",
+]) {
+  test(`${facade} loads first without a cycle through the storage core`, () => {
+    const run = importInFreshProcess(facade, "src/server/persistence/runtime.ts", "src/server/api.ts");
+    expect(run.stderr).not.toContain("before initialization");
+    expect(run.code).toBe(0);
+  });
+}
+
+test("the storage core loads on its own, before any facade", () => {
+  const run = importInFreshProcess("src/server/persistence/runtime.ts", "src/server/state.ts");
+  expect(run.stderr).not.toContain("before initialization");
+  expect(run.code).toBe(0);
+});
+

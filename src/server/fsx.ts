@@ -2,14 +2,17 @@
 // (specs/app/desktop-app.feature.md). They fill the two Bun.file/Bun.write
 // habits the code was written against: writes create missing parent
 // directories, and reads of missing paths are null rather than exceptions.
+//
+// These are the Promise forms of the Effect programs in
+// src/server/persistence/Files.ts, run on Node's file system
+// (persistence/runtime.ts). A failure rejects with the errno exception.
 
-import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import * as Files from "./persistence/Files";
+import { run } from "./persistence/runtime";
 
 /** Bun.write-style write: missing parent directories are created first. */
 export async function writeTextFile(path: string, content: string): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, content);
+  return run(Files.writeText(path, content));
 }
 
 /**
@@ -19,15 +22,7 @@ export async function writeTextFile(path: string, content: string): Promise<void
  * requests read and write at once).
  */
 export async function replaceTextFile(path: string, content: string): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  const tmp = `${path}.${process.pid}.${Math.random().toString(36).slice(2, 8)}.tmp`;
-  await writeFile(tmp, content);
-  try {
-    await rename(tmp, path);
-  } catch (e) {
-    await rm(tmp, { force: true }).catch(() => {});
-    throw e;
-  }
+  return run(Files.replaceText(path, content));
 }
 
 /**
@@ -35,27 +30,15 @@ export async function replaceTextFile(path: string, content: string): Promise<vo
  * path (missing, a directory, or under a non-directory segment).
  */
 export async function readTextFile(path: string): Promise<string | null> {
-  try {
-    return await readFile(path, "utf8");
-  } catch (e) {
-    const code = (e as NodeJS.ErrnoException).code;
-    if (code === "ENOENT" || code === "EISDIR" || code === "ENOTDIR") return null;
-    throw e;
-  }
+  return run(Files.readText(path));
 }
 
 /** True when a plain file exists at the path (directories don't count). */
 export async function fileExists(path: string): Promise<boolean> {
-  return stat(path).then(
-    (s) => s.isFile(),
-    () => false,
-  );
+  return run(Files.fileExists(path));
 }
 
 /** True when a directory exists at the path. */
 export async function directoryExists(path: string): Promise<boolean> {
-  return stat(path).then(
-    (s) => s.isDirectory(),
-    () => false,
-  );
+  return run(Files.directoryExists(path));
 }

@@ -65,7 +65,8 @@ const SERVICE_NAME = "specdriven";
  * its delegate at first use, which would strand spans on a stopped provider
  * after a shutdown/start cycle (tests cycle pipelines; production could too).
  */
-function tracer() {
+/** The app's tracer; a no-op one while no pipeline runs. */
+export function tracer() {
   return trace.getTracer(SERVICE_NAME, version);
 }
 
