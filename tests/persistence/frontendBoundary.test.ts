@@ -1,13 +1,14 @@
-// Effect and the storage core stay on the server. The browser bundle is
-// built from src/index.html's entry; nothing it imports for its value —
-// directly or through another module — may be `effect`, an `@effect/*`
-// package, or a file under src/server/persistence. A type-only import is
-// erased before bundling and does not count.
+// Effect and the services built on it stay on the server. The browser
+// bundle is built from src/index.html's entry; nothing it imports for its
+// value — directly or through another module — may be `effect`, an
+// `@effect/*` package, or a file under src/server/persistence,
+// src/server/sync or src/server/effect. A type-only import is erased before
+// bundling and does not count.
 //
 // The Promise facades (fsx.ts, automerge/store.ts, state.ts, tokenStore.ts,
-// secrets.ts) run on Effect, so one of them reaching the frontend would
-// carry the whole runtime into the page; this walk names the chain if it
-// ever happens.
+// secrets.ts, run.ts, git/index.ts, reload.ts) run on Effect, so one of them
+// reaching the frontend would carry the whole runtime into the page; this
+// walk names the chain if it ever happens.
 
 import { expect, test } from "bun:test";
 import { existsSync, readFileSync, statSync } from "node:fs";
@@ -66,12 +67,21 @@ test("the browser bundle reaches neither Effect nor the storage core", () => {
     .map(([name, from]) => `${name} <- ${chain(cameFrom, from)}`);
   expect(effectImports).toEqual([]);
 
-  const storageCore = [...cameFrom.keys()]
-    .filter((file) => relative(ROOT, file).startsWith("src/server/persistence/"))
+  const services = [...cameFrom.keys()]
+    .filter((file) => /^src\/server\/(persistence|sync|effect)\//.test(relative(ROOT, file)))
     .map((file) => chain(cameFrom, file));
-  expect(storageCore).toEqual([]);
+  expect(services).toEqual([]);
 
-  const facades = ["fsx.ts", "state.ts", "automerge/store.ts", "tokenStore.ts", "secrets.ts"]
+  const facades = [
+    "fsx.ts",
+    "state.ts",
+    "automerge/store.ts",
+    "tokenStore.ts",
+    "secrets.ts",
+    "run.ts",
+    "git/index.ts",
+    "reload.ts",
+  ]
     .map((name) => join(ROOT, "src/server", name))
     .filter((file) => cameFrom.has(file))
     .map((file) => chain(cameFrom, file));

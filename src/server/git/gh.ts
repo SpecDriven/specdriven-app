@@ -18,9 +18,12 @@ import {
   signInHint,
   createGitBackend,
   gitClone,
+  gitTimeouts,
   identityConfig,
   isAuthFailure,
+  limitsFor,
   subprocessRun,
+  withoutProgress,
 } from "./cli";
 import type { GitContext, GitRun } from "./cli";
 
@@ -41,12 +44,51 @@ export function ghAvailable(): boolean {
   return ghPath() !== null;
 }
 
-// What gh last reported. Asking costs a subprocess (and, for the account, a
-// network round-trip), and git commands ask on every invocation.
-let signedIn: Promise<boolean> | null = null;
-let account: Promise<GhAccount | null> | null = null;
+/**
+ * One answer from gh, asked for once and kept: asking costs a subprocess
+ * (and, for the account and the hosts, a network round-trip), and git
+ * commands ask on every invocation.
+ *
+ * An answer gh was too slow to give — it was stopped at its time limit — is
+ * a stand-in, not what gh said. It serves the callers waiting on it, and
+ * every later one, so no git command waits out the limit again; gh is asked
+ * again in the background until it does answer, so one slow moment does not
+ * decide the rest of the session.
+ */
+function remembered<T>(ask: () => Promise<{ value: T; stopped?: boolean }>) {
+  let answer: Promise<T> | null = null;
+  let retry: ReturnType<typeof setTimeout> | null = null;
+  // Told apart by a count: an answer that arrives after `forget` is dropped.
+  let asking = 0;
 
-let hosts: Promise<string[]> | null = null;
+  const askAgainLater = (mine: number) => {
+    retry = setTimeout(async () => {
+      retry = null;
+      const next = await ask();
+      if (mine !== asking) return;
+      if (next.stopped) askAgainLater(mine);
+      else answer = Promise.resolve(next.value);
+    }, gitTimeouts().retryMs);
+    retry.unref?.();
+  };
+
+  return {
+    get(): Promise<T> {
+      if (answer) return answer;
+      const mine = asking;
+      return (answer = ask().then(({ value, stopped }) => {
+        if (stopped && mine === asking) askAgainLater(mine);
+        return value;
+      }));
+    },
+    forget(): void {
+      asking++;
+      if (retry) clearTimeout(retry);
+      retry = null;
+      answer = null;
+    },
+  };
+}
 
 /**
  * Whether gh's account is the one in use: the GitHub CLI is the Git access
@@ -62,44 +104,53 @@ export async function ghAccountInUse(): Promise<boolean> {
  * Settings rather than restarting.
  */
 export function resetGhCache(): void {
-  signedIn = null;
-  account = null;
-  hosts = null;
+  signedIn.forget();
+  account.forget();
+  hosts.forget();
 }
+
+const hosts = remembered<string[]>(async () => {
+  const path = ghPath();
+  if (!path) return { value: [] };
+  // Checks each token with the host, so it can hang like any request; every
+  // git command waits on this answer.
+  const res = await run(path, ["auth", "status", "--json", "hosts"], {
+    timeoutMs: gitTimeouts().quietMs,
+    label: "gh auth status",
+  });
+  if (res.exitCode === 0) {
+    try {
+      const data = JSON.parse(res.stdout) as { hosts?: Record<string, { state?: string }[]> };
+      const known = Object.entries(data.hosts ?? {})
+        .filter(([, accounts]) => accounts.some((a) => a.state === "success"))
+        .map(([host]) => host);
+      if (known.length > 0) return { value: known };
+    } catch {
+      // Not JSON: fall through to github.com.
+    }
+  }
+  return { value: ["github.com"], stopped: res.timedOut };
+});
 
 /**
  * The hosts gh is logged in to — github.com and any GitHub Enterprise host
  * (`gh auth login --hostname …`) — so gh's credential helper answers for
  * each of them. A gh too old for `auth status --json` is taken to know
- * github.com only.
+ * github.com only, and so is one that did not answer in time, until it does.
  */
 export function ghHosts(): Promise<string[]> {
-  return (hosts ??= (async () => {
-    const path = ghPath();
-    if (!path) return [];
-    const res = await run(path, ["auth", "status", "--json", "hosts"]);
-    if (res.exitCode === 0) {
-      try {
-        const data = JSON.parse(res.stdout) as { hosts?: Record<string, { state?: string }[]> };
-        const known = Object.entries(data.hosts ?? {})
-          .filter(([, accounts]) => accounts.some((a) => a.state === "success"))
-          .map(([host]) => host);
-        if (known.length > 0) return known;
-      } catch {
-        // Not JSON: fall through to github.com.
-      }
-    }
-    return ["github.com"];
-  })());
+  return hosts.get();
 }
+
+const signedIn = remembered<boolean>(async () => {
+  const path = ghPath();
+  if (!path) return { value: false };
+  return { value: (await run(path, ["auth", "token"])).exitCode === 0 };
+});
 
 /** Whether gh holds a token — a local lookup, no network. */
 export function ghSignedIn(): Promise<boolean> {
-  return (signedIn ??= (async () => {
-    const path = ghPath();
-    if (!path) return false;
-    return (await run(path, ["auth", "token"])).exitCode === 0;
-  })());
+  return signedIn.get();
 }
 
 /**
@@ -116,30 +167,34 @@ export async function ghToken(host?: string): Promise<string | null> {
   return res.exitCode === 0 && token ? token : null;
 }
 
-/** The signed-in gh account, or null when gh is missing, signed out or unreachable. */
-export function ghAccount(): Promise<GhAccount | null> {
-  return (account ??= (async () => {
-    const path = ghPath();
-    if (!path || !(await ghSignedIn())) return null;
-    const res = await run(path, ["api", "user"]);
-    if (res.exitCode !== 0) return null;
-    try {
-      const user = JSON.parse(res.stdout) as {
-        login?: string;
-        id?: number;
-        name?: string | null;
-        email?: string | null;
-      };
-      if (!user.login) return null;
-      return {
+const account = remembered<GhAccount | null>(async () => {
+  const path = ghPath();
+  if (!path || !(await ghSignedIn())) return { value: null };
+  const res = await run(path, ["api", "user"], { timeoutMs: gitTimeouts().quietMs, label: "gh api user" });
+  if (res.exitCode !== 0) return { value: null, stopped: res.timedOut };
+  try {
+    const user = JSON.parse(res.stdout) as {
+      login?: string;
+      id?: number;
+      name?: string | null;
+      email?: string | null;
+    };
+    if (!user.login) return { value: null };
+    return {
+      value: {
         login: user.login,
         name: user.name ?? null,
         email: user.email ?? `${user.id ?? 0}+${user.login}@users.noreply.github.com`,
-      };
-    } catch {
-      return null; // gh printed something unexpected: treat as no account
-    }
-  })());
+      },
+    };
+  } catch {
+    return { value: null }; // gh printed something unexpected: treat as no account
+  }
+});
+
+/** The signed-in gh account, or null when gh is missing, signed out or unreachable. */
+export function ghAccount(): Promise<GhAccount | null> {
+  return account.get();
 }
 
 /** `!'<gh>' auth git-credential`, quoted for the shell git runs helpers in. */
@@ -192,9 +247,14 @@ async function ghClone(git: GitRun, url: string, dir: string): Promise<void> {
   const path = ghPath();
   const slug = githubSlug(url);
   if (!path || !slug || !(await ghSignedIn())) return gitClone(git, url, dir);
-  const res = await run(path, ["repo", "clone", `github.com/${slug}`, dir], {
+  // What follows `--` goes to the `git clone` gh runs: with its progress
+  // reported, the clone is held to the same limits as the plain one.
+  const res = await run(path, ["repo", "clone", `github.com/${slug}`, dir, "--", "--progress"], {
     env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    ...limitsFor("clone"),
+    label: "gh repo clone",
   });
+  if (!res.timedOut) res.stderr = withoutProgress(res.stderr);
   if (res.exitCode !== 0) {
     const output = res.stderr + res.stdout;
     throw new Error(
@@ -207,4 +267,5 @@ export const ghBackend: GitBackend = createGitBackend({
   name: "gh",
   git: subprocessRun(ghContext),
   clone: ghClone,
+  remoteBesideLocal: true,
 });

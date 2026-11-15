@@ -33,7 +33,7 @@ import {
 import { getLogger } from "../telemetry";
 import { DocumentRejected, InvalidDocPath, type FileIoError } from "./errors";
 import * as Files from "./Files";
-import { logged, traced } from "./Tracing";
+import { logged, traced } from "../effect/Tracing";
 
 const log = getLogger("automerge");
 

@@ -3,16 +3,14 @@
 // (toThrowable), so the facades — fsx.ts, automerge/store.ts, state.ts,
 // tokenStore.ts, secrets.ts — reject with exactly the errors they always
 // did: a file error is the errno exception itself (`code`, `syscall`,
-// `path`), a refused document is the caller's own error. The bridge in
-// runtime.ts does the rethrowing.
+// `path`), a refused document is the caller's own error. The bridge
+// (src/server/effect/bridge.ts) does the rethrowing.
 
 import { Data } from "effect";
 import type { PlatformError } from "effect/PlatformError";
+import type { Throwable } from "../effect/bridge";
 
-/** What a persistence failure hands to code that awaits a Promise. */
-export interface Throwable {
-  toThrowable(): unknown;
-}
+export type { Throwable };
 
 /**
  * A file operation failed. `code` is the errno name when the platform gave

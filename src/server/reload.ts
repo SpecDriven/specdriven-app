@@ -10,7 +10,10 @@
 // markdown drift (external edits, pre-document repos) into the documents —
 // see src/server/automerge/driftSync.ts.
 
+import { resolve } from "node:path";
+import { Semaphore, type Fiber } from "effect";
 import { autoResolveMergeConflicts, importDrift, mergeInProgress } from "./automerge/driftSync";
+import { fork, interrupt, promised, run as runProgram } from "./effect/runtime";
 import { commitAndPush, pull, syncSavedChanges } from "./git";
 import { resolveDataRepo } from "./repo";
 import { NOTEBOOK, importPageDrift } from "./pages";
@@ -22,6 +25,8 @@ import { checkDataFormat, stampDataFormat } from "./dataFormat";
 import { AGENTS_FILE, installAgentsFile } from "./agentsFile";
 import { isDemoMode } from "./demoMode";
 import { getLogger, withSpan } from "./telemetry";
+import { RepoLocks } from "./sync/RepoLocks";
+import { tickEvery } from "./sync/SyncLoop";
 import { sync as pluginSync } from "../plugins/host/loader";
 
 export const DEFAULT_RELOAD_SECONDS = 60;
@@ -67,10 +72,44 @@ export async function reloadData(rootDir: string): Promise<string> {
   return syncDataDir(dir);
 }
 
-/** The tick itself, on an already-resolved data dir (shared with tests). */
-export async function syncDataDir(dir: string): Promise<string> {
+// Each folder's sync that has been asked for and not begun: it waits for the
+// one that is running.
+const waiting = new Map<string, { tick: Promise<string> }>();
+
+/**
+ * The tick itself, on an already-resolved data dir (shared with tests). Ticks
+ * on one folder take turns (git-operations.md "sync ticks never overlap"):
+ * one asked for while another runs — the timer, a manual reload, the
+ * start-up pull — waits for it, then runs. Every sync asked for while one
+ * is already waiting is that one: a tick that begins after they were all
+ * asked for serves each of them, so a row of requests costs one tick, not a
+ * tick apiece.
+ */
+export function syncDataDir(dir: string): Promise<string> {
+  const key = resolve(dir);
+  const queued = waiting.get(key);
+  if (queued) return queued.tick;
+  const asked = Date.now();
+  const mine = {} as { tick: Promise<string> };
+  waiting.set(key, mine);
+  mine.tick = runProgram(
+    RepoLocks.use((locks) =>
+      locks.withTick(
+        dir,
+        promised(() => {
+          // Begun: whoever asks from here on wants a tick after this one.
+          if (waiting.get(key) === mine) waiting.delete(key);
+          return tick(dir, asked);
+        }),
+      ),
+    ),
+  );
+  return mine.tick;
+}
+
+async function tick(dir: string, asked: number): Promise<string> {
   return withSpan("sync.tick", { "specdriven.dir": dir }, async (span) => {
-    const pulled = await pull(dir);
+    const pulled = await pull(dir, asked);
     if (pulled.ok || pulled.conflictedFiles.length > 0) pullProblems.delete(dir);
     else pullProblems.set(dir, pulled.message);
     if (!pulled.ok) {
@@ -169,12 +208,18 @@ export interface ReloadScheduler {
   stop(): void;
 }
 
+/**
+ * Run `task` every `seconds` (sync/SyncLoop.ts): a task slower than the
+ * interval is never entered twice, and a new frequency or a stop takes
+ * effect after the running task ends instead of cutting it short.
+ */
 export function createReloadScheduler(task: () => void | Promise<void>): ReloadScheduler {
-  let timer: ReturnType<typeof setInterval> | null = null;
+  const oneAtATime = Semaphore.makeUnsafe(1);
+  let loop: Fiber.Fiber<never, never> | null = null;
   let current = 0;
   const stop = () => {
-    if (timer) clearInterval(timer);
-    timer = null;
+    if (loop) interrupt(loop);
+    loop = null;
     current = 0;
   };
   return {
@@ -185,8 +230,7 @@ export function createReloadScheduler(task: () => void | Promise<void>): ReloadS
       stop();
       if (seconds <= 0) return;
       current = seconds;
-      timer = setInterval(() => void task(), seconds * 1000);
-      timer.unref?.();
+      loop = fork(tickEvery(seconds * 1000, promised(async () => task()), oneAtATime));
     },
     stop,
   };

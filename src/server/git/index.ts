@@ -10,7 +10,7 @@ import { rm } from "node:fs/promises";
 import { isHostedMode } from "../hostedMode";
 import { getLogger, withSpan } from "../telemetry";
 import type { GitBackend, PathMove, PullResult, SyncResult } from "./backend";
-import { cliBackend, cliGitAvailable } from "./cli";
+import { cliBackend, cliGitAvailable, remoteStop } from "./cli";
 import { ghAvailable, ghBackend, resetGhCache } from "./gh";
 import { jsBackend } from "./js";
 import { registerEngineLookup } from "./access";
@@ -161,8 +161,22 @@ function notePush(repoDir: string, result: SyncResult, settles = false): SyncRes
   return result;
 }
 
-export async function pull(repoDir: string): Promise<PullResult> {
-  return traced("pull", repoDir, () => backend().pull(repoDir), (result) => ({
+/**
+ * Pull a folder. `askedAt` is when the sync this pull belongs to was asked
+ * for: a remote command on the folder that was stopped since then — the
+ * sync waited behind the one that ran it — has already found what this pull
+ * would ask, that the remote does not answer. The pull then says the same
+ * without waiting out the limit a second time (specs: git operations, "a
+ * git command that hangs is stopped").
+ */
+export async function pull(repoDir: string, askedAt?: number): Promise<PullResult> {
+  const stopped = remoteStop(repoDir);
+  const stop = stopped && askedAt !== undefined && stopped.at >= askedAt ? stopped : null;
+  const pulling =
+    stop
+      ? async () => ({ ok: false, conflictedFiles: await backend().conflictedFiles(repoDir), message: stop.message })
+      : () => backend().pull(repoDir);
+  return traced("pull", repoDir, pulling, (result) => ({
     "git.pull.ok": result.ok,
     "git.pull.conflicted_files": result.conflictedFiles.length,
     "git.message": result.message,

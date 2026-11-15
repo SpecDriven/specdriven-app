@@ -2,50 +2,28 @@
 // both Bun (web server, bun test) and Electron's Node runtime
 // (specs/app/desktop-app.feature.md), so nothing here may touch Bun.$ or
 // Bun.which.
+//
+// `run` is the Promise form of runCommand (src/server/effect/command.ts),
+// which is where a command's limits and stopping live.
 
-import { execFile } from "node:child_process";
 import { accessSync, constants, statSync } from "node:fs";
 import { delimiter, join } from "node:path";
+import { runAlone } from "./effect/bridge";
+import { runCommand, type RunOptions, type RunResult } from "./effect/command";
 
-export interface RunResult {
-  exitCode: number;
-  stdout: string;
-  stderr: string;
-}
-
-export interface RunOptions {
-  cwd?: string;
-  env?: Record<string, string | undefined>;
-  /** Written to the command's stdin, which is then closed. */
-  input?: string;
-}
+export { TIMED_OUT_EXIT } from "./effect/command";
+export type { RunOptions, RunResult };
 
 /**
  * Run a command with verbatim arguments — no shell, so nothing is ever
  * shell-interpreted. Output is captured and a non-zero exit or spawn failure
  * resolves with an exit code instead of throwing (the Bun.$
- * `.quiet().nothrow()` contract the git layer is written against).
+ * `.quiet().nothrow()` contract the git layer is written against). With
+ * `timeoutMs` or `quietMs`, a command still running at the limit — or silent
+ * for that long — is stopped and resolves with exit code 124.
  */
 export function run(cmd: string, args: string[], options: RunOptions = {}): Promise<RunResult> {
-  return new Promise((done) => {
-    const child = execFile(
-      cmd,
-      args,
-      { cwd: options.cwd, env: options.env as NodeJS.ProcessEnv, maxBuffer: 64 * 1024 * 1024 },
-      (error, stdout, stderr) => {
-        // Non-zero exits carry a numeric code; spawn failures (ENOENT etc.)
-        // carry a string code and count as exit 1.
-        const exitCode = error ? (typeof error.code === "number" ? error.code : 1) : 0;
-        done({ exitCode, stdout: String(stdout), stderr: String(stderr) });
-      },
-    );
-    if (options.input !== undefined) {
-      // A command that exits before reading it all closes the pipe: that is
-      // its answer, not a reason to throw.
-      child.stdin?.on("error", () => {});
-      child.stdin?.end(options.input);
-    }
-  });
+  return runAlone(runCommand(cmd, args, options));
 }
 
 /** Absolute path of an executable found on PATH, or null — like Bun.which. */
