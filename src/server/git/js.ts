@@ -26,7 +26,8 @@ import type { RunResult } from "../run";
 import type { GitBackend } from "./backend";
 import { cloneFailure, createGitBackend } from "./cli";
 import type { GitRun } from "./cli";
-import { nodeFileSystem } from "./nodeFs";
+import { isHostedMode } from "../hostedMode";
+import { nodeFileSystem, plainFileSystem } from "./nodeFs";
 
 /**
  * Always true: the engine ships with the app. It exists so the engine layer
@@ -145,13 +146,15 @@ async function identity(): Promise<IdentityOverride> {
  * signature — this engine is never run with a null directory.
  */
 const jsRun: GitRun = async (repoDir, ...args) => {
+  // A hosted worker's repositories hold no symlinks (nodeFs.ts plainFileSystem).
+  const fs = isHostedMode() ? plainFileSystem : nodeFileSystem;
   const git = createGit({
-    fs: nodeFileSystem,
+    fs,
     credentials: await credentials(),
     identity: await identity(),
   });
   const res = await git.execute(args, {
-    fs: nodeFileSystem,
+    fs,
     cwd: repoDir ?? process.cwd(),
     env: new Map<string, string>(),
     stdin: "",

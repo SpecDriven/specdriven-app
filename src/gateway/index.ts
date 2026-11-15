@@ -13,6 +13,7 @@ import { readConfig } from "./config";
 import { generateMasterKey, loadKeyring } from "./crypto";
 import { Datastore, datastoreGit, readDatastoreConfig } from "./datastore";
 import { openDatabase } from "./db";
+import { readWorkerLimits } from "./limits";
 import { RateLimiter } from "./rateLimit";
 import { RecentRepos } from "./repos";
 import { SecretStore } from "./secrets";
@@ -79,6 +80,8 @@ const workers = new WorkerPool({
   dataDir: config.dataDir,
   entry: config.workerEntry,
   idleMs: config.workerIdleMinutes * 60_000,
+  // What one worker may use of the container the others share (limits.ts).
+  limits: readWorkerLimits(),
   secrets: (userId) => secrets.values(userId),
   // Called only once requests flow, after `gateway` below exists.
   emailOf: (userId) => gateway.accounts.emailOf(userId),

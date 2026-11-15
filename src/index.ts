@@ -43,7 +43,12 @@ if (isReadOnlyMode()) await (await import("./server/readOnly")).setupReadOnly();
 // Hosted mode (src/server/hostedMode.ts): one user's worker behind the
 // gateway, which hands it that user's GitHub token in the environment — set
 // before the startup sync below, the first thing to need it.
-if (isHostedMode()) setTokenBackend(createEnvBackend());
+if (isHostedMode()) {
+  setTokenBackend(createEnvBackend());
+  // What the worker sets up in its own folder (src/gateway/workerStart.ts):
+  // the git author, the remembered repos, and no symlink in a clone.
+  await (await import("./gateway/workerStart")).prepareHostedWorker();
+}
 
 // The API itself lives in server/api.ts so the desktop app can serve the
 // same routes over its app:// protocol (specs/app/desktop-app.feature.md).

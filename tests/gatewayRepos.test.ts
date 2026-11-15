@@ -97,14 +97,14 @@ test("a settings file that is a symlink is not followed", async () => {
   await mkdir(join(root, ".specdriven"));
   await symlink(elsewhere, join(root, ".specdriven", "settings.yaml"));
   expect(await readWorkerRepos(root)).toBeNull();
-  expect(await seedWorkerRepos(root, [OLDER], null)).toBe(false);
+  expect(await seedWorkerRepos(root, [OLDER])).toBe(false);
   expect(JSON.parse(await readFile(elsewhere, "utf8"))).toEqual({ dataRepo: SPECS });
 });
 
 test("a worker with no settings gets the remembered repos; one with settings keeps its own", async () => {
   const root = await freshRoot("seed");
-  expect(await seedWorkerRepos(root, [], null)).toBe(false);
-  expect(await seedWorkerRepos(root, [SPECS, OLDER], null)).toBe(true);
+  expect(await seedWorkerRepos(root, [])).toBe(false);
+  expect(await seedWorkerRepos(root, [SPECS, OLDER])).toBe(true);
   const seeded = await readSettings(join(root, ".specdriven", "settings.yaml"));
   expect(seeded).toEqual({
     settingsVersion: SETTINGS_VERSION,
@@ -116,7 +116,7 @@ test("a worker with no settings gets the remembered repos; one with settings kee
     plugins: { repos: {} },
   });
 
-  expect(await seedWorkerRepos(root, [OLDER], null)).toBe(false);
+  expect(await seedWorkerRepos(root, [OLDER])).toBe(false);
   expect(await readWorkerRepos(root)).toEqual([SPECS, OLDER]);
 });
 
@@ -167,7 +167,7 @@ test("a worker's settings.json from before YAML is read, and not seeded over", a
   const json = join(root, ".specdriven", "settings.json");
   await writeFile(json, JSON.stringify({ dataRepo: SPECS, recentDataRepos: [SPECS, OLDER] }));
   expect(await readWorkerRepos(root)).toEqual([SPECS, OLDER]);
-  expect(await seedWorkerRepos(root, [OLDER], null)).toBe(false);
+  expect(await seedWorkerRepos(root, [OLDER])).toBe(false);
   expect(await readdir(join(root, ".specdriven"))).toEqual(["settings.json"]);
 
   // Once the worker's app has converted it, settings.yaml is the one read.

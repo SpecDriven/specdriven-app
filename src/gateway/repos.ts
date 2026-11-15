@@ -6,17 +6,21 @@
 // a settings file that is missing when it starts the user's worker.
 //
 // Only GitHub urls are kept: hosted mode has no local folders, and a path
-// on a lost volume would name nothing. The settings file is the user's, so
-// it is read and written as untrusted: no symlinks followed, no file of
-// theirs overwritten, and nothing taken from it but repo urls.
+// on a lost volume would name nothing. The settings file is the user's, in
+// a folder they can rearrange, so root never opens it
+// (docs/hosted-tenant-isolation.md "Step 1"): where workers have uids of
+// their own the gateway reads it as that uid, and the worker writes the
+// remembered repos for itself as it starts (workerStart.ts). Either way no
+// file of theirs is overwritten and nothing is taken from it but repo urls.
 
 import type { Database } from "bun:sqlite";
-import { chown, lstat, mkdir, readFile, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { PROFILE_KEY } from "../plugins/profile";
 import { GITHUB_HOST } from "../server/github";
 import { parseGitHubUrl } from "../server/repo";
 import { parseSettingsText, serializeSettings } from "../server/settingsFormat";
+import { runAs } from "./limits";
 import {
   LEGACY_JSON_STATE_FILE,
   MAX_RECENT_DATA_REPOS,
@@ -24,6 +28,9 @@ import {
   STATE_DIR,
   STATE_FILE,
 } from "../server/state";
+
+/** The remembered repos, as JSON, for a worker that starts with no settings file (workerStart.ts). */
+export const HOSTED_REPOS_ENV = "SPECDRIVEN_HOSTED_REPOS";
 
 /** Larger than any settings file the app writes; anything bigger is not read. */
 const MAX_SETTINGS_BYTES = 1024 * 1024;
@@ -89,20 +96,46 @@ function settingsPaths(root: string) {
 }
 
 /**
- * The repos a worker's settings file names, the open one first; null when
- * there is no settings file to read (nothing to learn, so nothing to forget).
+ * The settings file as the gateway's own user reads it: settings.yaml, and
+ * settings.json only without one; nothing that is not a plain file in a
+ * plain folder, and nothing over the size limit.
  */
-export async function readWorkerRepos(root: string): Promise<string[] | null> {
+async function settingsText(root: string): Promise<{ file: string; text: string } | null> {
   const { dir, file: yaml, json } = settingsPaths(root);
   const [dirStat, yamlStat, jsonStat] = await Promise.all(
     [dir, yaml, json].map((path) => lstat(path).catch(() => null)),
   );
-  // As the app reads it: settings.yaml, and settings.json only without one.
   const [file, fileStat] = yamlStat ? [yaml, yamlStat] : [json, jsonStat];
   if (!dirStat?.isDirectory() || !fileStat?.isFile() || fileStat.size > MAX_SETTINGS_BYTES) return null;
+  return { file, text: await readFile(file, "utf8") };
+}
+
+/**
+ * The same file read as the worker's uid, so whatever the worker put at
+ * that path — a link, a pipe — reaches nothing the worker could not read
+ * itself, and a read that never ends is stopped.
+ */
+async function settingsTextAs(uid: number, root: string): Promise<{ file: string; text: string } | null> {
+  const { file: yaml, json } = settingsPaths(root);
+  for (const file of [yaml, json]) {
+    const res = await runAs(uid, ["head", "-c", String(MAX_SETTINGS_BYTES + 1), file], 10_000);
+    if (res.exitCode !== 0) continue;
+    return res.stdout.length > MAX_SETTINGS_BYTES ? null : { file, text: res.stdout };
+  }
+  return null;
+}
+
+/**
+ * The repos a worker's settings file names, the open one first; null when
+ * there is no settings file to read (nothing to learn, so nothing to forget).
+ * `uid` is the worker's own where workers have one (workers.ts).
+ */
+export async function readWorkerRepos(root: string, uid: number | null = null): Promise<string[] | null> {
+  const found = uid === null ? await settingsText(root) : await settingsTextAs(uid, root);
+  if (!found) return null;
   let state: unknown;
   try {
-    state = parseSettingsText(await readFile(file, "utf8"), file);
+    state = parseSettingsText(found.text, found.file);
   } catch {
     return null;
   }
@@ -124,16 +157,16 @@ export async function readWorkerRepos(root: string): Promise<string[] | null> {
 /**
  * Give a worker with no settings file the remembered repos: the most recent
  * one open, the rest on its recent list. A file already there is the user's
- * and stays as it is. True when a file was written.
+ * and stays as it is. True when a file was written. The worker runs this
+ * for itself as it starts (workerStart.ts), so the file is its own.
  */
-export async function seedWorkerRepos(root: string, repos: string[], uid: number | null): Promise<boolean> {
+export async function seedWorkerRepos(root: string, repos: string[]): Promise<boolean> {
   const clean = cleanRepos(repos);
   if (clean.length === 0) return false;
   const { dir, file, json } = settingsPaths(root);
   const dirStat = await lstat(dir).catch(() => null);
   if (!dirStat) {
-    await mkdir(dir, { mode: 0o700 });
-    if (uid !== null) await chown(dir, uid, uid);
+    await mkdir(dir, { recursive: true, mode: 0o700 });
   } else if (!dirStat.isDirectory()) {
     return false;
   } else if (await lstat(json).catch(() => null)) {
@@ -156,6 +189,5 @@ export async function seedWorkerRepos(root: string, repos: string[], uid: number
     if ((e as NodeJS.ErrnoException).code === "EEXIST") return false;
     throw e;
   }
-  if (uid !== null) await chown(file, uid, uid);
   return true;
 }
