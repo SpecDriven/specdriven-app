@@ -4,6 +4,12 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.276 — 2026-11-14
+
+- Tokens for Jira, Confluence, Aha! and qTest are kept by one store, and two saved at the same moment are both kept ([#462](https://github.com/SpecDriven/specdriven-app/pull/462))
+- Windows installers are no longer built in CI: release-windows.yml is gone ([#461](https://github.com/SpecDriven/specdriven-app/pull/461))
+- Quitting the app ends its work in order: nothing new begins, running git work gets a moment, a command that hangs is stopped ([#460](https://github.com/SpecDriven/specdriven-app/pull/460))
+
 ## v0.1.275 — 2026-11-14
 
 - A git command that hangs is stopped, git work on one folder runs one at a time, and sync ticks never overlap ([#459](https://github.com/SpecDriven/specdriven-app/pull/459))
