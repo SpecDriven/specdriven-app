@@ -1,6 +1,7 @@
 // Credentials kept on this device, as Effect services: the GitHub sign-in
-// (TokenStore) and the named secret stores plugins keep (SecretStores).
-// Neither is part of settings.yaml — settings are shareable, a credential
+// (TokenStore), the named secret stores plugins keep (SecretStores), and the
+// tokens kept per site for Jira, Confluence, Aha! and qTest (SiteTokens).
+// None is part of settings.yaml — settings are shareable, a credential
 // never is.
 //
 // Each store reads through a backend and remembers what it read. The default
@@ -9,14 +10,21 @@
 // one, both handed over as the Promise interfaces below. A backend that
 // throws fails the program with a BackendError carrying what it threw.
 //
-// src/server/tokenStore.ts and src/server/secrets.ts are the Promise forms.
+// src/server/tokenStore.ts, src/server/secrets.ts and src/server/siteTokens.ts
+// are the Promise forms.
 
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, Semaphore } from "effect";
 import { FileSystem } from "effect/FileSystem";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { GITHUB_HOST } from "../github";
 import { STATE_DIR } from "../settingsModel";
+import {
+  parseSiteRecords,
+  type SiteTokenBackend,
+  type SiteTokenKind,
+  type SiteTokenRecord,
+} from "../siteTokenModel";
 import { BackendError, InvalidSecretName, type FileIoError } from "./errors";
 import * as Files from "./Files";
 import { HomePaths } from "./HomePaths";
@@ -154,6 +162,9 @@ export const tokenFile = credentialFile(parseRecord);
 
 /** A secret store's file. */
 export const secretFile = credentialFile(parseSecretRecord);
+
+/** One kind of site's tokens, as a file: a list of records. */
+export const siteTokenFile = credentialFile(parseSiteRecords);
 
 // ── A store: a backend and what it last read ───────────────────────────────
 
@@ -318,6 +329,105 @@ export class SecretStores extends Context.Service<SecretStores, SecretStoresShap
             if (entry) entry.use(next);
             else stores.set(name, slot(next));
           }),
+      });
+    }),
+  );
+}
+
+// ── Tokens kept per site ───────────────────────────────────────────────────
+
+/** One kind of site's tokens: a token per site, told apart by the kind's own rule for base urls. */
+export interface SiteTokenStore {
+  /** Every record, tokens included. */
+  readonly all: Effect.Effect<SiteTokenRecord[], CredentialError>;
+  /** The record for a site, or null. */
+  readonly find: (base: string) => Effect.Effect<SiteTokenRecord | null, CredentialError>;
+  /** Keep a token, replacing the one its site had; answers the records as they are now. */
+  readonly save: (record: SiteTokenRecord) => Effect.Effect<SiteTokenRecord[], CredentialError>;
+  /** Forget a site's token; answers the records as they are now. */
+  readonly clear: (base: string) => Effect.Effect<SiteTokenRecord[], CredentialError>;
+}
+
+export interface SiteTokensShape {
+  /** The store for a kind; the same one every time, by the kind's name. */
+  readonly store: (kind: SiteTokenKind) => SiteTokenStore;
+  /** Swap one kind's backend (Electron safeStorage, a test's fixed file); null restores its file. */
+  readonly setBackend: (kind: SiteTokenKind, backend: SiteTokenBackend | null) => Effect.Effect<void>;
+}
+
+/**
+ * The tokens the integrations keep per site on this device
+ * (specs/external-links): Jira, Confluence, Aha! and qTest. One store per
+ * kind, each a list of records in one file.
+ */
+export class SiteTokens extends Context.Service<SiteTokens, SiteTokensShape>()(
+  "specdriven/persistence/SiteTokens",
+) {
+  /** Each kind in its 0600 file under the app's home, until a backend is swapped in. */
+  static readonly layer = Layer.effect(
+    this,
+    Effect.gen(function* () {
+      const fs = yield* Effect.service(FileSystem);
+      const home = yield* Effect.service(HomePaths);
+      const onFs = <A, E>(effect: Effect.Effect<A, E, FileSystem>): Effect.Effect<A, E> =>
+        Effect.provideService(effect, FileSystem, fs);
+
+      const inFile = (kind: SiteTokenKind): Backend<SiteTokenRecord[]> => {
+        const path = Effect.map(home.appHome, (dir) => join(dir, kind.file));
+        return {
+          load: Effect.flatMap(path, (p) => onFs(siteTokenFile.load(p))),
+          save: (records) => Effect.flatMap(path, (p) => onFs(siteTokenFile.save(p, records))),
+          clear: Effect.flatMap(path, (p) => onFs(siteTokenFile.clear(p))),
+        };
+      };
+
+      interface Entry {
+        readonly records: Slot<SiteTokenRecord[]>;
+        readonly store: SiteTokenStore;
+      }
+      const entries = new Map<string, Entry>();
+
+      const entryFor = (kind: SiteTokenKind): Entry => {
+        let entry = entries.get(kind.name);
+        if (entry) return entry;
+        const records = slot(inFile(kind));
+        // One read or change at a time: a change is read, then write, and a
+        // second one starting in between would write the list without the
+        // first one's token; a read overtaken by a change would remember the
+        // list from before it.
+        const turn = Semaphore.makeUnsafe(1);
+        const alone = Semaphore.withPermit(turn);
+        const all = Effect.map(records.load, (list) => list ?? []);
+        const others = (base: string) => Effect.map(all, (list) => list.filter((r) => !kind.same(r.base, base)));
+        entry = {
+          records,
+          store: {
+            all: alone(all),
+            find: (base) => alone(Effect.map(all, (list) => list.find((r) => kind.same(r.base, base)) ?? null)),
+            save: (record) =>
+              alone(
+                Effect.flatMap(others(record.base), (rest) => {
+                  const next = [...rest, record];
+                  return Effect.as(records.save(next), next);
+                }),
+              ),
+            clear: (base) =>
+              alone(
+                // The last token gone leaves no file behind, not an empty list.
+                Effect.flatMap(others(base), (next) =>
+                  Effect.as(next.length === 0 ? records.clear : records.save(next), next),
+                ),
+              ),
+          },
+        };
+        entries.set(kind.name, entry);
+        return entry;
+      };
+
+      return SiteTokens.of({
+        store: (kind) => entryFor(kind).store,
+        setBackend: (kind, backend) =>
+          Effect.sync(() => entryFor(kind).records.use(backend ? handed(backend) : inFile(kind))),
       });
     }),
   );

@@ -60,3 +60,13 @@ test("the storage core loads on its own, before any facade", () => {
   expect(run.code).toBe(0);
 });
 
+// The per-site token stores (siteTokens.ts and its four forms) are facades
+// of the storage core like the ones above. confluenceTokens.ts is the one
+// the agent pane and the desktop shell also load.
+for (const facade of ["src/server/siteTokens.ts", "src/server/confluenceTokens.ts"]) {
+  test(`${facade} loads first without a cycle through the storage core`, () => {
+    const run = importInFreshProcess(facade, "src/server/persistence/runtime.ts", "src/server/api.ts");
+    expect(run.stderr).not.toContain("before initialization");
+    expect(run.code).toBe(0);
+  });
+}

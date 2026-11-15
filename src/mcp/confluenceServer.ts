@@ -15,7 +15,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { version } from "../../package.json";
 import { ConfluenceError, getPageBody, listChildren, resolveParent, searchPages } from "../server/confluence";
-import { confluenceTokenPath, parseConfluenceRecords } from "../server/confluenceTokens";
+import { CONFLUENCE_TOKENS, parseSiteRecords, siteTokenPath } from "../server/siteTokenModel";
 import { htmlToMarkdown } from "../server/html";
 import {
   CONFLUENCE_MCP_SERVER,
@@ -31,13 +31,13 @@ import {
 
 /** The token file the environment names, else the app's own. */
 export function tokensFileFromEnv(env: NodeJS.ProcessEnv = process.env): string {
-  return env[CONFLUENCE_TOKENS_FILE_ENV] || confluenceTokenPath();
+  return env[CONFLUENCE_TOKENS_FILE_ENV] || siteTokenPath(CONFLUENCE_TOKENS);
 }
 
 /** The wikis a token file holds right now; none when it is missing or corrupt. */
 export async function readWikis(file: string): Promise<Wiki[]> {
   const raw = await readFile(file, "utf8").catch(() => "");
-  return (parseConfluenceRecords(raw) ?? []).map(({ base, token }) => ({ base, token }));
+  return (parseSiteRecords(raw) ?? []).map(({ base, token }) => ({ base, token }));
 }
 
 export interface ConfluenceMcpOptions {

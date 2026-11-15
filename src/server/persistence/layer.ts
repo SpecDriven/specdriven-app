@@ -5,7 +5,7 @@
 import * as NodeFileSystem from "@effect/platform-node-shared/NodeFileSystem";
 import { Layer } from "effect";
 import type { FileSystem } from "effect/FileSystem";
-import { SecretStores, TokenStore } from "./Credentials";
+import { SecretStores, SiteTokens, TokenStore } from "./Credentials";
 import { DocStore } from "./DocStore";
 import { HomePaths } from "./HomePaths";
 import { Settings } from "./Settings";
@@ -16,7 +16,7 @@ import { Settings } from "./Settings";
  * directory and fixed paths for a test.
  */
 export const persistenceOn = <E, R>(platform: Layer.Layer<FileSystem | HomePaths, E, R>) =>
-  Layer.mergeAll(DocStore.layer, Settings.layer, TokenStore.layer, SecretStores.layer).pipe(
+  Layer.mergeAll(DocStore.layer, Settings.layer, TokenStore.layer, SecretStores.layer, SiteTokens.layer).pipe(
     Layer.provideMerge(platform),
   );
 
