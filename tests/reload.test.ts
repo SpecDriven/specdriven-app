@@ -91,6 +91,58 @@ test("setting the scheduler to 0 stops it", async () => {
   expect(runs).toBe(0);
 });
 
+/** A task that counts how many of it run at once. */
+function slowTask(ms: number) {
+  const seen = { runs: 0, running: 0, most: 0 };
+  const task = async () => {
+    seen.runs++;
+    seen.running++;
+    seen.most = Math.max(seen.most, seen.running);
+    await Bun.sleep(ms);
+    seen.running--;
+  };
+  return { seen, task };
+}
+
+// git-operations.md "sync ticks never overlap".
+test("a task slower than the interval is never entered twice", async () => {
+  const { seen, task } = slowTask(40);
+  const scheduler = createReloadScheduler(task);
+  scheduler.set(0.01);
+  await Bun.sleep(200);
+  scheduler.stop();
+  await Bun.sleep(60);
+  expect(seen.runs).toBeGreaterThanOrEqual(2);
+  expect(seen.most).toBe(1);
+});
+
+test("a new frequency set while the task runs does not start a second one beside it", async () => {
+  const { seen, task } = slowTask(80);
+  const scheduler = createReloadScheduler(task);
+  scheduler.set(0.01);
+  for (let i = 0; i < 50 && seen.running === 0; i++) await Bun.sleep(5);
+  expect(seen.running).toBe(1);
+  scheduler.set(0.005);
+  expect(scheduler.seconds).toBe(0.005);
+  await Bun.sleep(200);
+  scheduler.stop();
+  await Bun.sleep(100);
+  expect(seen.runs).toBeGreaterThanOrEqual(2);
+  expect(seen.most).toBe(1);
+});
+
+test("a task that throws does not end the schedule", async () => {
+  let runs = 0;
+  const scheduler = createReloadScheduler(() => {
+    runs++;
+    throw new Error("tick failed");
+  });
+  scheduler.set(0.01);
+  await Bun.sleep(60);
+  scheduler.stop();
+  expect(runs).toBeGreaterThanOrEqual(2);
+});
+
 // The reload tick (pull + commit/push) runs against a local-path origin on
 // the system-git engine, and on all three under SPECDRIVEN_ALL_ENGINES=1
 // (helpers/engines.ts).

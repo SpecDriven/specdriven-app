@@ -159,10 +159,49 @@ export async function gitClone(git: GitRun, url: string, dir: string): Promise<v
 }
 
 /**
+ * How long a git command that talks to the remote may run before it is
+ * stopped (specs: git operations, "a git command that hangs is stopped"). A
+ * remote that never answers would otherwise hold the folder's git lock, and
+ * every save behind it, for as long as the connection stays open.
+ */
+export interface GitTimeouts {
+  /** fetch, pull, push, ls-remote; `gh api` and `gh auth status`. */
+  remoteMs: number;
+  /** clone, which may move a whole repository. */
+  cloneMs: number;
+}
+
+// The remote limit stays under the web server's 60-second idle timeout
+// (src/index.ts), so a Sync button waiting on a hung pull hears that the
+// pull was stopped instead of losing the connection first.
+const DEFAULT_TIMEOUTS: GitTimeouts = { remoteMs: 50_000, cloneMs: 10 * 60_000 };
+let timeouts: GitTimeouts = DEFAULT_TIMEOUTS;
+
+/** Change the time limits; null puts the defaults back. Returns the previous ones. For tests. */
+export function setGitTimeouts(next: GitTimeouts | null): GitTimeouts {
+  const previous = timeouts;
+  timeouts = next ?? DEFAULT_TIMEOUTS;
+  return previous;
+}
+
+export function gitTimeouts(): GitTimeouts {
+  return timeouts;
+}
+
+const REMOTE_VERBS = new Set(["fetch", "pull", "push", "ls-remote"]);
+
+/** The time limit for a git command by its verb; undefined for one that stays on this computer. */
+export function timeoutFor(verb: string | undefined): number | undefined {
+  if (verb === "clone") return timeouts.cloneMs;
+  return verb !== undefined && REMOTE_VERBS.has(verb) ? timeouts.remoteMs : undefined;
+}
+
+/**
  * A GitRun that shells out to the git binary, with prompts disabled so a
- * command that cannot authenticate fails fast instead of hanging the server.
- * The context is resolved per command, so a sign-in mid-session is picked up
- * by the next operation.
+ * command that cannot authenticate fails fast instead of hanging the server,
+ * and a time limit on the commands that reach the remote for one that hangs
+ * anyway. The context is resolved per command, so a sign-in mid-session is
+ * picked up by the next operation.
  */
 export function subprocessRun(context: () => Promise<GitContext>): GitRun {
   return async (repoDir, ...args) => {
@@ -170,6 +209,8 @@ export function subprocessRun(context: () => Promise<GitContext>): GitRun {
     const base = repoDir ? ["-C", repoDir] : [];
     return run("git", [...base, ...config, ...args], {
       env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...env },
+      timeoutMs: timeoutFor(args[0]),
+      label: `git ${args[0] ?? ""}`.trim(),
     });
   };
 }

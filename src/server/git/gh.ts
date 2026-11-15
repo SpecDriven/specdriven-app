@@ -18,6 +18,7 @@ import {
   signInHint,
   createGitBackend,
   gitClone,
+  gitTimeouts,
   identityConfig,
   isAuthFailure,
   subprocessRun,
@@ -77,7 +78,12 @@ export function ghHosts(): Promise<string[]> {
   return (hosts ??= (async () => {
     const path = ghPath();
     if (!path) return [];
-    const res = await run(path, ["auth", "status", "--json", "hosts"]);
+    // Checks each token with the host, so it can hang like any request; every
+    // git command waits on this answer.
+    const res = await run(path, ["auth", "status", "--json", "hosts"], {
+      timeoutMs: gitTimeouts().remoteMs,
+      label: "gh auth status",
+    });
     if (res.exitCode === 0) {
       try {
         const data = JSON.parse(res.stdout) as { hosts?: Record<string, { state?: string }[]> };
@@ -121,7 +127,7 @@ export function ghAccount(): Promise<GhAccount | null> {
   return (account ??= (async () => {
     const path = ghPath();
     if (!path || !(await ghSignedIn())) return null;
-    const res = await run(path, ["api", "user"]);
+    const res = await run(path, ["api", "user"], { timeoutMs: gitTimeouts().remoteMs, label: "gh api user" });
     if (res.exitCode !== 0) return null;
     try {
       const user = JSON.parse(res.stdout) as {
@@ -194,6 +200,8 @@ async function ghClone(git: GitRun, url: string, dir: string): Promise<void> {
   if (!path || !slug || !(await ghSignedIn())) return gitClone(git, url, dir);
   const res = await run(path, ["repo", "clone", `github.com/${slug}`, dir], {
     env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    timeoutMs: gitTimeouts().cloneMs,
+    label: "gh repo clone",
   });
   if (res.exitCode !== 0) {
     const output = res.stderr + res.stdout;
