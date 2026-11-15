@@ -4,6 +4,12 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.278 — 2026-11-15
+
+- Hosted workers are walled in further: root stays out of their folders, a stop ends every process of the uid, and hosted git runs no hook and makes no symlink ([#466](https://github.com/SpecDriven/specdriven-app/pull/466))
+- Cloud sessions clone the spec repo so specs/ resolves ([#465](https://github.com/SpecDriven/specdriven-app/pull/465))
+- Signing in to the gateway never leads to another site, and a pasted url suggests a tool only on the tool's own domain ([#464](https://github.com/SpecDriven/specdriven-app/pull/464))
+
 ## v0.1.277 — 2026-11-15
 
 - No command is run through a shell: the Windows url opener and one test no longer hand run() cmd /c or sh -c ([#463](https://github.com/SpecDriven/specdriven-app/pull/463))
