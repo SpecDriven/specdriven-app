@@ -42,18 +42,16 @@ const inCallerSpan = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
  * it is interrupted and waited for, then the services let go of what they
  * hold. Nothing runs after that — Promise code the shutdown cut short, going
  * on to its next step, is refused instead of starting work on services built
- * anew, with their locks open, in a process that is about to exit.
+ * anew, with their locks open, in a process that is about to exit. There is
+ * no way back, on purpose: services built anew would also have lost what
+ * registered with them when a module loaded (store.ts onDocSaved), so a test
+ * of this runs in a process of its own (tests/shutdown.test.ts).
  */
 export async function dispose(): Promise<void> {
   disposed = true;
   const ending = runtime;
   runtime = undefined;
   await ending?.dispose();
-}
-
-/** For tests: after a dispose, let the next `run` build the services afresh. */
-export function reopen(): void {
-  disposed = false;
 }
 
 /** Run a program and hand its result, or the error it stands for, to a Promise caller. */

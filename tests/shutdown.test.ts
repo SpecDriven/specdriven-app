@@ -4,6 +4,12 @@
 // answer. The pieces first — the folder locks closing, running commands
 // being stopped, the runtime disposed, the stages and their limits — then
 // the web server itself, started for real and sent SIGTERM.
+//
+// A test that closes the app's own locks or disposes its runtime does it in
+// a process of its own (inAppProcess): the runtime is the one every test
+// file in this process shares, and what registered with its services when a
+// module loaded — the Data page's "document saved" listener — would be gone
+// from a runtime built anew, for every test that ran afterwards.
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
@@ -13,8 +19,6 @@ import { delimiter, join } from "node:path";
 import { Deferred, Effect, Exit, Fiber } from "effect";
 import { runAlone } from "../src/server/effect/bridge";
 import { stopCommands } from "../src/server/effect/command";
-import { dispose, reopen, run as runProgram } from "../src/server/effect/runtime";
-import { localTurn } from "../src/server/git/turns";
 import { run, which } from "../src/server/run";
 import { reloader, stopBackgroundWork } from "../src/server/api";
 import { appStages, leave, SHUTDOWN_LIMITS, type Step } from "../src/server/shutdown";
@@ -44,9 +48,6 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  // A test that closed the app's locks, or its runtime, leaves one nothing can use.
-  await dispose();
-  reopen();
   reloader.stop();
   await rm(root, { recursive: true, force: true });
 });
@@ -169,30 +170,76 @@ test("git work that outlasts the wait is not waited for, and what it would do ne
   expect(errorOf(result.save)).toBeInstanceOf(ShuttingDown);
 });
 
+/**
+ * Run a script in a process of its own, as the app would be: its own home
+ * and settings folder, nothing of this machine's in reach. The script
+ * prints one line of JSON, which is what this answers with.
+ */
+async function inAppProcess<T>(script: string): Promise<T> {
+  const file = join(root, `script-${Math.random().toString(36).slice(2)}.ts`);
+  await Bun.write(file, script);
+  const home = join(root, "home");
+  const proc = Bun.spawn([process.execPath, file], {
+    cwd: join(import.meta.dir, ".."),
+    env: {
+      PATH: "/usr/bin:/bin",
+      HOME: home,
+      TMPDIR: process.env.TMPDIR,
+      SPECDRIVEN_ROOT: join(root, "app"),
+      SPECDRIVEN_HOME: join(home, ".specdriven"),
+      SPECDRIVEN_NO_AUTO_INSTALL: "1",
+      FAKE_PID_FILE: pidFile,
+      FOLDER: join(root, "a"),
+    },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+  const answer = out.split("\n").find((line) => line.startsWith("{"));
+  if (code !== 0 || !answer) throw new Error(`the script ended with ${code}: ${out}\n${err}`);
+  return JSON.parse(answer) as T;
+}
+
+/** The import path of a source file, for a script. */
+const src = (path: string) => JSON.stringify(join(import.meta.dir, "..", "src", "server", path));
+
+/** How a promise ended: what it resolved with, or the message it rejected with. */
+const ENDING = `const ending = (p) => p.then((v) => ({ value: v }), (e) => ({ error: e.message }));`;
+
 test("git work asked of the app after its locks closed is refused as shutting down", async () => {
-  const dir = join(root, "a");
-  expect(await localTurn(dir, async () => "committed")).toBe("committed");
-  expect(await runProgram(RepoLocks.use((locks) => locks.close(1_000)))).toBe(true);
-  expect(localTurn(dir, async () => "committed")).rejects.toThrow("SpecDriven is shutting down");
+  const result = await inAppProcess<{ before: unknown; closed: boolean; after: unknown }>(`
+    import { run } from ${src("effect/runtime.ts")};
+    import { localTurn } from ${src("git/turns.ts")};
+    import { RepoLocks } from ${src("sync/RepoLocks.ts")};
+    ${ENDING}
+    const dir = process.env.FOLDER;
+    const before = await ending(localTurn(dir, async () => "committed"));
+    const closed = await run(RepoLocks.use((locks) => locks.close(1000)));
+    const after = await ending(localTurn(dir, async () => "committed"));
+    console.log(JSON.stringify({ before, closed, after }));
+  `);
+  expect(result.before).toEqual({ value: "committed" });
+  expect(result.closed).toBe(true);
+  expect(result.after).toEqual({ error: "SpecDriven is shutting down" });
 });
 
 test("disposing the runtime interrupts what still waits on it, and nothing runs on it afterwards", async () => {
-  const dir = join(root, "a");
-  const waiting = runProgram(Effect.never).then(
-    () => "ended",
-    (e: Error) => e.message,
-  );
-  await Bun.sleep(20);
-  await dispose();
-  expect(await waiting).toBe("The operation was interrupted");
-
-  // Code the shutdown cut short, going on to its next step, starts nothing.
-  let began = false;
-  const late = localTurn(dir, async () => {
-    began = true;
-  });
-  expect(late).rejects.toThrow("SpecDriven is shutting down");
-  expect(began).toBe(false);
+  const result = await inAppProcess<{ waiting: unknown; late: unknown; began: boolean }>(`
+    import { Effect } from "effect";
+    import { dispose, run } from ${src("effect/runtime.ts")};
+    import { localTurn } from ${src("git/turns.ts")};
+    ${ENDING}
+    const waiting = ending(run(Effect.never));
+    await Bun.sleep(20);
+    await dispose();
+    // Code the shutdown cut short, going on to its next step, starts nothing.
+    let began = false;
+    const late = await ending(localTurn(process.env.FOLDER, async () => { began = true; }));
+    console.log(JSON.stringify({ waiting: await waiting, late, began }));
+  `);
+  expect(result.waiting).toEqual({ error: "The operation was interrupted" });
+  expect(result.late).toEqual({ error: "SpecDriven is shutting down" });
+  expect(result.began).toBe(false);
 });
 
 test("a command still running at shutdown is stopped, and its run answers as a failed command", async () => {
@@ -264,14 +311,44 @@ test("a step that fails or does not answer within its limit is reported, and the
 });
 
 test("the app's own shutdown stops the reload timer and a running command, and leaves nothing to run on", async () => {
-  reloader.set(60);
-  const pending = run(SLEEPER, [], { env: { ...process.env, FAKE_PID_FILE: pidFile } });
-  const pid = await pidOf();
-  expect(await localTurn(join(root, "a"), async () => "committed")).toBe("committed");
-
-  const reports = await runAlone(leave(appStages({ graceMs: 400, killMs: 300, disposeMs: 400, flushMs: 400 })));
-
-  expect(reports.map((r) => [r.name, r.outcome])).toEqual([
+  const result = await inAppProcess<{
+    pid: number;
+    scheduled: number;
+    reports: [string, string][];
+    seconds: number;
+    exitCode: number;
+    after: unknown;
+  }>(`
+    import { readFileSync } from "node:fs";
+    import { reloader } from ${src("api.ts")};
+    import { runAlone } from ${src("effect/bridge.ts")};
+    import { localTurn } from ${src("git/turns.ts")};
+    import { run } from ${src("run.ts")};
+    import { appStages, leave } from ${src("shutdown.ts")};
+    ${ENDING}
+    reloader.set(60);
+    const scheduled = reloader.seconds;
+    const pending = run(${JSON.stringify(SLEEPER)}, [], { env: process.env });
+    let pid = 0;
+    while (!(pid > 0)) {
+      await Bun.sleep(25);
+      try { pid = Number(readFileSync(process.env.FAKE_PID_FILE, "utf8").trim()); } catch {}
+    }
+    await localTurn(process.env.FOLDER, async () => "committed");
+    const reports = await runAlone(leave(appStages({ graceMs: 400, killMs: 300, disposeMs: 400, flushMs: 400 })));
+    const after = await ending(localTurn(process.env.FOLDER, async () => "committed"));
+    console.log(JSON.stringify({
+      pid,
+      scheduled,
+      reports: reports.map((r) => [r.name, r.outcome]),
+      seconds: reloader.seconds,
+      exitCode: (await pending).exitCode,
+      after,
+    }));
+    process.exit(0);
+  `);
+  expect(result.scheduled).toBe(60);
+  expect(result.reports).toEqual([
     ["background work", "done"],
     ["agent sessions", "done"],
     ["git work", "done"],
@@ -279,11 +356,11 @@ test("the app's own shutdown stops the reload timer and a running command, and l
     ["runtime", "done"],
     ["telemetry", "done"],
   ]);
-  expect(reloader.seconds).toBe(0);
-  expect(alive(pid)).toBe(false);
-  expect((await pending).exitCode).not.toBe(0);
-  expect(localTurn(join(root, "a"), async () => "committed")).rejects.toThrow("SpecDriven is shutting down");
-});
+  expect(result.seconds).toBe(0);
+  expect(alive(result.pid)).toBe(false);
+  expect(result.exitCode).not.toBe(0);
+  expect(result.after).toEqual({ error: "SpecDriven is shutting down" });
+}, 30_000);
 
 test("stopping the background work stops the reload timer, and may be asked for twice", async () => {
   reloader.set(60);
