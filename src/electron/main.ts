@@ -22,14 +22,14 @@ import inspector from "node:inspector";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { endAllChatSessions } from "../server/agentChat";
 import { applyStartupState, handleApi } from "../server/api";
 import { specdrivenHome } from "../server/appSource";
 import { FOLDER_TITLES, setFolderChooser } from "../server/folderChooser";
 import { setActivator, setRelauncher, type ActivationResult } from "../server/relaunch";
 import { run } from "../server/run";
 import { HOME_SETTINGS_ENV } from "../server/state";
-import { initTelemetry, shutdownTelemetry, telemetryActive } from "../server/telemetry";
+import { shutdown } from "../server/shutdown";
+import { initTelemetry } from "../server/telemetry";
 import { setTokenBackend } from "../server/tokenStore";
 import { setConfluenceMcpLauncher, setConfluenceMcpTokensFile } from "../server/agentMcp";
 import { exportConfluenceTokens, onConfluenceTokensChanged, setConfluenceTokenBackend } from "../server/confluenceTokens";
@@ -96,19 +96,25 @@ const mcpTokensFile = join(userData, "confluence-tokens.mcp.json");
 
 // OpenTelemetry (opt-in via the standard OTEL_* environment variables) must
 // be up before the first sync or app:// API call so nothing escapes the
-// pipeline. Quitting waits once for the final flush; with telemetry off both
-// calls are no-ops and quit is untouched.
+// pipeline.
 initTelemetry();
-let telemetryFlushed = false;
+// Quitting waits once for the app's work to end in order
+// (src/server/shutdown.ts): the coding agent sessions — subprocesses, none
+// may outlive the window that showed them — are ended and their records
+// saved, the sync loop and the watchers stop, a git command still running is
+// stopped, and the last telemetry is flushed. Every step there has a time
+// limit, so the quit is held for a few seconds at most; the second quit,
+// below, goes through. It is asked for from a later turn of the event loop:
+// with nothing running the shutdown is over before this handler's event has
+// been delivered, and Electron ignores a quit asked for while it still is —
+// the app then stayed open, windowless, until it was killed.
+let leaving = false;
 app.on("will-quit", (event) => {
-  // Coding agent sessions (src/server/agentChat.ts) are Claude subprocesses;
-  // none may outlive the window that showed them.
-  void endAllChatSessions();
   rmSync(mcpTokensFile, { force: true });
-  if (telemetryFlushed || !telemetryActive()) return;
-  telemetryFlushed = true;
+  if (leaving) return;
+  leaving = true;
   event.preventDefault();
-  void shutdownTelemetry().finally(() => app.quit());
+  void shutdown().finally(() => setImmediate(() => app.quit()));
 });
 
 // A packaged macOS app launches with a minimal PATH; append the usual

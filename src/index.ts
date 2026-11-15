@@ -15,6 +15,7 @@ import { isReadOnlyMode } from "./server/readOnlyMode";
 import { createEnvBackend, setTokenBackend } from "./server/tokenStore";
 import { allowedHosts, listenHostname, rejectRequest } from "./server/requestGuard";
 import { initTelemetry } from "./server/telemetry";
+import { shutdownOnSignals } from "./server/shutdown";
 import { applyProfile } from "./server/profile";
 
 // `--profile <dir>` (src/server/profile.ts): settings, token and clones in a
@@ -137,6 +138,11 @@ const server = unixSocket
 // prefixes with it: the route table is swapped for one that serves the
 // shell there too, without a restart.
 shell.subscribe(() => server.reload({ routes: routes(), fetch }));
+
+// Ctrl-C and a stop from outside (src/server/shutdown.ts): no new request
+// is taken — not awaited, an open event stream would hold it — and the app's
+// work is ended in order before the process exits.
+shutdownOnSignals(() => void server.stop());
 
 // Bound to 127.0.0.1 Bun reports that address; say localhost, the name the
 // docs use (it resolves to the same loopback).

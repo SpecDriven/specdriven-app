@@ -291,6 +291,7 @@ import {
   routes as routeRegistry,
   sessionParts,
   sourcePaths,
+  stopWatching,
   syncPlugins,
 } from "../plugins/host/loader";
 import { profileManifests } from "../plugins/builtin/manifests";
@@ -404,6 +405,24 @@ export function applyNetSync(state: SpecDrivenState): Promise<void> {
     }
   });
   return netSyncTurn;
+}
+
+/**
+ * Shutdown (src/server/shutdown.ts): what repeats or watches by itself
+ * stops — the reload timer, the plugin folders' watchers, the document sync
+ * bridge. A sync tick that is running is not cut short here; the folder
+ * locks wait for it (src/server/sync/RepoLocks.ts `close`).
+ */
+export async function stopBackgroundWork(): Promise<void> {
+  reloader.stop();
+  stopWatching();
+  netSyncTurn = netSyncTurn.then(async () => {
+    const old = netSync;
+    netSync = null;
+    netSyncKey = null;
+    await old?.stop();
+  });
+  await netSyncTurn;
 }
 
 /** Apply the persisted settings a server run starts from. */
