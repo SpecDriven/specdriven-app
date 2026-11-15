@@ -183,7 +183,7 @@
   <li><strong>typecheck</strong> — <code>bun run typecheck</code> (<code>tsc --noEmit -p .</code>).</li>
   <li><strong>audit</strong> — <code>bun audit</code> with two advisories intentionally ignored (reasons documented inline in the workflow).</li>
 </ul>
-<p><code>bunfig.toml</code> pins <code>[test] root = "tests"</code>, so only the app&rsquo;s own tests under <code>tests/</code> are collected — <code>*.test.ts</code> files the desktop crash test leaves behind under <code>dist/</code> (from auto-installed plugins) are excluded. The release workflows (<code>release.yml</code>, <code>release-windows.yml</code>) only build; they do not run <code>bun test</code>.</p>
+<p><code>bunfig.toml</code> pins <code>[test] root = "tests"</code>, so only the app&rsquo;s own tests under <code>tests/</code> are collected — <code>*.test.ts</code> files the desktop crash test leaves behind under <code>dist/</code> (from auto-installed plugins) are excluded. The release workflow (<code>release.yml</code>) only builds; it does not run <code>bun test</code>.</p>
 </div>
 
 <h2>The five reasons in detail</h2>
