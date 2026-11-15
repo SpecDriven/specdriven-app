@@ -107,13 +107,16 @@ export function suggestLink(url: string): Partial<Pick<ExternalLink, "program" |
     return at >= 0 ? segments[at + 1] : undefined;
   };
   const key = (s: string | undefined) => s?.match(KEY_RE)?.[1];
+  // The domain itself or a subdomain of it — never a host that merely ends
+  // in or contains the name ("notasana.com", "monday.com.example").
+  const on = (domain: string) => host === domain || host.endsWith(`.${domain}`);
   if (host.endsWith(".atlassian.net") || host.includes("jira")) {
     return {
       program: "Jira",
       ticket: key(after("browse")) ?? key(parsed.searchParams.get("selectedIssue") ?? "") ?? key(path),
     };
   }
-  if (host === "linear.app" || host.endsWith(".linear.app")) {
+  if (on("linear.app")) {
     return { program: "Linear", ticket: key(after("issue")) ?? key(path) };
   }
   if (host === "github.com" || host === "www.github.com") {
@@ -124,11 +127,11 @@ export function suggestLink(url: string): Partial<Pick<ExternalLink, "program" |
     const number = after("issues") ?? after("merge_requests");
     return { program: "GitLab", ticket: number && /^\d+$/.test(number) ? `#${number}` : undefined };
   }
-  if (host.endsWith("asana.com")) {
+  if (on("asana.com")) {
     const number = [...segments].reverse().find((s) => /^\d+$/.test(s));
     return { program: "Asana", ticket: number };
   }
-  if (host.endsWith("trello.com")) {
+  if (on("trello.com")) {
     const number = segments[2]?.match(/^(\d+)-/)?.[1];
     return { program: "Trello", ticket: number ? `#${number}` : undefined };
   }
@@ -139,11 +142,11 @@ export function suggestLink(url: string): Partial<Pick<ExternalLink, "program" |
   if (host.includes("youtrack")) {
     return { program: "YouTrack", ticket: key(after("issue")) ?? key(path) };
   }
-  if (host.endsWith("shortcut.com")) {
+  if (on("shortcut.com")) {
     const number = after("story");
     return { program: "Shortcut", ticket: number && /^\d+$/.test(number) ? `#${number}` : undefined };
   }
-  if (host.includes("monday.com")) {
+  if (on("monday.com")) {
     const number = after("pulses");
     return { program: "Monday", ticket: number && /^\d+$/.test(number) ? `#${number}` : undefined };
   }

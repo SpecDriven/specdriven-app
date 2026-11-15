@@ -4,6 +4,8 @@
 // with the allowed emails and the users' roles.
 // Plain DOM, no framework; every value from the server goes in as text.
 
+import { safeNextPath } from "./next";
+
 type Json = Record<string, unknown>;
 
 async function call(path: string, method = "GET", body?: Json): Promise<{ ok: boolean; status: number; data: Json }> {
@@ -57,8 +59,7 @@ function errorOf(data: Json): string {
 
 /** Where to go after signing in: a same-site path from ?next=, else the app. */
 function nextPath(): string {
-  const next = new URLSearchParams(location.search).get("next") ?? "/";
-  return next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\") ? next : "/";
+  return safeNextPath(new URLSearchParams(location.search).get("next"), location.origin);
 }
 
 /** The pages that answer "check your email" whatever the address. */

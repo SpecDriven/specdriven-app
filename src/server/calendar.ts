@@ -14,7 +14,7 @@ export const ESTIMATE_PRESETS: readonly number[] = [15, 30, 60, 120, 240, 480];
 const HOURS = String.raw`(\d+(?:\.\d+)?)\s*(?:h|hrs?|hours?)`;
 const MINUTES = String.raw`(\d+)\s*(?:m|mins?|minutes?)`;
 const ESTIMATE_RE = new RegExp(
-  `^(?:${HOURS}(?:\\s*${MINUTES})?|${MINUTES.replace("(\\d+)", "(\\d+)")}|(\\d+))$`,
+  `^(?:${HOURS}(?:\\s*${MINUTES})?|${MINUTES}|(\\d+))$`,
   "i",
 );
 

@@ -438,6 +438,25 @@ test("a pasted url suggests the tool and the ticket", () => {
   expect(suggestLink("not a url")).toEqual({});
 });
 
+test("a tool is suggested for its own domain and subdomains only", () => {
+  expect(suggestLink("https://app.asana.com/0/1200/987654")).toEqual({ program: "Asana", ticket: "987654" });
+  expect(suggestLink("https://trello.com/c/AbCd/12-fix-login")).toEqual({ program: "Trello", ticket: "#12" });
+  expect(suggestLink("https://app.shortcut.com/acme/story/55/title")).toEqual({ program: "Shortcut", ticket: "#55" });
+  expect(suggestLink("https://acme.monday.com/boards/1/pulses/77")).toEqual({ program: "Monday", ticket: "#77" });
+  expect(suggestLink("https://acme.linear.app/acme/issue/ENG-42")).toEqual({ program: "Linear", ticket: "ENG-42" });
+  // A host that only ends in, or contains, a tool's domain is not that tool.
+  for (const url of [
+    "https://notasana.com/0/1200/987654",
+    "https://nottrello.com/c/AbCd/12-fix-login",
+    "https://notshortcut.com/acme/story/55/title",
+    "https://monday.com.other.example/boards/1/pulses/77",
+    "https://notmonday.com/boards/1/pulses/77",
+    "https://notlinear.app/acme/issue/1",
+  ]) {
+    expect(suggestLink(url).program).toBeUndefined();
+  }
+});
+
 test("a pasted url fills only the fields still empty", () => {
   expect(withLinkUrl(EMPTY_LINK_DRAFT, JIRA.url)).toEqual(linkDraftOf(JIRA));
   expect(withLinkUrl({ program: "Tracker", ticket: "", url: "" }, JIRA.url)).toEqual({
