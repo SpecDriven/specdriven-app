@@ -4,6 +4,10 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.277 — 2026-11-15
+
+- No command is run through a shell: the Windows url opener and one test no longer hand run() cmd /c or sh -c ([#463](https://github.com/SpecDriven/specdriven-app/pull/463))
+
 ## v0.1.276 — 2026-11-14
 
 - Tokens for Jira, Confluence, Aha! and qTest are kept by one store, and two saved at the same moment are both kept ([#462](https://github.com/SpecDriven/specdriven-app/pull/462))
