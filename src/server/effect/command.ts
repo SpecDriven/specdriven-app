@@ -7,17 +7,26 @@
 // interrupted, and it answers like any failed command, with exit code 124
 // (as coreutils `timeout` does) and a line in stderr saying so.
 //
+// A command may also be held to `quietMs`: stopped once it has written
+// nothing for that long. That limit tells a command that hangs from one
+// that is slow — a transfer that keeps reporting progress runs on, however
+// long it takes, and one that has gone silent is stopped the same way.
+//
 // Node APIs only: the server runs under both Bun and Electron's Node runtime
 // (specs/app/desktop-app.feature.md), so nothing here may touch Bun.spawn.
-// src/server/run.ts is the Promise form of this service.
+// src/server/run.ts is the Promise form of runCommand. It needs none of the
+// app's services, so it is no service itself: a program that wants a command
+// run yields runCommand, and a test hands the command a stand-in executable.
 
 import { execFile, type ChildProcess } from "node:child_process";
-import { Context, Duration, Effect, Layer, Option } from "effect";
+import { Duration, Effect, Option } from "effect";
 
 export interface RunResult {
   exitCode: number;
   stdout: string;
   stderr: string;
+  /** Set when the command was stopped at one of its limits instead of ending by itself. */
+  timedOut?: true;
 }
 
 export interface RunOptions {
@@ -27,6 +36,12 @@ export interface RunOptions {
   input?: string;
   /** Stop the command after this many milliseconds; it then answers with exit code 124. */
   timeoutMs?: number;
+  /**
+   * Stop the command once it has written nothing — to stdout or stderr — for
+   * this many milliseconds; it then answers with exit code 124. For a command
+   * that reports its progress as it works.
+   */
+  quietMs?: number;
   /** What a timed-out answer calls the command ("git pull"); the program's file name when left out. */
   label?: string;
   /** How long a stopped command has to exit after SIGTERM before SIGKILL. */
@@ -56,14 +71,21 @@ function stop(child: ChildProcess, graceMs: number): Promise<void> {
   });
 }
 
-/** One run of the command, stopped if the run is interrupted. */
+/** One run of the command, stopped if the run is interrupted or goes quiet past `quietMs`. */
 function spawn(cmd: string, args: readonly string[], options: RunOptions): Effect.Effect<RunResult> {
   return Effect.callback<RunResult>((resume) => {
+    const grace = options.killGraceMs ?? KILL_GRACE_MS;
+    let quiet: ReturnType<typeof setTimeout> | undefined;
+    // Set once the command is being stopped for its silence: its answer is
+    // then the one below, given when the process has exited.
+    let silenced = false;
     const child = execFile(
       cmd,
       args,
       { cwd: options.cwd, env: options.env as NodeJS.ProcessEnv, maxBuffer: 64 * 1024 * 1024 },
       (error, stdout, stderr) => {
+        clearTimeout(quiet);
+        if (silenced) return;
         // Non-zero exits carry a numeric code; spawn failures (ENOENT etc.)
         // carry a string code and count as exit 1.
         const exitCode = error ? (typeof error.code === "number" ? error.code : 1) : 0;
@@ -76,20 +98,41 @@ function spawn(cmd: string, args: readonly string[], options: RunOptions): Effec
       child.stdin?.on("error", () => {});
       child.stdin?.end(options.input);
     }
-    return Effect.promise(() => stop(child, options.killGraceMs ?? KILL_GRACE_MS));
+    const quietMs = options.quietMs;
+    if (quietMs !== undefined && quietMs > 0 && child.pid !== undefined) {
+      const heard = () => {
+        if (silenced) return;
+        clearTimeout(quiet);
+        quiet = setTimeout(() => {
+          silenced = true;
+          void stop(child, grace).then(() => resume(Effect.succeed(stopped(cmd, options.label, "quiet", quietMs))));
+        }, quietMs);
+      };
+      child.stdout?.on("data", heard);
+      child.stderr?.on("data", heard);
+      heard();
+    }
+    return Effect.promise(() => {
+      clearTimeout(quiet);
+      return stop(child, grace);
+    });
   });
 }
 
-/** A time limit as a person reads it: "2 minutes", "90 seconds", "300 ms". */
+/** A time limit as a person reads it: "2 minutes", "1 second", "1.5 seconds", "300 ms". */
 function limitText(ms: number): string {
   if (ms >= 60_000 && ms % 60_000 === 0) return ms === 60_000 ? "1 minute" : `${ms / 60_000} minutes`;
-  if (ms >= 1000) return `${Math.round(ms / 1000)} seconds`;
-  return `${ms} ms`;
+  if (ms < 1000) return `${ms} ms`;
+  const seconds = Math.round(ms / 100) / 10;
+  return seconds === 1 ? "1 second" : `${seconds} seconds`;
 }
 
-function timedOut(cmd: string, ms: number, label: string | undefined): RunResult {
+/** The answer of a command stopped at a limit: which limit, in stderr, as a failed command says why. */
+function stopped(cmd: string, label: string | undefined, limit: "total" | "quiet", ms: number): RunResult {
   const name = label ?? cmd.split(/[\\/]/).pop() ?? cmd;
-  return { exitCode: TIMED_OUT_EXIT, stdout: "", stderr: `${name} took longer than ${limitText(ms)} and was stopped\n` };
+  const why =
+    limit === "quiet" ? `made no progress for ${limitText(ms)}` : `took longer than ${limitText(ms)}`;
+  return { exitCode: TIMED_OUT_EXIT, stdout: "", stderr: `${name} ${why} and was stopped\n`, timedOut: true };
 }
 
 /** Run a command with verbatim arguments — no shell — and answer with how it ended. */
@@ -99,16 +142,6 @@ export function runCommand(cmd: string, args: readonly string[], options: RunOpt
   if (ms === undefined || !(ms > 0)) return run;
   return run.pipe(
     Effect.timeoutOption(Duration.millis(ms)),
-    Effect.map(Option.getOrElse(() => timedOut(cmd, ms, options.label))),
+    Effect.map(Option.getOrElse(() => stopped(cmd, options.label, "total", ms))),
   );
-}
-
-export interface CommandsShape {
-  readonly run: (cmd: string, args: readonly string[], options?: RunOptions) => Effect.Effect<RunResult>;
-}
-
-/** Runs the app's commands — git, gh and the rest. */
-export class Commands extends Context.Service<Commands, CommandsShape>()("specdriven/sync/Commands") {
-  /** Real processes, on Node's child_process. */
-  static readonly layer = Layer.succeed(this, { run: runCommand });
 }

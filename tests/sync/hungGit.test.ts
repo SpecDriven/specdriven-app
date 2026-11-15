@@ -1,34 +1,47 @@
 // specs: git operations, "a git command that hangs is stopped": a pull the
-// remote never answers is stopped at its time limit and shown as the
-// folder's pull problem, and a save waiting behind it still reaches the
-// remote. And "sync ticks never overlap": ticks asked for at once on one
-// folder take turns.
+// remote never answers is stopped once it has gone quiet for its limit and
+// shown as the folder's pull problem; an edit saved meanwhile is committed
+// without waiting for it, and pushed by the first sync the remote answers;
+// a remote that answers nothing is waited for once, not once per command;
+// and a pull that keeps reporting progress is left to finish. And "sync
+// ticks never overlap": ticks asked for at once on one folder take turns,
+// and the ones asked for while one waits are that one.
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { $ } from "bun";
-import { commitAndPush, setGitEngine } from "../../src/server/git";
+import { commitAndPush, pull, setGitEngine } from "../../src/server/git";
 import { setGitTimeouts } from "../../src/server/git/cli";
 import { which } from "../../src/server/run";
 import { pullProblem, syncDataDir } from "../../src/server/reload";
 import { linkExecutable } from "../helpers/fakeBin";
 import { twoClones } from "../helpers/fixtures";
 
-// A git that never answers a pull and is the real git for everything else.
-const HANGING_PULL = `#!/bin/sh
+// The real git, except for the verbs two variables name: one in $HANG is
+// noted in $HANG_LOG and never answers; one in $SLOW reports progress for
+// 1.2 seconds before the real git runs it.
+const FAKE_GIT = `#!/bin/sh
 for a in "$@"; do
-  if [ "$a" = pull ]; then exec /bin/sleep 30; fi
+  case " $HANG " in *" $a "*) echo "$a" >> "$HANG_LOG"; exec /bin/sleep 30;; esac
+  case " $SLOW " in *" $a "*)
+    i=0
+    while [ $i -lt 12 ]; do echo "Receiving objects:  $i% ($i/99)" >&2; /bin/sleep 0.1; i=$((i+1)); done
+    exec "$REAL_GIT" "$@";;
+  esac
 done
 exec "$REAL_GIT" "$@"
 `;
 
 let root: string;
-const saved = { PATH: process.env.PATH, REAL_GIT: process.env.REAL_GIT };
+let hangLog: string;
+const VARIABLES = ["PATH", "REAL_GIT", "HANG", "SLOW", "HANG_LOG"] as const;
+const saved = Object.fromEntries(VARIABLES.map((key) => [key, process.env[key]]));
 
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "specdriven-hunggit-"));
+  hangLog = join(root, "hung.log");
   setGitEngine("cli");
 });
 
@@ -42,33 +55,112 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-/** Put the hanging git first on PATH; the fixtures' own git calls must come before this. */
-function hangPulls(): void {
+/** Put the fake git first on PATH; the fixtures' own git calls must come before this. */
+function fakeGit(verbs: { hang?: string; slow?: string }): void {
   const bin = join(root, "bin");
   Bun.spawnSync(["/bin/mkdir", "-p", bin]);
   process.env.REAL_GIT = which("git")!;
-  linkExecutable(bin, "git", HANGING_PULL);
+  process.env.HANG = verbs.hang ?? "";
+  process.env.SLOW = verbs.slow ?? "";
+  process.env.HANG_LOG = hangLog;
+  linkExecutable(bin, "git", FAKE_GIT);
   process.env.PATH = `${bin}${delimiter}${process.env.PATH ?? ""}`;
 }
 
-test("a pull that hangs is stopped at its limit and a save behind it still reaches the remote", async () => {
+/** The remote commands that were left to hang, in order. */
+async function hung(): Promise<string[]> {
+  const log = Bun.file(hangLog);
+  return (await log.exists()) ? (await log.text()).split("\n").filter(Boolean) : [];
+}
+
+async function subjects(dir: string): Promise<string> {
+  return (await $`${process.env.REAL_GIT!} -C ${dir} log --format=%s`.quiet()).stdout.toString();
+}
+
+test("a pull that hangs is stopped, and an edit saved meanwhile is committed at once and pushed when the remote answers", async () => {
   const { a, originDir } = await twoClones(root);
-  hangPulls();
-  setGitTimeouts({ remoteMs: 400, cloneMs: 400 });
+  fakeGit({ hang: "fetch" });
+  setGitTimeouts({ quietMs: 1500 });
   await Bun.write(join(a, "specs/late.feature.md"), "# Late\n");
 
-  const started = Date.now();
-  const tick = syncDataDir(a);
-  await Bun.sleep(100); // the tick's pull is under way
-  const save = await commitAndPush(a, "specs/late.feature.md", "Add Late");
-  const message = await tick;
+  let tickEnded = false;
+  const tick = syncDataDir(a).finally(() => (tickEnded = true));
+  await Bun.sleep(150); // the tick's fetch is waiting on the remote
+  const save = commitAndPush(a, "specs/late.feature.md", "Add Late");
+  // The commit does not wait for the fetch: it is there while the fetch hangs.
+  for (let i = 0; i < 100 && !(await subjects(a)).includes("Add Late"); i++) await Bun.sleep(10);
+  expect(await subjects(a)).toContain("Add Late");
+  expect(tickEnded).toBe(false);
 
-  expect(Date.now() - started).toBeLessThan(10_000);
-  expect(message).toContain("git pull took longer than 400 ms and was stopped");
-  expect(pullProblem(a)).toContain("git pull took longer than 400 ms and was stopped");
-  expect(save.pushed).toBe(true);
-  const subjects = (await $`git -C ${originDir} log --format=%s`.quiet()).stdout.toString();
-  expect(subjects).toContain("Add Late");
+  const message = await tick;
+  expect(message).toContain("git fetch made no progress for 1.5 seconds and was stopped");
+  expect(pullProblem(a)).toContain("git fetch made no progress for 1.5 seconds and was stopped");
+  // The push behind the stopped fetch is not left to wait out the limit too.
+  const result = await save;
+  expect(result.pushed).toBe(false);
+  expect(result.message).toContain("push not tried");
+  expect(await hung()).toEqual(["fetch"]);
+  expect(await subjects(originDir)).not.toContain("Add Late");
+
+  // The remote answers again: the next sync pulls, and pushes what waited.
+  process.env.HANG = "";
+  await syncDataDir(a);
+  expect(pullProblem(a)).toBeNull();
+  expect(await subjects(originDir)).toContain("Add Late");
+});
+
+test("a remote that answers nothing is waited for once, by the sync that found it and by the one asked for meanwhile", async () => {
+  const { a } = await twoClones(root);
+  fakeGit({ hang: "fetch push" });
+  setGitTimeouts({ quietMs: 1000 });
+  // Something to push, so each sync has a pull and a push to wait for.
+  await Bun.write(join(a, "specs/late.feature.md"), "# Late\n");
+
+  const timer = syncDataDir(a);
+  await Bun.sleep(150); // the timer's tick is waiting on its fetch
+  const button = syncDataDir(a);
+  const [first, second] = await Promise.all([timer, button]);
+
+  for (const message of [first, second]) {
+    expect(message).toContain("git fetch made no progress for 1 second and was stopped");
+    expect(message).toContain("push not tried");
+  }
+  // One command waited out the limit — not the fetch and the push of each sync.
+  expect(await hung()).toEqual(["fetch"]);
+});
+
+test("syncs asked for while one waits are served by one tick", async () => {
+  const { a } = await twoClones(root);
+  fakeGit({ hang: "fetch" });
+  setGitTimeouts({ quietMs: 400 });
+
+  const running = syncDataDir(a);
+  await Bun.sleep(150); // begun, and held up by its fetch
+  const waiting = syncDataDir(a);
+  const later = syncDataDir(a);
+  expect(waiting).not.toBe(running);
+  expect(later).toBe(waiting);
+  expect(await later).toBe(await waiting);
+  await running;
+  // Asked for after the wait is over, a sync is a tick of its own again.
+  expect(syncDataDir(a)).not.toBe(waiting);
+});
+
+test("a pull that keeps reporting progress is left to finish, however long it has run", async () => {
+  const { a, b } = await twoClones(root);
+  await Bun.write(join(b, "specs/theirs.feature.md"), "# Theirs\n");
+  await $`git -C ${b} add -A`.quiet();
+  await $`git -C ${b} commit -q -m Theirs`.quiet();
+  await $`git -C ${b} push -q`.quiet();
+  fakeGit({ slow: "fetch" });
+  setGitTimeouts({ quietMs: 400 });
+
+  const started = Date.now();
+  const pulled = await pull(a);
+
+  expect(Date.now() - started).toBeGreaterThan(1000); // three times the quiet limit
+  expect(pulled.ok).toBe(true);
+  expect(await Bun.file(join(a, "specs/theirs.feature.md")).exists()).toBe(true);
 });
 
 test("ticks asked for at once on one folder take turns and both go through", async () => {

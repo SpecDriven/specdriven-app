@@ -1,6 +1,6 @@
 // The storage core's services as one layer. runtime.ts used to build the
 // app's only Effect runtime from this alone; the app runtime
-// (src/server/effect/runtime.ts) now adds the sync services beside it.
+// (src/server/effect/runtime.ts) now adds the per-folder git locks beside it.
 
 import * as NodeFileSystem from "@effect/platform-node-shared/NodeFileSystem";
 import { Layer } from "effect";

@@ -13,10 +13,12 @@
 // knows the order of operations for a pull, a conflict resolution or a save,
 // and nothing about how a git command is carried out. Engines supply that as
 // a GitRun — a subprocess here and in gh.ts, the bundled implementation in
-// js.ts. Every command it issues is therefore one all three understand.
+// js.ts. Every command it issues is therefore one all three understand; the
+// one exception is a pull, which the two that run a git binary carry out as
+// its fetch and its merge (fetchThenMerge below).
 
 import { mkdir, readdir, rename, rm } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 import { getAuth } from "../auth";
 import { readTextFile, writeTextFile } from "../fsx";
 import { GITHUB_HOST, webBase } from "../github";
@@ -24,9 +26,10 @@ import { isHostedMode } from "../hostedMode";
 import { currentGitAccess } from "./access";
 import { run, which } from "../run";
 import { getLogger } from "../telemetry";
-import type { RunResult } from "../run";
+import type { RunOptions, RunResult } from "../run";
 import type { GitBackend, PathMove, PullResult, SyncResult } from "./backend";
 import { isRepoRoot } from "./repoRoot";
+import { localTurn, remoteTurn } from "./turns";
 import { FALLBACK_TITLE, pathsInStatus, summarizeSavedChanges } from "./saveSummary";
 import { PROJECT_SETTINGS_FILE } from "../members";
 import type { ChangedFile } from "./saveSummary";
@@ -159,28 +162,40 @@ export async function gitClone(git: GitRun, url: string, dir: string): Promise<v
 }
 
 /**
- * How long a git command that talks to the remote may run before it is
- * stopped (specs: git operations, "a git command that hangs is stopped"). A
- * remote that never answers would otherwise hold the folder's git lock, and
- * every save behind it, for as long as the connection stays open.
+ * The limits on a git command that talks to the remote (specs: git
+ * operations, "a git command that hangs is stopped"). A remote that never
+ * answers would otherwise hold the folder's git lock, and every save behind
+ * it, for as long as the connection stays open.
  */
 export interface GitTimeouts {
-  /** fetch, pull, push, ls-remote; `gh api` and `gh auth status`. */
-  remoteMs: number;
-  /** clone, which may move a whole repository. */
-  cloneMs: number;
+  /**
+   * How long fetch, pull, push and clone may go without reporting progress.
+   * They are run with `--progress`, so one that is moving data keeps
+   * writing; one that has written nothing for this long has a remote that
+   * stopped answering. Also the whole limit of the commands that say
+   * nothing until they end: ls-remote, `gh api`, `gh auth status`.
+   */
+  quietMs: number;
+  /** How long fetch, pull, push and clone may run in all, however busy. */
+  totalMs: number;
+  /**
+   * After a remote command on a folder was stopped, how long that folder's
+   * pushes are not tried — they would only wait out the same limit — and
+   * how long gh's stand-in answers stand before gh is asked again.
+   */
+  retryMs: number;
 }
 
-// The remote limit stays under the web server's 60-second idle timeout
-// (src/index.ts), so a Sync button waiting on a hung pull hears that the
-// pull was stopped instead of losing the connection first.
-const DEFAULT_TIMEOUTS: GitTimeouts = { remoteMs: 50_000, cloneMs: 10 * 60_000 };
+// The quiet limit stays under the web server's 60-second idle timeout
+// (src/index.ts), so a Sync button waiting on a remote that does not answer
+// hears that the pull was stopped instead of losing the connection first.
+const DEFAULT_TIMEOUTS: GitTimeouts = { quietMs: 50_000, totalMs: 30 * 60_000, retryMs: 60_000 };
 let timeouts: GitTimeouts = DEFAULT_TIMEOUTS;
 
-/** Change the time limits; null puts the defaults back. Returns the previous ones. For tests. */
-export function setGitTimeouts(next: GitTimeouts | null): GitTimeouts {
+/** Change some of the limits; null puts the defaults back. Returns the previous ones. For tests. */
+export function setGitTimeouts(next: Partial<GitTimeouts> | null): GitTimeouts {
   const previous = timeouts;
-  timeouts = next ?? DEFAULT_TIMEOUTS;
+  timeouts = next ? { ...DEFAULT_TIMEOUTS, ...next } : DEFAULT_TIMEOUTS;
   return previous;
 }
 
@@ -188,30 +203,91 @@ export function gitTimeouts(): GitTimeouts {
   return timeouts;
 }
 
-const REMOTE_VERBS = new Set(["fetch", "pull", "push", "ls-remote"]);
+/** The verbs that move data and report it as they go. */
+const PROGRESS_VERBS = new Set(["fetch", "pull", "push", "clone"]);
 
-/** The time limit for a git command by its verb; undefined for one that stays on this computer. */
-export function timeoutFor(verb: string | undefined): number | undefined {
-  if (verb === "clone") return timeouts.cloneMs;
-  return verb !== undefined && REMOTE_VERBS.has(verb) ? timeouts.remoteMs : undefined;
+// A fetch of fewer than a hundred objects is unpacked one object at a time,
+// and reports each only when it is whole — a single large file arrives in
+// silence, which would read as a remote that stopped answering. Kept as a
+// pack, what arrives is reported by its size, about once a second, however
+// few objects it holds (as a clone always is).
+const RECEIVE_REPORTS = ["-c", "fetch.unpackLimit=1"];
+
+/**
+ * The limits for a git command by its verb; none for one that stays on this
+ * computer.
+ */
+export function limitsFor(verb: string | undefined): Pick<RunOptions, "quietMs" | "timeoutMs"> {
+  if (verb !== undefined && PROGRESS_VERBS.has(verb)) return { quietMs: timeouts.quietMs, timeoutMs: timeouts.totalMs };
+  return verb === "ls-remote" ? { timeoutMs: timeouts.quietMs } : {};
+}
+
+// What `--progress` adds to stderr, in the forms git writes it: a counter
+// ("Receiving objects:  45% (9/20), 1.2 MiB | 300 KiB/s", "remote:
+// Enumerating objects: 5, done."), and the two summary lines of a pack.
+const PROGRESS_LINE =
+  /^(remote: )?(.+: +\d+% \(\d+\/\d+\)|[^:]+: \d+, done\.|Total \d+ \(delta \d+\)|Delta compression using )/;
+
+/**
+ * A command's stderr as it reads without `--progress`: what a failed pull or
+ * push says is shown to the user, and the progress it reported on the way
+ * is not part of that. A counter rewrites its own line with carriage
+ * returns, so only what a terminal would be left showing is looked at.
+ */
+export function withoutProgress(stderr: string): string {
+  const kept: string[] = [];
+  for (const line of stderr.split("\n")) {
+    const shown = line.slice(line.lastIndexOf("\r") + 1).replace(/\x1b\[K/g, "");
+    if (shown.trim() === "" ? line.includes("\r") : PROGRESS_LINE.test(shown.trimEnd())) continue;
+    kept.push(shown === line ? line : shown.trimEnd());
+  }
+  return kept.join("\n");
+}
+
+/** A remote command that was stopped at a limit: when, and what it then said. */
+export interface RemoteStop {
+  at: number;
+  message: string;
+}
+
+// Each folder's remote command that was last stopped at a limit, while no
+// remote command on the folder has ended by itself since: the remote is not
+// answering, as far as this app knows.
+const stops = new Map<string, RemoteStop>();
+
+/** The stop that says a folder's remote is not answering; null once a remote command has ended by itself. */
+export function remoteStop(repoDir: string): RemoteStop | null {
+  return stops.get(resolve(repoDir)) ?? null;
+}
+
+/** Keep a folder's stop in step with how one of its remote commands ended. */
+function noteRemote(repoDir: string, res: RunResult): RunResult {
+  const key = resolve(repoDir);
+  if (res.timedOut) stops.set(key, { at: Date.now(), message: (res.stderr + res.stdout).trim() });
+  else stops.delete(key);
+  return res;
 }
 
 /**
  * A GitRun that shells out to the git binary, with prompts disabled so a
  * command that cannot authenticate fails fast instead of hanging the server,
- * and a time limit on the commands that reach the remote for one that hangs
- * anyway. The context is resolved per command, so a sign-in mid-session is
+ * and limits on the commands that reach the remote for one that hangs
+ * anyway: they report their progress, and are stopped when they have gone
+ * quiet. The context is resolved per command, so a sign-in mid-session is
  * picked up by the next operation.
  */
 export function subprocessRun(context: () => Promise<GitContext>): GitRun {
   return async (repoDir, ...args) => {
     const { config, env } = await context();
     const base = repoDir ? ["-C", repoDir] : [];
-    return run("git", [...base, ...config, ...args], {
+    const [verb, ...rest] = args;
+    const reports = verb !== undefined && PROGRESS_VERBS.has(verb);
+    const res = await run("git", [...base, ...config, ...(reports ? [...RECEIVE_REPORTS, verb, "--progress", ...rest] : args)], {
       env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...env },
-      timeoutMs: timeoutFor(args[0]),
-      label: `git ${args[0] ?? ""}`.trim(),
+      ...limitsFor(verb),
+      label: `git ${verb ?? ""}`.trim(),
     });
+    return reports && !res.timedOut ? { ...res, stderr: withoutProgress(res.stderr) } : res;
   };
 }
 
@@ -221,9 +297,42 @@ export interface BackendOptions {
   git: GitRun;
   /** Replaces the default `git clone`; receives this engine's runner. */
   clone?(git: GitRun, url: string, dir: string): Promise<void>;
+  /**
+   * Whether this engine's fetch and push may run while the folder's index
+   * and working tree are being changed — true of a git binary, whose
+   * commands lock what they touch. The bundled engine runs in this process
+   * and makes no such promise, so everything it does on a folder takes
+   * turns.
+   */
+  remoteBesideLocal?: boolean;
 }
 
-export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions): GitBackend {
+/**
+ * The workflow of every git operation, and who waits for whom on one folder
+ * (git-operations.md "git operations on one folder run one at a time",
+ * sync/RepoLocks.ts): what changes the index or the working tree — add,
+ * commit, mv, rm, merge, checkout — takes the folder's local turn, and what
+ * talks to the remote — fetch, push — takes its remote turn. A save's
+ * commit therefore waits for another commit or a merge, a moment, and never
+ * for the network; its push waits for the push or fetch before it.
+ *
+ * Neither turn is asked for by code that already holds it. The one place
+ * both are held is the bundled engine's pull, which is one command.
+ */
+export function createGitBackend({ name, git, clone: cloneWith, remoteBesideLocal = false }: BackendOptions): GitBackend {
+  const local = localTurn;
+  const remote = remoteBesideLocal ? remoteTurn : localTurn;
+
+  /**
+   * The stop that still holds a folder's pushes back: a remote command was
+   * stopped at its limit not long ago, and nothing has answered since. A
+   * push tried now would only wait out the same limit.
+   */
+  function heldBack(repoDir: string): RemoteStop | null {
+    const stop = remoteStop(repoDir);
+    return stop && Date.now() - stop.at < gitTimeouts().retryMs ? stop : null;
+  }
+
   /**
    * Whether the checked-out branch tracks a remote one. Read from config
    * rather than resolved as the `@{u}` revision, which the bundled engine
@@ -266,7 +375,9 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
     if (!(await hasUpstream(repoDir))) {
       return { ok: true, conflictedFiles: [], message: "no upstream configured; skipped pull" };
     }
-    const res = await git(repoDir, "pull", "--no-rebase");
+    const res = remoteBesideLocal
+      ? await fetchThenMerge(repoDir)
+      : await local(repoDir, async () => noteRemote(repoDir, await git(repoDir, "pull", "--no-rebase")));
     if (res.exitCode === 0) {
       return { ok: true, conflictedFiles: [], message: res.stdout.trim() };
     }
@@ -277,6 +388,18 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
       conflictedFiles: conflicts,
       message: conflicts.length === 0 && isAuthFailure(output) ? signInHint() : output,
     };
+  }
+
+  /**
+   * `git pull --no-rebase` as the two commands it runs, so each waits only
+   * for what it can collide with: the fetch for the remote, the merge of
+   * what it fetched for the index. An edit saved while the fetch waits on
+   * the network is committed at once, and merged with what arrives.
+   */
+  async function fetchThenMerge(repoDir: string): Promise<RunResult> {
+    const fetched = await remote(repoDir, async () => noteRemote(repoDir, await git(repoDir, "fetch")));
+    if (fetched.exitCode !== 0) return fetched;
+    return local(repoDir, () => git(repoDir, "merge", "FETCH_HEAD"));
   }
 
   /** Content of a file on the other side of an in-progress merge (theirs). */
@@ -342,11 +465,19 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
     if (!(await hasUpstream(repoDir))) {
       return { pushed: false, message: "no upstream configured; skipped push" };
     }
-    const res = await git(repoDir, "push");
-    if (res.exitCode === 0) return { pushed: true, message: "pushed" };
-    const output = (res.stderr + res.stdout).trim();
-    const failure = isAuthFailure(output) ? signInHint() : output;
-    return { pushed: false, failure, message: `push failed: ${failure}` };
+    return remote(repoDir, async () => {
+      // Looked at once the turn has come: a push that waited behind the
+      // command that was stopped is not tried either. The commits stay on
+      // this computer, and the next sync that reaches the remote pushes them
+      // (syncSavedChanges below).
+      const held = heldBack(repoDir);
+      if (held) return { pushed: false, failure: held.message, message: `push not tried: ${held.message}` };
+      const res = noteRemote(repoDir, await git(repoDir, "push"));
+      if (res.exitCode === 0) return { pushed: true, message: "pushed" };
+      const output = (res.stderr + res.stdout).trim();
+      const failure = isAuthFailure(output) ? signInHint() : output;
+      return { pushed: false, failure, message: `push failed: ${failure}` };
+    });
   }
 
   /**
@@ -370,16 +501,19 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
     content: string,
     alsoAdd: string[] = [],
   ): Promise<SyncResult> {
-    await writeTextFile(`${repoDir}/${relPath}`, content);
-    await git(repoDir, "add", relPath, ...alsoAdd);
-    const remaining = await conflictedFiles(repoDir);
+    const remaining = await local(repoDir, async () => {
+      await writeTextFile(`${repoDir}/${relPath}`, content);
+      await git(repoDir, "add", relPath, ...alsoAdd);
+      const left = await conflictedFiles(repoDir);
+      if (left.length === 0) await commit(repoDir, "--no-edit");
+      return left;
+    });
     if (remaining.length > 0) {
       return {
         pushed: false,
         message: `conflict resolved; ${remaining.length} conflicted file(s) remain`,
       };
     }
-    await commit(repoDir, "--no-edit");
     return pushOutcome(await push(repoDir), "conflict resolved; committed and pushed", "conflict resolved; committed");
   }
 
@@ -401,24 +535,31 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
     if (!(await isRepoRoot(repoDir))) {
       return { pushed: false, message: "not a standalone git repository; skipped sync" };
     }
-    if ((await conflictedFiles(repoDir)).length > 0) {
-      return { pushed: false, message: "merge conflict in progress; skipped sync" };
-    }
-    const status = await git(repoDir, "status", "--porcelain", "-b");
-    if (status.exitCode !== 0) return { pushed: false, message: "no saved changes" };
-    // The branch line (`## main...origin/main [ahead 2]`) leads; no file's
-    // status line can start with it.
-    const lines = status.stdout.split("\n");
-    const branch = lines.find((line) => line.startsWith("## ")) ?? "";
-    const changes = lines.filter((line) => !line.startsWith("## ")).join("\n");
-    if (changes.trim() === "") {
-      if (!/\[ahead \d+/.test(branch)) return { pushed: false, message: "no saved changes" };
-      return pushOutcome(await push(repoDir), "earlier saved changes pushed", "earlier saved changes not pushed yet");
-    }
-    const message = await saveMessage(repoDir, changes);
-    await git(repoDir, "add", "-A");
-    await commit(repoDir, "-m", message);
-    return pushOutcome(await push(repoDir), "saved scenarios committed and pushed", "saved scenarios committed");
+    // What there is to push, found — and committed — in one local turn: a
+    // result when there is nothing, else which kind of commits wait.
+    const waiting = await local(repoDir, async (): Promise<SyncResult | "earlier" | "saved"> => {
+      if ((await conflictedFiles(repoDir)).length > 0) {
+        return { pushed: false, message: "merge conflict in progress; skipped sync" };
+      }
+      const status = await git(repoDir, "status", "--porcelain", "-b");
+      if (status.exitCode !== 0) return { pushed: false, message: "no saved changes" };
+      // The branch line (`## main...origin/main [ahead 2]`) leads; no file's
+      // status line can start with it.
+      const lines = status.stdout.split("\n");
+      const branch = lines.find((line) => line.startsWith("## ")) ?? "";
+      const changes = lines.filter((line) => !line.startsWith("## ")).join("\n");
+      if (changes.trim() === "") {
+        return /\[ahead \d+/.test(branch) ? "earlier" : { pushed: false, message: "no saved changes" };
+      }
+      const message = await saveMessage(repoDir, changes);
+      await git(repoDir, "add", "-A");
+      await commit(repoDir, "-m", message);
+      return "saved";
+    });
+    if (typeof waiting !== "string") return waiting;
+    return waiting === "earlier"
+      ? pushOutcome(await push(repoDir), "earlier saved changes pushed", "earlier saved changes not pushed yet")
+      : pushOutcome(await push(repoDir), "saved scenarios committed and pushed", "saved scenarios committed");
   }
 
   /**
@@ -489,13 +630,15 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
       for (const m of moves) await rename(`${repoDir}/${m.from}`, `${repoDir}/${m.to}`);
       return { pushed: false, message: "renamed locally (not a git repository)" };
     }
-    for (const m of moves) {
-      const mv = await git(repoDir, "mv", m.from, m.to);
-      if (mv.exitCode !== 0) {
-        throw new Error(`git mv failed: ${(mv.stderr + mv.stdout).trim()}`);
+    await local(repoDir, async () => {
+      for (const m of moves) {
+        const mv = await git(repoDir, "mv", m.from, m.to);
+        if (mv.exitCode !== 0) {
+          throw new Error(`git mv failed: ${(mv.stderr + mv.stdout).trim()}`);
+        }
       }
-    }
-    await commit(repoDir, "-m", message, "--", ...moves.flatMap((m) => [m.from, m.to]));
+      await commit(repoDir, "-m", message, "--", ...moves.flatMap((m) => [m.from, m.to]));
+    });
     return pushOutcome(await push(repoDir), "renamed, committed and pushed", "renamed, committed");
   }
 
@@ -515,16 +658,18 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
       for (const p of all) await rm(`${repoDir}/${p}`, { recursive: true, force: true });
       return { pushed: false, message: "deleted locally (not a git repository)" };
     }
-    // -r for the Automerge doc directory that rides along with a feature.
-    const rmRes = await git(repoDir, "rm", "-f", "-r", ...all);
-    if (rmRes.exitCode !== 0) {
-      throw new Error(`git rm failed: ${(rmRes.stderr + rmRes.stdout).trim()}`);
-    }
-    // What is kept rides the same commit — an archived page's document,
-    // which must never reach a peer without the removal or the other way
-    // round (specs/app/roadmap.feature.md "Archive a roadmap page").
-    if (alsoAdd.length > 0) await git(repoDir, "add", ...alsoAdd);
-    await commit(repoDir, "-m", message, "--", ...all, ...alsoAdd);
+    await local(repoDir, async () => {
+      // -r for the Automerge doc directory that rides along with a feature.
+      const rmRes = await git(repoDir, "rm", "-f", "-r", ...all);
+      if (rmRes.exitCode !== 0) {
+        throw new Error(`git rm failed: ${(rmRes.stderr + rmRes.stdout).trim()}`);
+      }
+      // What is kept rides the same commit — an archived page's document,
+      // which must never reach a peer without the removal or the other way
+      // round (specs/app/roadmap.feature.md "Archive a roadmap page").
+      if (alsoAdd.length > 0) await git(repoDir, "add", ...alsoAdd);
+      await commit(repoDir, "-m", message, "--", ...all, ...alsoAdd);
+    });
     return pushOutcome(await push(repoDir), "deleted, committed and pushed", "deleted, committed");
   }
 
@@ -540,28 +685,34 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
     if (!(await isRepoRoot(repoDir))) {
       return { pushed: false, message: "saved locally (not a git repository)" };
     }
-    await git(repoDir, "add", ...all);
-    await commit(repoDir, "-m", message, "--", ...all);
+    await local(repoDir, async () => {
+      await git(repoDir, "add", ...all);
+      await commit(repoDir, "-m", message, "--", ...all);
+    });
     return pushOutcome(await push(repoDir), "committed and pushed", "committed");
   }
 
   async function commitAllAndPublish(repoDir: string, branch: string, message: string): Promise<SyncResult> {
-    // A clone of an empty repository has no commit, and its HEAD names
-    // whatever branch this git defaults to: point it at the one asked for.
-    const born = (await git(repoDir, "rev-parse", "--verify", "--quiet", "HEAD")).exitCode === 0;
-    if (!born) {
-      const res = await git(repoDir, "symbolic-ref", "HEAD", `refs/heads/${branch}`);
-      if (res.exitCode !== 0) {
-        const fallback = await git(repoDir, "checkout", "-b", branch);
-        if (fallback.exitCode !== 0) {
-          throw new Error(`Could not start the branch ${branch}: ${(fallback.stderr + fallback.stdout).trim()}`);
+    const current = await local(repoDir, async () => {
+      // A clone of an empty repository has no commit, and its HEAD names
+      // whatever branch this git defaults to: point it at the one asked for.
+      const born = (await git(repoDir, "rev-parse", "--verify", "--quiet", "HEAD")).exitCode === 0;
+      if (!born) {
+        const res = await git(repoDir, "symbolic-ref", "HEAD", `refs/heads/${branch}`);
+        if (res.exitCode !== 0) {
+          const fallback = await git(repoDir, "checkout", "-b", branch);
+          if (fallback.exitCode !== 0) {
+            throw new Error(`Could not start the branch ${branch}: ${(fallback.stderr + fallback.stdout).trim()}`);
+          }
         }
       }
-    }
-    await git(repoDir, "add", "-A");
-    await commit(repoDir, "-m", message);
-    const current = (await git(repoDir, "rev-parse", "--abbrev-ref", "HEAD")).stdout.trim() || branch;
-    const res = await git(repoDir, "push", "-u", "origin", `${current}:refs/heads/${current}`);
+      await git(repoDir, "add", "-A");
+      await commit(repoDir, "-m", message);
+      return (await git(repoDir, "rev-parse", "--abbrev-ref", "HEAD")).stdout.trim() || branch;
+    });
+    const res = await remote(repoDir, async () =>
+      noteRemote(repoDir, await git(repoDir, "push", "-u", "origin", `${current}:refs/heads/${current}`)),
+    );
     if (res.exitCode === 0) return { pushed: true, message: `committed and pushed to ${current}` };
     const output = (res.stderr + res.stdout).trim();
     const failure = isAuthFailure(output) ? signInHint() : output;
@@ -582,15 +733,19 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
    * the remote rather than the local branch the clone made.
    */
   async function checkoutRef(repoDir: string, ref: string): Promise<string> {
-    const fetched = await git(repoDir, "fetch", "origin", "--tags");
+    const fetched = await remote(repoDir, async () =>
+      noteRemote(repoDir, await git(repoDir, "fetch", "origin", "--tags")),
+    );
     if (fetched.exitCode !== 0) {
       const output = fetched.stderr + fetched.stdout;
       throw new Error(
         `Could not fetch ${ref}: ${isAuthFailure(output) ? signInHint() : output.trim()}`,
       );
     }
-    let res = await git(repoDir, "checkout", "--detach", `origin/${ref}`);
-    if (res.exitCode !== 0) res = await git(repoDir, "checkout", "--detach", ref);
+    const res = await local(repoDir, async () => {
+      const tracked = await git(repoDir, "checkout", "--detach", `origin/${ref}`);
+      return tracked.exitCode === 0 ? tracked : git(repoDir, "checkout", "--detach", ref);
+    });
     if (res.exitCode !== 0) {
       throw new Error(`The repository has no ref "${ref}": ${(res.stderr + res.stdout).trim()}`);
     }
@@ -619,4 +774,4 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
   };
 }
 
-export const cliBackend = createGitBackend({ name: "cli", git: subprocessRun(appContext) });
+export const cliBackend = createGitBackend({ name: "cli", git: subprocessRun(appContext), remoteBesideLocal: true });

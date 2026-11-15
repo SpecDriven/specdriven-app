@@ -46,12 +46,12 @@ test("a folder's lock does not hold up another folder", async () => {
     const locks = yield* RepoLocks;
     const release = yield* Deferred.make<void>();
     // Folder a stays locked until the end of the test…
-    const holder = yield* Effect.forkChild(locks.withRepo(join(root, "a"), Deferred.await(release)));
+    const holder = yield* Effect.forkChild(locks.withIndex(join(root, "a"), Deferred.await(release)));
     yield* Effect.yieldNow;
     // …while folder b's operation runs straight through.
-    const other = yield* locks.withRepo(join(root, "b"), Effect.succeed("b ran"));
+    const other = yield* locks.withIndex(join(root, "b"), Effect.succeed("b ran"));
     // The same folder, named another way, waits for the holder.
-    const same = yield* Effect.forkChild(locks.withRepo(join(root, "x", "..", "a"), Effect.succeed("a ran")));
+    const same = yield* Effect.forkChild(locks.withIndex(join(root, "x", "..", "a"), Effect.succeed("a ran")));
     yield* Effect.yieldNow;
     const waitedBefore = same.pollUnsafe() === undefined;
     yield* Deferred.succeed(release, undefined);
@@ -78,7 +78,7 @@ test("ticks on one folder take turns; a save is not held up by a tick", async ()
     const second = yield* Effect.forkChild(locks.withTick(dir, Effect.sync(() => order.push("tick 2"))));
     yield* Effect.yieldNow;
     // A save's git operation takes the repo lock, not the tick lock.
-    yield* locks.withRepo(dir, Effect.sync(() => order.push("save")));
+    yield* locks.withIndex(dir, Effect.sync(() => order.push("save")));
     yield* Deferred.succeed(release, undefined);
     yield* Fiber.await(first);
     yield* Fiber.await(second);
@@ -86,4 +86,29 @@ test("ticks on one folder take turns; a save is not held up by a tick", async ()
   });
   const order = await Effect.runPromise(Effect.provide(program, RepoLocks.layer));
   expect(order).toEqual(["tick 1 start", "save", "tick 2"]);
+});
+
+test("a folder's local work does not wait for its remote work, and remote work takes turns", async () => {
+  const program = Effect.gen(function* () {
+    const locks = yield* RepoLocks;
+    const release = yield* Deferred.make<void>();
+    const dir = join(root, "a");
+    // A fetch waits on the remote until the end of the test…
+    const fetch = yield* Effect.forkChild(locks.withRemote(dir, Deferred.await(release)));
+    yield* Effect.yieldNow;
+    // …while a commit on the same folder runs straight through…
+    const commit = yield* locks.withIndex(dir, Effect.succeed("committed"));
+    // …and the push after it waits for the fetch.
+    const push = yield* Effect.forkChild(locks.withRemote(dir, Effect.succeed("pushed")));
+    yield* Effect.yieldNow;
+    const waitedBefore = push.pollUnsafe() === undefined;
+    yield* Deferred.succeed(release, undefined);
+    yield* Fiber.await(fetch);
+    const after = yield* Fiber.await(push);
+    return { commit, waitedBefore, after };
+  });
+  const { commit, waitedBefore, after } = await Effect.runPromise(Effect.provide(program, RepoLocks.layer));
+  expect(commit).toBe("committed");
+  expect(waitedBefore).toBe(true);
+  expect(after._tag).toBe("Success");
 });

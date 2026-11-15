@@ -3,15 +3,15 @@
 // (specs/app/desktop-app.feature.md), so nothing here may touch Bun.$ or
 // Bun.which.
 //
-// `run` is the Promise form of the Commands service (src/server/sync/
-// Commands.ts), which is where a command's time limit and stopping live.
+// `run` is the Promise form of runCommand (src/server/effect/command.ts),
+// which is where a command's limits and stopping live.
 
 import { accessSync, constants, statSync } from "node:fs";
 import { delimiter, join } from "node:path";
-import { run as runProgram } from "./effect/runtime";
-import { Commands, type RunOptions, type RunResult } from "./sync/Commands";
+import { runAlone } from "./effect/bridge";
+import { runCommand, type RunOptions, type RunResult } from "./effect/command";
 
-export { TIMED_OUT_EXIT } from "./sync/Commands";
+export { TIMED_OUT_EXIT } from "./effect/command";
 export type { RunOptions, RunResult };
 
 /**
@@ -19,11 +19,11 @@ export type { RunOptions, RunResult };
  * shell-interpreted. Output is captured and a non-zero exit or spawn failure
  * resolves with an exit code instead of throwing (the Bun.$
  * `.quiet().nothrow()` contract the git layer is written against). With
- * `timeoutMs`, a command still running at the limit is stopped and resolves
- * with exit code 124.
+ * `timeoutMs` or `quietMs`, a command still running at the limit — or silent
+ * for that long — is stopped and resolves with exit code 124.
  */
 export function run(cmd: string, args: string[], options: RunOptions = {}): Promise<RunResult> {
-  return runProgram(Commands.use((commands) => commands.run(cmd, args, options)));
+  return runAlone(runCommand(cmd, args, options));
 }
 
 /** Absolute path of an executable found on PATH, or null — like Bun.which. */

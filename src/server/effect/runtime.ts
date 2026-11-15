@@ -1,28 +1,25 @@
-// The app's one Effect runtime, and the bridge Promise code goes through to
-// use it. Built once, on first use, from every service the server runs on
-// Effect: the storage core (src/server/persistence) and the sync services
-// (src/server/sync — commands with a time limit, per-folder git locks).
+// The app's one Effect runtime, and the way Promise code uses it. Built
+// once, on first use, from every service the server runs on Effect: the
+// storage core (src/server/persistence) and the per-folder git locks
+// (src/server/sync/RepoLocks.ts). This is where the services are put
+// together, so it is the one file here that names them.
 //
-// The bridge keeps the Promise functions' contract: a failure rejects with
-// the error the function always threw (persistence/errors.ts toThrowable),
-// a defect with the thrown value itself, never with an Effect wrapper; and
-// the caller's active span travels into the program (Tracing.ts), so spans
+// A program's ending reaches the Promise caller through bridge.ts, and the
+// caller's active span travels into the program (Tracing.ts), so spans
 // started inside nest under it.
 //
 // Nothing here imports a Promise facade (fsx.ts, state.ts, run.ts, git/, …):
 // they import this file (tests/importCycles.test.ts).
 
 import { context as otelContext, ROOT_CONTEXT } from "@opentelemetry/api";
-import { Effect, Exit, Fiber, Layer, ManagedRuntime } from "effect";
-import type { Cause } from "effect";
-import type { Throwable } from "../persistence/errors";
+import { Effect, Fiber, Layer, ManagedRuntime } from "effect";
 import { PersistenceLive } from "../persistence/layer";
-import { SpanContext } from "../persistence/Tracing";
-import { Commands } from "../sync/Commands";
 import { RepoLocks } from "../sync/RepoLocks";
+import { settle, type Throwable } from "./bridge";
+import { SpanContext } from "./Tracing";
 
 /** Every service of the app runtime, as the app runs them. */
-export const AppLive = Layer.mergeAll(PersistenceLive, Commands.layer, RepoLocks.layer);
+export const AppLive = Layer.mergeAll(PersistenceLive, RepoLocks.layer);
 
 /** What a program run through the bridge may depend on. */
 export type App = Layer.Success<typeof AppLive>;
@@ -31,22 +28,6 @@ let runtime: ManagedRuntime.ManagedRuntime<App, never> | undefined;
 
 function live(): ManagedRuntime.ManagedRuntime<App, never> {
   return (runtime ??= ManagedRuntime.make(AppLive));
-}
-
-/** What a failed run throws to a Promise caller: the first failure, else the first defect. */
-function thrown(cause: Cause.Cause<Throwable>): unknown {
-  for (const reason of cause.reasons) {
-    if (reason._tag === "Fail") return reason.error.toThrowable();
-  }
-  for (const reason of cause.reasons) {
-    if (reason._tag === "Die") return reason.defect;
-  }
-  return new Error("The operation was interrupted");
-}
-
-function settle<A>(exit: Exit.Exit<A, Throwable>): A {
-  if (Exit.isSuccess(exit)) return exit.value;
-  throw thrown(exit.cause);
 }
 
 /** Seed the program with the caller's active span. */

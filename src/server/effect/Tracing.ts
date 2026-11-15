@@ -16,10 +16,10 @@ import { context as otelContext, SpanStatusCode, trace } from "@opentelemetry/ap
 import type { Attributes, Context as OtelContext, Span } from "@opentelemetry/api";
 import { Cause, Context, Effect, Exit } from "effect";
 import { tracer } from "../telemetry";
-import type { Throwable } from "./errors";
+import type { Throwable } from "./bridge";
 
 /** The OpenTelemetry context the running fiber's spans and log lines belong to. */
-export const SpanContext = Context.Reference<OtelContext>("specdriven/persistence/SpanContext", {
+export const SpanContext = Context.Reference<OtelContext>("specdriven/effect/SpanContext", {
   defaultValue: () => otelContext.active(),
 });
 

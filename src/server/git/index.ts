@@ -7,12 +7,10 @@
 
 import type { Attributes } from "@opentelemetry/api";
 import { rm } from "node:fs/promises";
-import { promised, run as runProgram } from "../effect/runtime";
 import { isHostedMode } from "../hostedMode";
-import { RepoLocks } from "../sync/RepoLocks";
 import { getLogger, withSpan } from "../telemetry";
 import type { GitBackend, PathMove, PullResult, SyncResult } from "./backend";
-import { cliBackend, cliGitAvailable } from "./cli";
+import { cliBackend, cliGitAvailable, remoteStop } from "./cli";
 import { ghAvailable, ghBackend, resetGhCache } from "./gh";
 import { jsBackend } from "./js";
 import { registerEngineLookup } from "./access";
@@ -102,17 +100,6 @@ function backend(): GitBackend {
 
 const log = getLogger("git");
 
-/**
- * Run one operation that commits or talks to the remote while no other runs
- * on the folder (git-operations.md "git operations on one folder run one at
- * a time"): a save that arrives during a tick's pull waits for it instead of
- * racing it for the index. Read-only helpers — stage versions, diffs — take
- * no lock; conflict resolution calls them between locked operations.
- */
-function oneAtATime<T>(repoDir: string, operation: () => Promise<T>): Promise<T> {
-  return runProgram(RepoLocks.use((locks) => locks.withRepo(repoDir, promised(operation))));
-}
-
 function gitAttrs(repoDir: string): Attributes {
   return { "git.engine": currentEngine(), "specdriven.dir": repoDir };
 }
@@ -174,8 +161,22 @@ function notePush(repoDir: string, result: SyncResult, settles = false): SyncRes
   return result;
 }
 
-export async function pull(repoDir: string): Promise<PullResult> {
-  return traced("pull", repoDir, () => oneAtATime(repoDir, () => backend().pull(repoDir)), (result) => ({
+/**
+ * Pull a folder. `askedAt` is when the sync this pull belongs to was asked
+ * for: a remote command on the folder that was stopped since then — the
+ * sync waited behind the one that ran it — has already found what this pull
+ * would ask, that the remote does not answer. The pull then says the same
+ * without waiting out the limit a second time (specs: git operations, "a
+ * git command that hangs is stopped").
+ */
+export async function pull(repoDir: string, askedAt?: number): Promise<PullResult> {
+  const stopped = remoteStop(repoDir);
+  const stop = stopped && askedAt !== undefined && stopped.at >= askedAt ? stopped : null;
+  const pulling =
+    stop
+      ? async () => ({ ok: false, conflictedFiles: await backend().conflictedFiles(repoDir), message: stop.message })
+      : () => backend().pull(repoDir);
+  return traced("pull", repoDir, pulling, (result) => ({
     "git.pull.ok": result.ok,
     "git.pull.conflicted_files": result.conflictedFiles.length,
     "git.message": result.message,
@@ -183,7 +184,7 @@ export async function pull(repoDir: string): Promise<PullResult> {
 }
 
 export async function push(repoDir: string): Promise<SyncResult> {
-  return notePush(repoDir, await traced("push", repoDir, () => oneAtATime(repoDir, () => backend().push(repoDir)), syncOutcome));
+  return notePush(repoDir, await traced("push", repoDir, () => backend().push(repoDir), syncOutcome));
 }
 
 export async function theirsVersion(repoDir: string, relPath: string): Promise<string | null> {
@@ -225,7 +226,7 @@ export async function resolveConflict(
     "git.resolve_conflict",
     { ...gitAttrs(repoDir), "specdriven.file": relPath },
     async (span) => {
-      const result = notePush(repoDir, await oneAtATime(repoDir, () => backend().resolveConflict(repoDir, relPath, content, alsoAdd)));
+      const result = notePush(repoDir, await backend().resolveConflict(repoDir, relPath, content, alsoAdd));
       span.setAttributes(syncOutcome(result));
       log.info(`resolved conflict on ${relPath}`, { "git.pushed": result.pushed });
       return result;
@@ -236,7 +237,7 @@ export async function resolveConflict(
 export async function syncSavedChanges(repoDir: string): Promise<SyncResult> {
   // A conflict being resolved pushes nothing and says nothing about what is
   // waiting; any other answer has looked at everything there was to push.
-  const result = await traced("sync_saved_changes", repoDir, () => oneAtATime(repoDir, () => backend().syncSavedChanges(repoDir)), syncOutcome);
+  const result = await traced("sync_saved_changes", repoDir, () => backend().syncSavedChanges(repoDir), syncOutcome);
   return notePush(repoDir, result, !result.message.startsWith("merge conflict in progress"));
 }
 
@@ -250,7 +251,7 @@ export async function moveAndPush(
   const result = await traced(
     "move_and_push",
     repoDir,
-    () => oneAtATime(repoDir, () => backend().moveAndPush(repoDir, fromPath, toPath, message, extraMoves)),
+    () => backend().moveAndPush(repoDir, fromPath, toPath, message, extraMoves),
     (result) => ({ ...syncOutcome(result), "git.from": fromPath, "git.to": toPath }),
   );
   return notePush(repoDir, result);
@@ -265,7 +266,7 @@ export async function removeAndPush(
   const result = await traced(
     "remove_and_push",
     repoDir,
-    () => oneAtATime(repoDir, () => backend().removeAndPush(repoDir, paths, message, alsoAdd)),
+    () => backend().removeAndPush(repoDir, paths, message, alsoAdd),
     syncOutcome,
   );
   return notePush(repoDir, result);
@@ -278,7 +279,7 @@ export async function commitAndPush(
 ): Promise<SyncResult> {
   return notePush(
     repoDir,
-    await traced("commit_and_push", repoDir, () => oneAtATime(repoDir, () => backend().commitAndPush(repoDir, paths, message)), syncOutcome),
+    await traced("commit_and_push", repoDir, () => backend().commitAndPush(repoDir, paths, message), syncOutcome),
   );
 }
 
@@ -292,7 +293,7 @@ export async function commitAllAndPublish(repoDir: string, branch: string, messa
   return traced(
     "commit_all_and_publish",
     repoDir,
-    () => oneAtATime(repoDir, () => backend().commitAllAndPublish(repoDir, branch, message)),
+    () => backend().commitAllAndPublish(repoDir, branch, message),
     (result) => ({ ...syncOutcome(result), "git.branch": branch }),
   );
 }
@@ -302,7 +303,7 @@ export async function hasUpstream(repoDir: string): Promise<boolean> {
 }
 
 export async function checkoutRef(repoDir: string, ref: string): Promise<string> {
-  return traced("checkout_ref", repoDir, () => oneAtATime(repoDir, () => backend().checkoutRef(repoDir, ref)), (commit) => ({
+  return traced("checkout_ref", repoDir, () => backend().checkoutRef(repoDir, ref), (commit) => ({
     "git.ref": ref,
     "git.commit": commit,
   }));
@@ -315,7 +316,7 @@ export async function headCommit(repoDir: string): Promise<string> {
 export async function clone(url: string, dir: string): Promise<void> {
   return withSpan("git.clone", { ...gitAttrs(dir), "git.url": url }, async () => {
     log.info(`cloning ${url}`, { "specdriven.dir": dir });
-    await oneAtATime(dir, () => backend().clone(url, dir));
+    await backend().clone(url, dir);
   });
 }
 
