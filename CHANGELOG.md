@@ -4,6 +4,10 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.275 — 2026-11-14
+
+- A git command that hangs is stopped, git work on one folder runs one at a time, and sync ticks never overlap ([#459](https://github.com/SpecDriven/specdriven-app/pull/459))
+
 ## v0.1.274 — 2026-11-14
 
 - The storage core runs on Effect: files, the document store, settings and credentials are typed services behind the same Promise functions ([#458](https://github.com/SpecDriven/specdriven-app/pull/458))
