@@ -12,6 +12,10 @@
 // that is slow — a transfer that keeps reporting progress runs on, however
 // long it takes, and one that has gone silent is stopped the same way.
 //
+// The commands that are running are remembered, so the app can stop them
+// when it shuts down (stopCommands, src/server/shutdown.ts): none outlives
+// the app that started it.
+//
 // Node APIs only: the server runs under both Bun and Electron's Node runtime
 // (specs/app/desktop-app.feature.md), so nothing here may touch Bun.spawn.
 // src/server/run.ts is the Promise form of runCommand. It needs none of the
@@ -71,6 +75,23 @@ function stop(child: ChildProcess, graceMs: number): Promise<void> {
   });
 }
 
+/** The commands running now. */
+const running = new Set<ChildProcess>();
+
+/**
+ * Stop every command still running: SIGTERM, then SIGKILL after `graceMs`.
+ * Completes once they have all exited, with how many there were. Each run
+ * answers the way its command ended — a failed command — so whoever waits
+ * for one goes on.
+ */
+export function stopCommands(graceMs: number = KILL_GRACE_MS): Effect.Effect<number> {
+  return Effect.promise(async () => {
+    const children = [...running];
+    await Promise.all(children.map((child) => stop(child, graceMs)));
+    return children.length;
+  });
+}
+
 /** One run of the command, stopped if the run is interrupted or goes quiet past `quietMs`. */
 function spawn(cmd: string, args: readonly string[], options: RunOptions): Effect.Effect<RunResult> {
   return Effect.callback<RunResult>((resume) => {
@@ -92,6 +113,10 @@ function spawn(cmd: string, args: readonly string[], options: RunOptions): Effec
         resume(Effect.succeed({ exitCode, stdout: String(stdout), stderr: String(stderr) }));
       },
     );
+    if (child.pid !== undefined) {
+      running.add(child);
+      child.once("exit", () => running.delete(child));
+    }
     if (options.input !== undefined) {
       // A command that exits before reading it all closes the pipe: that is
       // its answer, not a reason to fail.

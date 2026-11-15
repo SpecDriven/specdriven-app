@@ -156,24 +156,17 @@ export function startTelemetry(options: TelemetryOptions = {}): void {
 const HOOKS = Symbol.for("specdriven.telemetry.hooks");
 
 /**
- * Flush the last batch on the ways a server process actually ends: signals
- * (the web app under Bun) and a draining event loop. Installed only once a
- * pipeline runs, so without OTEL configured process behavior is untouched.
- * Adding a signal listener replaces the default exit — the handler must
- * exit itself, with the conventional 128+signal code.
+ * Flush the last batch when the event loop drains — a script that started a
+ * pipeline and ran to its end. Installed only once a pipeline runs, so
+ * without OTEL configured process behavior is untouched. A signal and the
+ * desktop app's quit are the entry points' to handle: their shutdown
+ * (src/server/shutdown.ts) flushes as its last step, after the work whose
+ * spans and log lines the flush should carry has ended.
  */
 function installShutdownHooks(): void {
   const flags = globalThis as Record<symbol, unknown>;
   if (flags[HOOKS]) return;
   flags[HOOKS] = true;
-  for (const [signal, code] of [
-    ["SIGINT", 130],
-    ["SIGTERM", 143],
-  ] as const) {
-    process.once(signal, () => {
-      void shutdownTelemetry().finally(() => process.exit(code));
-    });
-  }
   process.on("beforeExit", () => {
     // The pending flush keeps the loop alive until it completes.
     void shutdownTelemetry();

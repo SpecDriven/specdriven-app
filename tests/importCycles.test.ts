@@ -45,6 +45,15 @@ for (const facade of [
   });
 }
 
+// The shutdown (src/server/shutdown.ts) names the things it stops — the API's
+// background work, the agent sessions, the runtime — and none of them may
+// reach back to it, whichever entry point loads it and wherever in its imports.
+test("src/server/shutdown.ts loads first without a cycle through what it stops", () => {
+  const run = importInFreshProcess("src/server/shutdown.ts", "src/server/api.ts", "src/server/agentChat.ts");
+  expect(run.stderr).not.toContain("before initialization");
+  expect(run.code).toBe(0);
+});
+
 test("the storage core loads on its own, before any facade", () => {
   const run = importInFreshProcess("src/server/persistence/runtime.ts", "src/server/state.ts");
   expect(run.stderr).not.toContain("before initialization");

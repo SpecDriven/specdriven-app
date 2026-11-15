@@ -104,6 +104,10 @@ export function syncDataDir(dir: string): Promise<string> {
       ),
     ),
   );
+  // A tick that never began — the app is shutting down — is nobody's to wait for.
+  mine.tick.catch(() => {
+    if (waiting.get(key) === mine) waiting.delete(key);
+  });
   return mine.tick;
 }
 

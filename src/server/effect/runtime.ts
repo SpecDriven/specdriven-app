@@ -25,14 +25,36 @@ export const AppLive = Layer.mergeAll(PersistenceLive, RepoLocks.layer);
 export type App = Layer.Success<typeof AppLive>;
 
 let runtime: ManagedRuntime.ManagedRuntime<App, never> | undefined;
+/** Set once the runtime was disposed: the app is on its way out and runs nothing more. */
+let disposed = false;
 
 function live(): ManagedRuntime.ManagedRuntime<App, never> {
+  if (disposed) throw new Error("SpecDriven is shutting down");
   return (runtime ??= ManagedRuntime.make(AppLive));
 }
 
 /** Seed the program with the caller's active span. */
 const inCallerSpan = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   Effect.provideService(effect, SpanContext, otelContext.active());
+
+/**
+ * End the runtime (src/server/shutdown.ts): every program still running on
+ * it is interrupted and waited for, then the services let go of what they
+ * hold. Nothing runs after that — Promise code the shutdown cut short, going
+ * on to its next step, is refused instead of starting work on services built
+ * anew, with their locks open, in a process that is about to exit.
+ */
+export async function dispose(): Promise<void> {
+  disposed = true;
+  const ending = runtime;
+  runtime = undefined;
+  await ending?.dispose();
+}
+
+/** For tests: after a dispose, let the next `run` build the services afresh. */
+export function reopen(): void {
+  disposed = false;
+}
 
 /** Run a program and hand its result, or the error it stands for, to a Promise caller. */
 export async function run<A>(effect: Effect.Effect<A, Throwable, App>): Promise<A> {

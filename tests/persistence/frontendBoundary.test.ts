@@ -6,9 +6,9 @@
 // bundling and does not count.
 //
 // The Promise facades (fsx.ts, automerge/store.ts, state.ts, tokenStore.ts,
-// secrets.ts, run.ts, git/index.ts, reload.ts) run on Effect, so one of them
-// reaching the frontend would carry the whole runtime into the page; this
-// walk names the chain if it ever happens.
+// secrets.ts, run.ts, git/index.ts, reload.ts, shutdown.ts) run on Effect,
+// so one of them reaching the frontend would carry the whole runtime into
+// the page; this walk names the chain if it ever happens.
 
 import { expect, test } from "bun:test";
 import { existsSync, readFileSync, statSync } from "node:fs";
@@ -81,6 +81,7 @@ test("the browser bundle reaches neither Effect nor the storage core", () => {
     "run.ts",
     "git/index.ts",
     "reload.ts",
+    "shutdown.ts",
   ]
     .map((name) => join(ROOT, "src/server", name))
     .filter((file) => cameFrom.has(file))
