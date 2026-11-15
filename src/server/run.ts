@@ -21,6 +21,12 @@ export type { RunOptions, RunResult };
  * `.quiet().nothrow()` contract the git layer is written against). With
  * `timeoutMs` or `quietMs`, a command still running at the limit — or silent
  * for that long — is stopped and resolves with exit code 124.
+ *
+ * Never hand it a shell to run a command line — `sh -c …`, `cmd /c …` — not
+ * in a test either: that is the one way an argument gets shell-interpreted
+ * after all, and code scanning then reads every argument of every command
+ * run through here as shell text (js/shell-command-injection-from-environment).
+ * A test that needs a script runs a stand-in executable (tests/helpers/fakeBin.ts).
  */
 export function run(cmd: string, args: string[], options: RunOptions = {}): Promise<RunResult> {
   return runAlone(runCommand(cmd, args, options));

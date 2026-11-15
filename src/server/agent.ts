@@ -241,11 +241,11 @@ export function desktopOpener(platform: string = process.platform): {
     case "linux":
       return { cmd: "xdg-open", args: (url) => [url] };
     case "win32":
-      // cmd.exe treats "&" in the url as a command separator and execFile
-      // cannot quote it away — escape as "^&" (or use
-      // `rundll32 url.dll,FileProtocolHandler`) before Claude Code Desktop
-      // is offered on Windows; claudeDesktopInstalled keeps it off for now.
-      return { cmd: "cmd", args: (url) => ["/c", "start", "", url] };
+      // Not `cmd /c start`: cmd.exe reads an "&" in the url as the start of
+      // another command, and execFile cannot quote it away. This hands the
+      // url to its handler with no shell in between. Not yet tried on
+      // Windows — claudeDesktopInstalled keeps it off there for now.
+      return { cmd: "rundll32", args: (url) => ["url.dll,FileProtocolHandler", url] };
     default:
       throw new Error(`no way to open a url on ${platform}`);
   }
