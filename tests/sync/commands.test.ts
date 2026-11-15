@@ -81,8 +81,12 @@ test("an interrupted run stops its process before the interruption completes", a
   expect(alive(pid)).toBe(false);
 });
 
+// Says a line on each stream and ends with exit code 3. A stand-in executable
+// like the others, never `sh -c` through run() (see run's own comment).
+const ENDS_3 = cachedExecutable("#!/bin/sh\necho out\necho err >&2\nexit 3\n");
+
 test("a command that finishes within its limit answers as it would without one", async () => {
-  const res = await run("/bin/sh", ["-c", "echo out; echo err >&2; exit 3"], { timeoutMs: 10_000 });
+  const res = await run(ENDS_3, [], { timeoutMs: 10_000 });
   expect(res).toEqual({ exitCode: 3, stdout: "out\n", stderr: "err\n" });
 });
 

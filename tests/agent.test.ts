@@ -130,7 +130,12 @@ describe("desktopOpener", () => {
     expect(desktopOpener("darwin").cmd).toBe("open");
     expect(desktopOpener("darwin").args("claude://x")).toEqual(["claude://x"]);
     expect(desktopOpener("linux").cmd).toBe("xdg-open");
-    expect(desktopOpener("win32").args("claude://x")).toEqual(["/c", "start", "", "claude://x"]);
+    // Windows: no cmd.exe, which would read an "&" in the url as a second command.
+    expect(desktopOpener("win32").cmd).toBe("rundll32");
+    expect(desktopOpener("win32").args("claude://x")).toEqual(["url.dll,FileProtocolHandler", "claude://x"]);
+    const url = claudeDesktopUrl("a & b", "/code/app");
+    expect(url).toContain("&folder=");
+    expect(desktopOpener("win32").args(url).at(-1)).toBe(url);
     expect(() => desktopOpener("sunos")).toThrow();
   });
 });
