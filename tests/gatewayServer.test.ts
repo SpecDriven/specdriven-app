@@ -12,6 +12,7 @@ import { buildAssets, type GatewayAssets } from "../src/gateway/assets";
 import { generateMasterKey, loadKeyring } from "../src/gateway/crypto";
 import { openDatabase } from "../src/gateway/db";
 import type { Mail } from "../src/gateway/mail";
+import { WORKER_API_CSP } from "../src/gateway/proxy";
 import { SecretStore } from "../src/gateway/secrets";
 import { createGateway, type Gateway, type Workers } from "../src/gateway/server";
 
@@ -63,6 +64,13 @@ function standIn(userId: string): string {
               }),
               { headers: { "Content-Type": "text/event-stream" } },
             );
+          }
+          // A worker under attack: a page with script, and cookies of its own.
+          if (new URL(req.url).pathname.endsWith("/hostile")) {
+            const headers = new Headers({ "Content-Type": "text/html", "Content-Security-Policy": "script-src *" });
+            headers.append("Set-Cookie", "__Host-sd_session=theirs; Path=/; Secure; HttpOnly");
+            headers.append("Set-Cookie", "other=1; Path=/");
+            return new Response("<script>fetch('/auth/admin')</script>", { headers });
           }
           return Response.json({
             user: userId,
@@ -236,6 +244,24 @@ test("request bodies pass through and streamed answers stream", async () => {
   const stream = await call("/api/stream", { cookie });
   expect(stream.headers.get("content-type")).toBe("text/event-stream");
   expect(await stream.text()).toBe("event 0\nevent 1\nevent 2\n");
+});
+
+// specs/app/hosted-app.feature.md "A worker's answer cannot act on the
+// gateway's pages" (src/gateway/proxy.ts).
+test("a worker's answer sets no cookie, and on the API cannot run as a page", async () => {
+  const cookie = await signUp("a@example.com");
+  for (const path of ["/api/hostile", "/plugins/notes/hostile"]) {
+    const res = await call(path, { cookie, method: path.startsWith("/api/") ? "GET" : "POST" });
+    expect(await res.text()).toContain("<script>");
+    expect(res.headers.getSetCookie()).toEqual([]);
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+  }
+  const api = await call("/api/hostile", { cookie });
+  expect(api.headers.get("content-security-policy")).toBe(WORKER_API_CSP);
+  expect(WORKER_API_CSP).toContain("sandbox");
+  expect(WORKER_API_CSP).toContain("default-src 'none'");
+  // The person is still signed in as themselves.
+  expect((await call("/auth/me", { cookie })).status).toBe(200);
 });
 
 test("a cross-site write is refused before it reaches the worker", async () => {

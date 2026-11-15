@@ -269,6 +269,32 @@ function noteRemote(repoDir: string, res: RunResult): RunResult {
 }
 
 /**
+ * What every git command of a hosted worker runs with, ahead of anything
+ * the repository's own config says (specs/app/hosted-app.feature.md "A
+ * repository's contents cannot make a hosted worker run code"). The person
+ * controls the repository's contents, and several people's workers share
+ * the container, so:
+ *
+ *   - no hook and no file-system monitor command runs, whatever a write
+ *     into `.git` left there;
+ *   - a symlink is checked out as a plain file holding its target, so no
+ *     link in the repository can point the app's reads and writes at
+ *     `.git` or anywhere else (the bundled engine: js.ts);
+ *   - the only transports are https, the one the gateway's token is for,
+ *     and plain http, which a stand-in GitHub in development speaks; a
+ *     remote url that names a command to run (`ext::`), a local path or
+ *     ssh is refused.
+ */
+export const HOSTED_GIT_CONFIG = [
+  "-c", "core.hooksPath=/dev/null",
+  "-c", "core.fsmonitor=false",
+  "-c", "core.symlinks=false",
+  "-c", "protocol.allow=never",
+  "-c", "protocol.https.allow=always",
+  "-c", "protocol.http.allow=always",
+];
+
+/**
  * A GitRun that shells out to the git binary, with prompts disabled so a
  * command that cannot authenticate fails fast instead of hanging the server,
  * and limits on the commands that reach the remote for one that hangs
@@ -279,7 +305,7 @@ function noteRemote(repoDir: string, res: RunResult): RunResult {
 export function subprocessRun(context: () => Promise<GitContext>): GitRun {
   return async (repoDir, ...args) => {
     const { config, env } = await context();
-    const base = repoDir ? ["-C", repoDir] : [];
+    const base = [...(repoDir ? ["-C", repoDir] : []), ...(isHostedMode() ? HOSTED_GIT_CONFIG : [])];
     const [verb, ...rest] = args;
     const reports = verb !== undefined && PROGRESS_VERBS.has(verb);
     const res = await run("git", [...base, ...config, ...(reports ? [...RECEIVE_REPORTS, verb, "--progress", ...rest] : args)], {

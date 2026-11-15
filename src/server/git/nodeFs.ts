@@ -88,3 +88,12 @@ export const nodeFileSystem: FileSystem = {
 function dirOf(path: string): string {
   return dirname(path);
 }
+
+/**
+ * The disk without symlinks, for a hosted worker (src/server/hostedMode.ts):
+ * just-git, handed no way to read or make a link, checks one out as a plain
+ * file holding its target, as system git does with `core.symlinks=false`
+ * (cli.ts HOSTED_GIT_CONFIG). A person controls their repository's contents,
+ * and a link in it could point the app's reads and writes anywhere.
+ */
+export const plainFileSystem: FileSystem = { ...nodeFileSystem, lstat: undefined, readlink: undefined, symlink: undefined };

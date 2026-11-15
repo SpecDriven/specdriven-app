@@ -14,7 +14,7 @@ Browser ──HTTPS──▶ Railway edge ──▶ gateway (src/gateway, :$PORT
                                       ▼
                      worker per user = bun src/index.ts, SPECDRIVEN_HOSTED=1
                      unix socket /data/users/<id>/run/app.sock
-                     HOME, settings, clones under /data/users/<id>/
+                     HOME, settings, clones, temp files under /data/users/<id>/
                      env: that user's GitHub token and agent keys only
 ```
 
@@ -34,16 +34,40 @@ Browser ──HTTPS──▶ Railway edge ──▶ gateway (src/gateway, :$PORT
   - local-path data repos (only `https://github.com/…` urls are accepted);
   - the websocket sync server;
   - the app's own GitHub sign-in, which the account page replaces.
+
+  Git runs on a repository its person controls, so in a hosted worker it
+  also runs with fixed settings (`HOSTED_GIT_CONFIG` in
+  `src/server/git/cli.ts`; the bundled engine does the same): no hook and no
+  file-system monitor command, only http(s) remotes, and a symlink is
+  checked out as a plain file holding its target. A clone from before that
+  rule has its symlinks replaced the same way when the worker starts.
 - **Isolation between users.** Each worker runs as a Linux uid of its own
   (200000 and up, kept in the database), started through `setpriv` with no
-  supplementary groups and `no_new_privs`. Its folder `/data/users/<id>`
-  belongs to that uid with mode 0700; `/data` and `/data/users` are 0711,
-  so a worker can pass through to its own folder but can't list the others;
-  and `app.db` is root-only (0600).
+  supplementary groups and `no_new_privs`. Inside `/data/users/<id>` its
+  five folders (`home`, `root`, `repos`, `run`, `tmp`) belong to that uid
+  with mode 0700; `/data` and `/data/users` are 0711, so a worker can pass
+  through to its own folder but can't list the others; and `app.db` is
+  root-only (0600).
   - This is what makes the folders separate. A user controls their data
     repo's contents, symlinks included, so a link to another user's folder,
     to the database or to `/proc/<gateway>/environ` (where the master key
     is) is refused by the kernel, not by convention.
+  - **Root stays out of those folders.** As root the gateway would follow a
+    link a worker left anywhere it wrote or read. So `/data/users/<id>`
+    itself is root's (mode 0750, the worker's group): the worker can list
+    it, and only root can add, rename or replace one of the five folders.
+    Root makes those and never opens anything inside them. The worker sets
+    up its own git author and settings as it starts
+    (`src/gateway/workerStart.ts`), and the gateway reads a worker's
+    settings and measures its folder as that worker's uid. A volume from
+    before this rule is brought in line the next time each worker starts.
+  - **Stopping a worker ends every process of its uid**, not only the
+    worker: anything it started and detached goes too, on a stop, a restart
+    and before the next start (`src/gateway/endProcesses.ts`).
+  - **Limits.** Each worker starts under `prlimit` caps on processes and
+    open files, with a temp folder of its own, and no worker starts while
+    the volume is nearly full. A disk and a memory budget per person are
+    off until you set them (see the variables below).
   - Separate uids need the gateway to run as root with `setpriv` installed,
     as in the image. Elsewhere (development, tests) the workers share the
     gateway's user and the gateway logs a warning.
@@ -85,11 +109,12 @@ redeploy that loses the volume still knows everyone (`src/gateway/datastore.ts`)
   secret, allowed email, role, recent repos, sign-in, sign-out) is committed
   as "Save accounts" and pushed. A session's sliding expiry alone is not pushed.
 - **Recent repos** (`src/gateway/repos.ts`): the gateway reads them from each
-  running worker's settings file every minute and when the worker stops. A
-  worker that starts with no settings file (its folder was on the lost
-  volume) gets one naming them, the most recent open, so the next sign-in
-  goes straight to that repo instead of asking for its url. A settings file
-  that is already there is never overwritten, and symlinks are not followed.
+  running worker's settings file every minute and when the worker stops,
+  as that worker's uid. A worker that starts with no settings file (its
+  folder was on the lost volume) is handed the list and writes one naming
+  them, the most recent open, so the next sign-in goes straight to that
+  repo instead of asking for its url. A settings file that is already there
+  is never overwritten.
 - **On SIGTERM** (every redeploy): one last forced push, so everything is in
   the repo before the container goes.
 - **When the repo can't be read**, the gateway refuses to start rather than
@@ -195,7 +220,9 @@ host as the allowed host. A GET or HEAD for any other host, such as the
 service's `*.up.railway.app` domain, is redirected (301) to the same path on
 `PUBLIC_URL`; any other request for it is refused. Gateway pages are sent
 with a strict CSP, `frame-ancestors 'none'` and `no-store`; every response
-gets HSTS and `nosniff`.
+gets HSTS and `nosniff`. What a worker answers is passed on without any
+cookie it set, and an API answer carries a policy that keeps it from running
+as a page (`src/gateway/proxy.ts`).
 
 ## Deploying on Railway
 
@@ -219,6 +246,11 @@ gets HSTS and `nosniff`.
    | `RESEND_API_KEY` | from [resend.com](https://resend.com), with your sending domain verified |
    | `MAIL_FROM` | e.g. `SpecDriven <no-reply@specs.example.com>` on that verified domain |
    | `SPECDRIVEN_WORKER_IDLE_MINUTES` | optional, default 30 |
+   | `SPECDRIVEN_WORKER_MAX_PROCESSES` | optional, default 512: processes and threads one person's worker may have |
+   | `SPECDRIVEN_WORKER_MAX_OPEN_FILES` | optional, default 4096: files one worker process may hold open |
+   | `SPECDRIVEN_MIN_FREE_MB` | optional, default 256: no worker starts while the volume has less free, so `app.db` keeps room |
+   | `SPECDRIVEN_WORKER_MAX_DISK_MB` | optional, no budget unless set: a worker whose folder holds more is stopped, and stays stopped until the folder is under it |
+   | `SPECDRIVEN_WORKER_MAX_MEMORY_MB` | optional, no budget unless set: a worker holding more memory is stopped, and starts again on its person's next request |
    | `SPECDRIVEN_DATASTORE_TOKEN` | a GitHub token that can read and write the [datastore](#datastore) repo: a fine-grained token with resource owner **SpecDriven**, access to `hosted-app` only, and the **Contents: Read and write** permission. Unset, accounts live only on the volume |
    | `SPECDRIVEN_DATASTORE_REPO` | optional, default `https://github.com/SpecDriven/hosted-app` |
 
@@ -331,6 +363,8 @@ When no variables are set:
 | `src/gateway/crypto.ts`, `secrets.ts` | AES-GCM keyring and the per-user secret store |
 | `src/gateway/datastore.ts` | the accounts' mirror in the datastore repo |
 | `src/gateway/workers.ts`, `proxy.ts` | the per-user worker pool and the streaming proxy |
+| `src/gateway/workerStart.ts` | what a worker sets up in its own folder as it starts |
+| `src/gateway/limits.ts`, `endProcesses.ts` | a worker's caps and budgets; ending every process of a worker's uid |
 | `src/gateway/appShell.ts`, `assets.ts`, `pages/` | the app's frontend and the gateway's own pages |
 | `src/gateway/mail.ts` | Resend client and email texts |
 | `src/server/hostedMode.ts` | what a hosted worker refuses |
