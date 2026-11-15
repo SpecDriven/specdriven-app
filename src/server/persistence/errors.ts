@@ -1,10 +1,10 @@
 // The ways the storage core fails, as typed errors in the Effect error
 // channel. Each one also says what the Promise functions built on it throw
 // (toThrowable), so the facades — fsx.ts, automerge/store.ts, state.ts,
-// tokenStore.ts, secrets.ts — reject with exactly the errors they always
-// did: a file error is the errno exception itself (`code`, `syscall`,
-// `path`), a refused document is the caller's own error. The bridge
-// (src/server/effect/bridge.ts) does the rethrowing.
+// tokenStore.ts, secrets.ts, siteTokens.ts — reject with exactly the errors
+// they always did: a file error is the errno exception itself (`code`,
+// `syscall`, `path`), a refused document is the caller's own error. The
+// bridge (src/server/effect/bridge.ts) does the rethrowing.
 
 import { Data } from "effect";
 import type { PlatformError } from "effect/PlatformError";
@@ -97,7 +97,7 @@ export class DocumentRejected
 
 /**
  * A credential backend handed to the app (the desktop's safeStorage, a
- * hosted worker's read-only one) failed; `cause` is what it threw.
+ * hosted worker's read-only one, a test's) failed; `cause` is what it threw.
  */
 export class BackendError
   extends Data.TaggedError("BackendError")<{

@@ -3,7 +3,7 @@
 // runtime (src/server/effect/runtime.ts) — Node's file system underneath,
 // which serves Bun and Electron alike — and `run` is the bridge every
 // Promise facade (fsx.ts, automerge/store.ts, state.ts, tokenStore.ts,
-// secrets.ts) goes through.
+// secrets.ts, siteTokens.ts) goes through.
 //
 // The bridge keeps the facades' contract: a failure rejects with the error
 // the function always threw (errors.ts toThrowable), never with an Effect

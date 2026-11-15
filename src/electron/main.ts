@@ -50,10 +50,7 @@ import {
 } from "./linkRouting";
 import {
   createSecretSafeStorageBackend,
-  createConfluenceSafeStorageBackend,
-  createJiraSafeStorageBackend,
-  createQtestSafeStorageBackend,
-  createAhaSafeStorageBackend,
+  createSiteTokenSafeStorageBackend,
   createSafeStorageBackend,
   safeStorageAvailable,
 } from "./secureToken";
@@ -559,10 +556,10 @@ if (!app.requestSingleInstanceLock()) {
     // stays in place. safeStorage needs the ready app, hence here.
     if (await safeStorageAvailable()) {
       setTokenBackend(createSafeStorageBackend(join(userData, "github-token.enc")));
-      setConfluenceTokenBackend(createConfluenceSafeStorageBackend(join(userData, "confluence-tokens.enc")));
-      setJiraTokenBackend(createJiraSafeStorageBackend(join(userData, "jira-tokens.enc")));
-      setQtestTokenBackend(createQtestSafeStorageBackend(join(userData, "qtest-tokens.enc")));
-      setAhaTokenBackend(createAhaSafeStorageBackend(join(userData, "aha-tokens.enc")));
+      setConfluenceTokenBackend(createSiteTokenSafeStorageBackend(join(userData, "confluence-tokens.enc")));
+      setJiraTokenBackend(createSiteTokenSafeStorageBackend(join(userData, "jira-tokens.enc")));
+      setQtestTokenBackend(createSiteTokenSafeStorageBackend(join(userData, "qtest-tokens.enc")));
+      setAhaTokenBackend(createSiteTokenSafeStorageBackend(join(userData, "aha-tokens.enc")));
       // The plugins' secret stores (src/server/secrets.ts), one encrypted
       // file each; a store from before them keeps its old file name.
       setSecretBackendFactory((name) => {

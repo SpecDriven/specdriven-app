@@ -5,7 +5,7 @@
 // the core (src/server/agentMcp.ts) shares the names without loading it.
 
 import type { PageBody, PageHit } from "../server/confluence";
-import type { ConfluenceTokenRecord } from "../server/confluenceTokens";
+import type { SiteTokenRecord } from "../server/siteTokenModel";
 import { parseParentPageUrl, sameBase, type ParentPageRef } from "../server/confluenceUrl";
 
 /** The server's name: its tools reach the agent as `mcp__specdriven-confluence__<tool>`. */
@@ -21,7 +21,7 @@ export const PAGE_TEXT_MAX = 60_000;
 export class ToolError extends Error {}
 
 /** A saved wiki: its base url and the token for it. */
-export type Wiki = Pick<ConfluenceTokenRecord, "base" | "token">;
+export type Wiki = Pick<SiteTokenRecord, "base" | "token">;
 
 const saved = (wikis: Wiki[]) => wikis.map((w) => w.base).join(", ");
 
