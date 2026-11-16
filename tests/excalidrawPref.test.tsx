@@ -11,7 +11,6 @@ import { MarkdownEditor } from "../src/frontend/MarkdownEditor";
 import {
   applyExcalidrawPref,
   readExcalidrawPref,
-  setExcalidrawDemoMode,
 } from "../src/frontend/excalidrawPref";
 
 // The preference lives in localStorage, which bun's test runtime lacks.
@@ -40,80 +39,39 @@ beforeEach(() => {
 afterEach(() => {
   if (saved === undefined) delete g.localStorage;
   else g.localStorage = saved;
-  // The demo default is module state: leave it off for the next test.
-  setExcalidrawDemoMode(false);
 });
 
 const html = (el: React.ReactElement) => renderToStaticMarkup(el);
 const BUTTON = 'aria-label="Excalidraw diagram"';
 
 describe("the Excalidraw preference", () => {
-  test("is off until switched on, and remembered on the device", () => {
-    expect(readExcalidrawPref()).toBe(false);
-    applyExcalidrawPref(true);
+  test("is on for a device that has never chosen", () => {
     expect(readExcalidrawPref()).toBe(true);
-    expect(g.localStorage!.getItem("sd-excalidraw")).toBe("on");
-    // Off is stored, not erased: the demo reads an absent key as "on", so a
-    // visitor's "off" has to be a decision it can tell from silence.
+  });
+
+  test("remembers an off choice on the device, and an on choice too", () => {
     applyExcalidrawPref(false);
     expect(readExcalidrawPref()).toBe(false);
     expect(g.localStorage!.getItem("sd-excalidraw")).toBe("off");
+    applyExcalidrawPref(true);
+    expect(readExcalidrawPref()).toBe(true);
+    expect(g.localStorage!.getItem("sd-excalidraw")).toBe("on");
   });
 
-  test("reads off when storage is unavailable", () => {
+  test("reads on when storage is unavailable", () => {
     g.localStorage = {
       ...fakeStorage(),
       getItem: () => {
         throw new Error("private mode");
       },
     };
-    expect(readExcalidrawPref()).toBe(false);
-  });
-
-  // Demo mode (src/server/demo.ts) only moves the default: drawing is what a
-  // visitor came to see, so the button is there before they find Settings.
-  describe("in the demo", () => {
-    test("is on for a device that has never chosen", () => {
-      setExcalidrawDemoMode(true);
-      expect(readExcalidrawPref()).toBe(true);
-    });
-
-    test("still lets a visitor turn it off, and stays off", () => {
-      setExcalidrawDemoMode(true);
-      applyExcalidrawPref(false);
-      expect(readExcalidrawPref()).toBe(false);
-    });
-
-    test("keeps an on choice made outside the demo", () => {
-      applyExcalidrawPref(true);
-      setExcalidrawDemoMode(true);
-      expect(readExcalidrawPref()).toBe(true);
-    });
-
-    test("goes back to off once the demo default is dropped", () => {
-      setExcalidrawDemoMode(true);
-      setExcalidrawDemoMode(false);
-      expect(readExcalidrawPref()).toBe(false);
-    });
-
-    test("is still on when storage is unavailable", () => {
-      // A private window cannot remember a choice, so there is no choice to
-      // read and the default stands. Only the preference is unrememberable;
-      // a diagram still saves to the data repo like any other.
-      g.localStorage = {
-        ...fakeStorage(),
-        getItem: () => {
-          throw new Error("private mode");
-        },
-      };
-      setExcalidrawDemoMode(true);
-      expect(readExcalidrawPref()).toBe(true);
-    });
+    expect(readExcalidrawPref()).toBe(true);
   });
 });
 
 describe("the editor toolbar", () => {
   test("has no diagram button while the switch is off", () => {
+    applyExcalidrawPref(false);
     expect(html(<MarkdownEditor value="" onChange={() => {}} />)).not.toContain(BUTTON);
   });
 
@@ -146,6 +104,7 @@ describe("a diagram already in the text", () => {
   });
 
   test("carries none while the switch is off", () => {
+    applyExcalidrawPref(false);
     expect(preview(DIAGRAM)).not.toContain("md-img-edit");
   });
 
@@ -183,6 +142,7 @@ describe("an image to mark up", () => {
   });
 
   test("carries none while the switch is off", () => {
+    applyExcalidrawPref(false);
     expect(preview(SHOT)).not.toContain("Mark up image");
   });
 
@@ -208,6 +168,7 @@ describe("an image to mark up", () => {
   });
 
   test("is not offered by the toolbar while the switch is off", () => {
+    applyExcalidrawPref(false);
     expect(write(`${SHOT}\n`)).not.toContain("Mark up image");
   });
 });
@@ -239,6 +200,7 @@ describe("the toolbar's diagram button", () => {
   });
 
   test("is absent altogether while the switch is off", () => {
+    applyExcalidrawPref(false);
     const markup = write("![flow.excalidraw](/api/images/flow-excalidraw-1a2b3c4d.svg)\n");
     expect(markup).not.toContain(BUTTON);
     expect(markup).not.toContain("Edit diagram");
@@ -259,6 +221,7 @@ describe("the image picker", () => {
   });
 
   test("takes only images while it is off", () => {
+    applyExcalidrawPref(false);
     expect(accept(html(<MarkdownEditor value="" onChange={() => {}} />))).toBe("image/*");
   });
 });
