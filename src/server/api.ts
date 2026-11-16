@@ -54,6 +54,7 @@ import { dataRepoDir, ensureDataRepoFolder, MissingDataRepoError, parseGitHubUrl
 import { folderKind, initSpecFolder } from "./folderKind";
 import { isDemoMode, reseedDemo } from "./demo";
 import { HOSTED_REFUSAL, isHostedMode } from "./hostedMode";
+import { usesGithubApp } from "./hostedToken";
 import { isReadOnlyMode, READ_ONLY_REFUSAL, readOnlyAllows, readOnlySite } from "./readOnlyMode";
 import { canChooseFolder, chooseFolder } from "./folderChooser";
 import {
@@ -853,6 +854,9 @@ async function stateFields(state: SpecDrivenState) {
     // Hosted mode (src/server/hostedMode.ts): the client sends GitHub
     // sign-in to the gateway's account page and offers no local agents.
     hosted: isHostedMode(),
+    // Whether the hosted service reaches GitHub through its own app rather
+    // than a pasted token (src/server/hostedToken.ts): the wording differs.
+    hostedGithubApp: isHostedMode() && usesGithubApp(),
     // The running app's version (package.json), shown beside the user name
     // so every copy, the public demo included, says which build is on screen.
     version: appVersion,

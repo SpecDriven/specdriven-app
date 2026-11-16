@@ -1,6 +1,7 @@
 // The gateway's database (bun:sqlite on the Railway volume): accounts and
 // their roles, sessions and hand-over codes, email links, the allowed emails, the users'
-// encrypted secrets and recent data repos, and the rate limiter's counters.
+// encrypted secrets, GitHub accounts and recent data repos, and the rate
+// limiter's counters.
 // Tokens of every kind are stored as SHA-256 hashes only, so a copy of the
 // file cannot be replayed; secrets are AES-GCM ciphertext under a key that
 // never touches the volume (crypto.ts).
@@ -96,6 +97,21 @@ export const MIGRATIONS: string[] = [
     state_hash TEXT NOT NULL,
     created_at INTEGER NOT NULL,
     expires_at INTEGER NOT NULL
+  );
+  `,
+  // Each person's GitHub account (githubLinks.ts), as they proved it on the
+  // account page: who they are there, and no secret. The tokens their worker
+  // uses are made for an hour and never stored.
+  `
+  CREATE TABLE github_links (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    -- One GitHub account, one person here: a GitHub account that is someone's
+    -- already cannot be made another's (server.ts).
+    github_id INTEGER NOT NULL UNIQUE,
+    login TEXT NOT NULL,
+    name TEXT,
+    email TEXT NOT NULL,
+    linked_at INTEGER NOT NULL
   );
   `,
 ];

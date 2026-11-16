@@ -17,5 +17,5 @@
 | [Releasing](docs/releasing.md) | Versioning, tagging and the release workflow |
 | [Deployment modes](docs/deployment-modes.md) | Demo mode, hosted multi-user |
 | [Hosted on Railway](docs/deployment-railway.md) | The multi-user gateway deployment |
-| [Hosted tenant isolation](docs/hosted-tenant-isolation.md) | Proposal: firmer walls between people in the hosted app |
+| [Hosted tenant isolation](docs/hosted-tenant-isolation.md) | Firmer walls between people in the hosted app: the three steps built, and what each closes |
 | [Observability](docs/observability.md) | OpenTelemetry export, log files, the in-app log viewer |

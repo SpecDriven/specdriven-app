@@ -19,6 +19,7 @@ import { basename, dirname, join } from "node:path";
 import { createGit } from "just-git";
 import type { CredentialProvider, IdentityOverride } from "just-git";
 import { getAuth } from "../auth";
+import { askGateway, repoOfPath, tokenSocket } from "../hostedToken";
 import { DEMO_USER, isDemoMode } from "../demoMode";
 import { readTextFile } from "../fsx";
 import { urlOnHost } from "../github";
@@ -48,9 +49,27 @@ export function jsGitAvailable(): boolean {
 async function credentials(): Promise<CredentialProvider> {
   const auth = await getAuth();
   if (!auth) return () => null;
+  if (auth.brokered) return brokeredCredentials;
   return (url) =>
     urlOnHost(url, auth.host) ? { type: "basic", username: "x-access-token", password: auth.token } : null;
 }
+
+/**
+ * A hosted worker whose service has a GitHub App (src/server/hostedToken.ts)
+ * holds no token: each repository's is asked of the gateway when a request
+ * to it is about to go out. With none to give, the request goes without.
+ */
+const brokeredCredentials: CredentialProvider = async (url) => {
+  const socket = tokenSocket();
+  if (!socket || !urlOnHost(url)) return null;
+  const repo = repoOfPath(new URL(url).pathname);
+  if (!repo) return null;
+  try {
+    return { type: "basic", username: "x-access-token", password: (await askGateway(socket, repo)).token };
+  } catch {
+    return null;
+  }
+};
 
 /**
  * The user's global git identity. just-git reads a repository's own

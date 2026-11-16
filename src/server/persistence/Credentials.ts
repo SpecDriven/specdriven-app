@@ -45,6 +45,13 @@ export interface TokenRecord {
    * Enterprise, and the ones the hosted gateway builds.
    */
   host?: string;
+  /**
+   * A hosted worker whose service has a GitHub App of its own
+   * (src/server/hostedToken.ts): this is who the person is on GitHub, and
+   * `token` is empty. Git asks the gateway for each repository's token as
+   * it needs one.
+   */
+  brokered?: true;
 }
 
 /** How a credential store is kept, as the app is handed one. */

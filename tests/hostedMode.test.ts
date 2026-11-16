@@ -14,6 +14,7 @@ import { normalizeCodeRepo } from "../src/server/members";
 import { currentEngine, setGitEngine } from "../src/server/git";
 import { signInHint } from "../src/server/git/cli";
 import { createEnvBackend, TOKEN_ENV } from "../src/server/tokenStore";
+import { GITHUB_APP_ENV, IDENTITY_ENV, TOKEN_SOCKET_ENV, usesGithubApp } from "../src/server/hostedToken";
 import { workerKeyGuard } from "../src/server/hostedMode";
 
 let root: string;
@@ -123,6 +124,40 @@ test("the env token backend reads the gateway's record and refuses to change it"
   expect(await createEnvBackend({ [TOKEN_ENV]: "not json" }).load()).toBeNull();
   await expect(backend.save(record)).rejects.toThrow(/account page/);
   await expect(backend.clear()).rejects.toThrow(/account page/);
+});
+
+// docs/hosted-tenant-isolation.md "Step 3": with the service's GitHub App
+// the gateway says who the person is on GitHub and where to ask for tokens.
+test("with the service's GitHub App, the sign-in is who the person is and holds no token", async () => {
+  const who = { id: 42, login: "octo", name: "Octo Cat", email: "octo@example.com" };
+  const env = { [TOKEN_SOCKET_ENV]: "/data/users/u/gate/github.sock", [IDENTITY_ENV]: JSON.stringify(who) };
+  const backend = createEnvBackend(env);
+  expect(await backend.load()).toEqual({ ...who, token: "", brokered: true });
+  await expect(backend.save({ ...who, token: "t" })).rejects.toThrow(/account page/);
+  // No socket to ask, or nobody named: signed out.
+  expect(await createEnvBackend({ [IDENTITY_ENV]: JSON.stringify(who) }).load()).toBeNull();
+  expect(await createEnvBackend({ [TOKEN_SOCKET_ENV]: "/s", [IDENTITY_ENV]: "{}" }).load()).toBeNull();
+  // A pasted token still stored and handed over wins: the person has not connected yet.
+  const pasted = { token: "ghp_x", login: "octo", name: null, email: null, id: 42 };
+  expect(await createEnvBackend({ ...env, [TOKEN_ENV]: JSON.stringify(pasted) }).load()).toEqual(pasted);
+});
+
+test("what a failed sync says to do names the app where the service has one", () => {
+  const saved = process.env[GITHUB_APP_ENV];
+  try {
+    delete process.env[GITHUB_APP_ENV];
+    expect(usesGithubApp()).toBe(false);
+    expect(signInHint()).toContain("add a GitHub token");
+    process.env[GITHUB_APP_ENV] = "1";
+    expect(usesGithubApp()).toBe(true);
+    expect(usesGithubApp({ [GITHUB_APP_ENV]: "0" })).toBe(false);
+    expect(signInHint()).toBe(
+      "authentication required — on your account page, connect GitHub and install the SpecDriven app on this repository",
+    );
+  } finally {
+    if (saved === undefined) delete process.env[GITHUB_APP_ENV];
+    else process.env[GITHUB_APP_ENV] = saved;
+  }
 });
 
 test("agent keys arrive as SPECDRIVEN_AGENT_KEY_<NAME> variables", () => {

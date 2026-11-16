@@ -43,7 +43,7 @@ export async function runSpawner(config: GatewayConfig): Promise<never> {
     console.error("workers: a uid each, and nothing more: SPECDRIVEN_WORKER_SANDBOX=off");
   }
 
-  const spawner = new Spawner({ dataDir: config.dataDir, entry: config.workerEntry, gatewayGid: GATEWAY_UID, sandbox });
+  const spawner = new Spawner({ dataDir: config.dataDir, entry: config.workerEntry, gatewayGid: GATEWAY_UID, gatewayUid: GATEWAY_UID, sandbox });
   const path = process.env[SPAWNER_SOCKET_ENV]?.trim() || DEFAULT_SPAWNER_SOCKET;
   const key = randomToken();
   const server = await serveSpawner(spawner, { path, key, gid: GATEWAY_UID });

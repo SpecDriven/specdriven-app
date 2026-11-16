@@ -22,15 +22,24 @@
 // socket: the git author and the remembered repos the worker sets up for
 // itself (workerStart.ts), and its settings and folder size the spawner
 // reads as that worker's uid.
+//
+// Where the service has a GitHub App (docs/hosted-tenant-isolation.md "Step
+// 3") a worker is given no GitHub token either. The pool listens on a socket
+// of that worker's own (tokenSocket.ts) and answers its git with an hour's
+// token for the one repository it asks for; when the worker stops, the
+// socket goes and the tokens it was given are revoked.
 
 import { join } from "node:path";
 import { agentKeyEnvName } from "../server/agentKeys";
+import { GITHUB_APP_ENV, IDENTITY_ENV, TOKEN_SOCKET_ENV } from "../server/hostedToken";
 import { TOKEN_ENV } from "../server/tokenStore";
 import { randomToken } from "./crypto";
+import type { GithubIdentity, RepoToken } from "./githubApp";
 import { DEFAULT_LIMITS, freeMb, type WorkerLimits } from "./limits";
 import { cleanRepos, HOSTED_REPOS_ENV, reposInSettings } from "./repos";
 import type { UserSecrets } from "./secrets";
 import { Spawner, userDirs, type SpawnerApi } from "./spawner";
+import { serveTokens, type TokenServer } from "./tokenSocket";
 
 export { endProcessesOf, userDirs, workerCommand, workerIsolation } from "./spawner";
 
@@ -95,6 +104,22 @@ export interface WorkerPoolOptions {
   spawner?: SpawnerApi;
   /** The local port of the workers' one way out (egress.ts); absent leaves their network alone. */
   egressPort?: number | null;
+  /**
+   * GitHub through the service's own app (githubLinks.ts): a worker whose
+   * person has connected their account holds no token and asks for each
+   * repository's. Absent, a worker gets the token its person pasted.
+   */
+  github?: GithubTokens;
+}
+
+/** The slice of the GitHub App's tokens the pool uses (githubLinks.ts RepoTokens). */
+export interface GithubTokens {
+  /** The person's GitHub account, when they have connected one. */
+  identity(userId: string): GithubIdentity | null;
+  /** An hour's token for one repository, or a thrown reason the worker is told. */
+  tokenFor(userId: string, repo: string): Promise<RepoToken>;
+  /** End every token made for the person's worker. */
+  forget(userId: string): void;
 }
 
 /** Where a person's worker listens, and the key it asks of every request. */
@@ -113,6 +138,8 @@ interface Running extends WorkerAddress {
   /** Settles with the exit code once the worker's process has ended. */
   ended: Promise<number | null>;
   end(code: number | null): void;
+  /** Where this worker's git asks for GitHub tokens; null when it is given none that way. */
+  tokens: TokenServer | null;
 }
 
 /** Repeated crashes of one user's worker back off instead of looping. */
@@ -129,7 +156,12 @@ export function workerEnv(
   base: Record<string, string | undefined> = process.env,
   email: string | null = null,
   repos: string[] = [],
-  own: { key?: string; egressPort?: number | null } = {},
+  own: {
+    key?: string;
+    egressPort?: number | null;
+    /** The service has a GitHub App; with the person's account, their worker asks it for tokens. */
+    github?: { identity: GithubIdentity | null } | null;
+  } = {},
 ): Record<string, string> {
   const env: Record<string, string> = {};
   for (const name of PASSTHROUGH) {
@@ -167,7 +199,15 @@ export function workerEnv(
   if (email) env.SPECDRIVEN_ACCOUNT_EMAIL = email;
   const remembered = cleanRepos(repos);
   if (remembered.length) env[HOSTED_REPOS_ENV] = JSON.stringify(remembered);
-  if (secrets.github) env[TOKEN_ENV] = JSON.stringify(secrets.github);
+  if (own.github) env[GITHUB_APP_ENV] = "1";
+  if (own.github?.identity) {
+    // Who the person is on GitHub and where to ask: no token, pasted or made.
+    const { id, login, name, email } = own.github.identity;
+    env[IDENTITY_ENV] = JSON.stringify({ id, login, name, email });
+    env[TOKEN_SOCKET_ENV] = dirs.tokenSocket;
+  } else if (secrets.github) {
+    env[TOKEN_ENV] = JSON.stringify(secrets.github);
+  }
   for (const [name, value] of Object.entries(secrets.agentKeys)) env[agentKeyEnvName(name)] = value;
   return env;
 }
@@ -250,8 +290,20 @@ export class WorkerPool {
     }
     await this.settling.get(userId);
     const uid = live ? live.uid : this.knownUid(userId);
+    // First, so nothing more is handed to a worker that is on its way out.
+    if (live) this.release(userId, live);
     if (live || uid !== null) await this.spawner.stop({ userId, uid });
     if (live) await this.captureRepos(userId);
+  }
+
+  /**
+   * A worker is going or gone: its token socket closes, and the GitHub
+   * tokens it was given end now rather than with their hour.
+   */
+  private release(userId: string, worker: Running): void {
+    worker.tokens?.close();
+    worker.tokens = null;
+    this.opts.github?.forget(userId);
   }
 
   /** The uid of an account that may be gone by now; null then, and without separate uids. */
@@ -278,6 +330,8 @@ export class WorkerPool {
   async stopAll(): Promise<void> {
     if (this.sweeper) clearInterval(this.sweeper);
     this.sweeper = null;
+    // One still starting is stopped too, once it is up or has failed.
+    await Promise.all([...this.starting.values()].map((start) => start.catch(() => {})));
     await Promise.all([...this.running.keys()].map((id) => this.stop(id)));
   }
 
@@ -366,7 +420,9 @@ export class WorkerPool {
     // A key of its own for every start: a request that reaches this worker
     // through another worker's socket, or any other way, does not carry it.
     const key = randomToken();
-    const env = workerEnv(dirs, await this.opts.secrets(userId), this.opts.baseEnv, email, repos, { key, egressPort });
+    const identity = this.opts.github?.identity(userId) ?? null;
+    const github = this.opts.github ? { identity } : null;
+    const env = workerEnv(dirs, await this.opts.secrets(userId), this.opts.baseEnv, email, repos, { key, egressPort, github });
     let end!: (code: number | null) => void;
     const ended = new Promise<number | null>((resolve) => (end = resolve));
     const worker: Running = {
@@ -378,14 +434,25 @@ export class WorkerPool {
       stopping: false,
       ended,
       end,
+      tokens: null,
     };
     this.instances.set(worker.instance, { userId, worker });
     try {
       const { processes, openFiles } = this.limits;
       await this.spawner.start({ userId, uid, instance: worker.instance, env, limits: { processes, openFiles }, egressPort });
+      if (identity) {
+        // The spawner has made the folder; the worker's git waits a moment
+        // for the socket if it asks before this is done.
+        worker.tokens = await serveTokens({
+          path: dirs.tokenSocket,
+          uid,
+          answer: (repo) => this.opts.github!.tokenFor(userId, repo),
+        });
+      }
       await this.waitReady(worker);
     } catch (e) {
       worker.stopping = true;
+      this.release(userId, worker);
       await this.spawner.stop({ userId, uid }).catch(() => {});
       this.instances.delete(worker.instance);
       throw e;
@@ -403,6 +470,7 @@ export class WorkerPool {
     worker.end(code);
     if (this.running.get(userId) === worker) this.running.delete(userId);
     if (worker.stopping) return;
+    this.release(userId, worker);
     console.error(`worker for ${userId} exited with code ${code}`);
     this.crashes.set(userId, [...this.recentCrashes(userId), Date.now()].slice(-CRASH_LIMIT));
     // It went by itself: note its repos. The next start waits for this.

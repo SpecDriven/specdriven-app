@@ -20,7 +20,8 @@ Browser ──HTTPS──▶ Railway edge ──▶ gateway (src/gateway, :$PORT
                      worker per user = bun src/index.ts, SPECDRIVEN_HOSTED=1
                      unix socket /data/users/<id>/run/app.sock
                      HOME, settings, clones, temp files under /data/users/<id>/
-                     env: that user's GitHub token and agent keys only
+                     env: that user's agent keys only; no GitHub token
+                     GitHub: asks the gateway for an hour's token per repository
                      out: through the gateway's proxy, to GitHub only
 ```
 
@@ -114,7 +115,9 @@ Browser ──HTTPS──▶ Railway edge ──▶ gateway (src/gateway, :$PORT
 | Session | 32 random bytes in an `HttpOnly; Secure; SameSite=Lax` `__Host-` cookie. The database keeps only its SHA-256. Expires after 14 idle days and 30 days at most. With [an account host](#the-account-host) there are two: the sign-in on the account host, and one made from it for the app's host, which ends with it | `sessions` |
 | Hand-over code | 32 random bytes in a redirect's url, from the account host to the app's. Stored as SHA-256 with the hash of a secret in that browser's cookie; works once, for a minute | `handover_codes` |
 | Email links (sign-up, reset) | 32 random bytes in the link's `#fragment`, so the token never reaches a server log or a `Referer` header. Stored as SHA-256, single use; sign-up links last 24 h, reset links 30 min | `email_tokens` |
-| GitHub token, agent API keys | AES-256-GCM with a fresh IV per secret. The owner's id and the secret's name are bound in as associated data | `secrets` |
+| GitHub account | With [the service's GitHub App](#github): the person's GitHub id and login, as they proved them once. No token is stored: each is made for an hour when a worker's git asks | `github_links` |
+| Agent API keys, and a GitHub token pasted before the app | AES-256-GCM with a fresh IV per secret. The owner's id and the secret's name are bound in as associated data | `secrets` |
+| The GitHub App's private key and client secret | **Railway variables**, never on the volume or in the datastore | `SPECDRIVEN_GITHUB_APP_PRIVATE_KEY`, `SPECDRIVEN_GITHUB_APP_CLIENT_SECRET` |
 | Master key | 32 random bytes, a **Railway variable**, never on the volume | `SPECDRIVEN_MASTER_KEY` |
 
 A copy of the volume, or a backup of it, reveals no secret without the master
@@ -157,15 +160,19 @@ redeploy that loses the volume still knows everyone (`src/gateway/datastore.ts`)
   repo no longer open. Rotate it with `SPECDRIVEN_MASTER_KEYS_PREVIOUS` as
   usual. The re-sealed secrets are pushed on the next save.
 
-The browser can only write secrets: the account page shows each one's name,
-its last four characters and, for GitHub, the account the token belongs to.
-Secrets are decrypted only in the gateway, when it starts that person's
-worker. They reach the worker as environment variables:
+The browser can only write secrets: the account page shows each one's name
+and its last four characters. Secrets are decrypted only in the gateway,
+when it starts that person's worker. They reach the worker as environment
+variables:
 
-- the GitHub token as `SPECDRIVEN_GITHUB_TOKEN_RECORD`, read through
-  `createEnvBackend` in `src/server/tokenStore.ts`;
 - each agent key as `SPECDRIVEN_AGENT_KEY_<NAME>`, read through
-  `src/server/agentKeys.ts`.
+  `src/server/agentKeys.ts`;
+- without [the service's GitHub App](#github), the pasted GitHub token as
+  `SPECDRIVEN_GITHUB_TOKEN_RECORD`, read through `createEnvBackend` in
+  `src/server/tokenStore.ts`.
+
+With the app, no GitHub token is in the environment at all: see
+[GitHub](#github).
 
 The worker's environment is built from scratch, so the master key and the
 Resend key never reach it.
@@ -183,12 +190,66 @@ background git sync could not run while the person is signed out.
    gateway re-encrypts every secret under the new key.
 3. On a later deploy, remove the old key.
 
-**GitHub token.** Ask people for a
+## GitHub
+
+A worker reaches GitHub in one of two ways. Which one depends on whether the
+service has a GitHub App of its own.
+
+**With the app** (`SPECDRIVEN_GITHUB_APP_*` set; recommended):
+
+- A person presses **Connect GitHub** on the account page, once. GitHub asks
+  them to confirm, and the gateway learns which GitHub account is theirs.
+  The token that sign-in produces is revoked straight away. The gateway
+  keeps the account's id and login as the commit identity.
+- They install the app on their specs repository, from the link on the
+  account page.
+- When their worker's git fetches or pushes, it asks the gateway for a
+  token over a socket only that worker can open. The gateway asks GitHub
+  whether the app is installed on that repository and what the person may
+  do there, and answers with a token that lasts one hour, reaches that one
+  repository, and can write only if the person can.
+- When the worker stops, the tokens it was given are revoked.
+- One GitHub account belongs to one account here. To move it, disconnect
+  it on the account that has it.
+
+Nothing a person could lose is stored. A token pasted before the app keeps
+working until its owner connects, which deletes it; no new one can be
+pasted.
+
+**Without the app:** people paste a
 [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new)
-limited to their specs repository, with **Contents: read and write**, plus
-**Issues** and **Pull requests** if they use those tabs. When the token is
-saved, the gateway checks it with GitHub (`GET /user`) and stores the login,
-name and email as the commit identity.
+limited to their specs repository, with **Contents: read and write**. When
+the token is saved, the gateway checks it with GitHub (`GET /user`) and
+stores the login, name and email as the commit identity. The token is kept
+sealed and handed to the worker in its environment. It lasts as long as its
+owner chose, which is the weakness the app removes.
+
+[Hosted tenant isolation, step 3](hosted-tenant-isolation.md#step-3-make-a-stolen-token-worth-little)
+has the reasons and the limits.
+
+### Registering the app
+
+1. On GitHub, under the organisation that runs the service: Settings →
+   Developer settings → GitHub Apps → **New GitHub App**.
+2. Fill in:
+
+   | Field | Value |
+   |---|---|
+   | Callback URL | `<ACCOUNT_URL>/auth/github/callback` (`<PUBLIC_URL>/…` while there is no account host) |
+   | Setup URL | optional: `<ACCOUNT_URL>/account` |
+   | Expire user authorization tokens | on |
+   | Request user authorization (OAuth) during installation | off |
+   | Webhook | not active |
+   | Repository permissions | **Contents: Read and write**, **Metadata: Read-only**; nothing else |
+   | Where can this GitHub App be installed? | any account, if people keep their specs outside the organisation |
+
+3. On the app's page, **generate a client secret** and **generate a private
+   key** (a `.pem` file downloads).
+4. Set the three variables in [Deploying on Railway](#deploying-on-railway)
+   and redeploy. The start log no longer says that people paste a token.
+
+The private key can make a token for every repository the app is installed
+on. Keep it where the master key is kept, and nowhere else.
 
 ## Sign-up and password recovery
 
@@ -331,6 +392,9 @@ gateway logs at start that the account pages share it.
    | `ACCOUNT_URL` | optional but recommended: `https://account.specs.example.com`, [a host of their own](#the-account-host) for sign-in, the account page and the admin page. Unset, they share `PUBLIC_URL`'s host |
    | `RESEND_API_KEY` | from [resend.com](https://resend.com), with your sending domain verified |
    | `MAIL_FROM` | e.g. `SpecDriven <no-reply@specs.example.com>` on that verified domain |
+   | `SPECDRIVEN_GITHUB_APP_CLIENT_ID` | recommended: the client id of [the service's GitHub App](#github). Set all three of these or none: with only some, the gateway refuses to start |
+   | `SPECDRIVEN_GITHUB_APP_CLIENT_SECRET` | a client secret generated on the app's page |
+   | `SPECDRIVEN_GITHUB_APP_PRIVATE_KEY` | the app's private key: the whole text of the `.pem` file. Its line ends may be written as `\n`, or the file given in base64 |
    | `SPECDRIVEN_WORKER_IDLE_MINUTES` | optional, default 30 |
    | `SPECDRIVEN_WORKER_MAX_PROCESSES` | optional, default 512: processes and threads one person's worker may have |
    | `SPECDRIVEN_WORKER_MAX_OPEN_FILES` | optional, default 4096: files one worker process may hold open |
@@ -350,9 +414,10 @@ gateway logs at start that the account pages share it.
    [Custom domains on Cloudflare](#custom-domains-on-cloudflare).
 5. **Deploy, then sign in** as the [first admin](#admins-and-the-allowed-emails)
    and change its password on the account page. Open **Admin** to allow the
-   addresses and domains that may sign up. Open **Account & tokens**, paste
-   the GitHub token, and enter your specs repository's url on the first-run
-   screen.
+   addresses and domains that may sign up. Open **Account & tokens**,
+   connect [GitHub](#github) and install the app on your specs repository
+   (or, without the app, paste a GitHub token), and enter the repository's
+   url on the first-run screen.
 
 **Limits to know:**
 
@@ -360,8 +425,8 @@ gateway logs at start that the account pages share it.
   (plugin events) reconnect on their own.
 - The gateway's idle timeout is 255 s, and the worker's is 60 s per request.
 
-**Backups:** the [datastore](#datastore) repo holds the accounts and the
-encrypted secrets, and its history is a backup in itself. Railway volume
+**Backups:** the [datastore](#datastore) repo holds the accounts, who each
+is on GitHub, and the encrypted secrets, and its history is a backup in itself. Railway volume
 backups cover them as well. The specs themselves live in GitHub, and each
 worker pushes saved work on its sync tick.
 
@@ -440,6 +505,9 @@ When no variables are set:
 - there is one process and one host: no spawner, no sandbox, no account host
   (set `PUBLIC_URL` and `ACCOUNT_URL` to two local names to try the two
   hosts);
+- GitHub is a pasted token, unless the three `SPECDRIVEN_GITHUB_APP_*`
+  variables are set (a GitHub App whose callback url is
+  `http://localhost:3000/auth/github/callback` will do);
 - the frontend is bundled in memory at start;
 - the first admin is made as on Railway; sign in as it to allow addresses.
 
@@ -459,6 +527,8 @@ When no variables are set:
 | `src/gateway/admin.ts` | roles, the allowed emails and invitations, the first admin |
 | `src/gateway/sessions.ts`, `rateLimit.ts` | cookies and sessions; fixed-window limits |
 | `src/gateway/crypto.ts`, `secrets.ts` | AES-GCM keyring and the per-user secret store |
+| `src/gateway/githubApp.ts`, `githubLinks.ts` | the service's GitHub App: who a person is on GitHub, and an hour's token for one repository |
+| `src/gateway/tokenSocket.ts` | the socket a worker's git asks for that token on |
 | `src/gateway/datastore.ts` | the accounts' mirror in the datastore repo |
 | `src/gateway/workers.ts`, `proxy.ts` | the per-user worker pool (when a worker starts and stops, what it may use) and the streaming proxy |
 | `src/gateway/workerStart.ts` | what a worker sets up in its own folder as it starts |
@@ -466,6 +536,7 @@ When no variables are set:
 | `src/gateway/appShell.ts`, `assets.ts`, `pages/` | the app's frontend and the gateway's own pages |
 | `src/gateway/mail.ts` | Resend client and email texts |
 | `src/server/hostedMode.ts` | what a hosted worker refuses |
+| `src/server/hostedToken.ts`, `src/server/git/hostedCredential.ts` | a worker's side of the token socket, and git's credential helper that uses it |
 | `src/server/agentKeys.ts` | agent keys for future remote-agent integrations |
 
 ## Public read-only site

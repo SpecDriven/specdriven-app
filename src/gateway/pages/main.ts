@@ -1,6 +1,6 @@
 // The gateway's own pages (src/gateway/pages/*.html): sign in, sign up,
 // forgotten password, choosing a password from an emailed link, the account
-// page with the GitHub token, agent keys and password, and the admin page
+// page with GitHub, agent keys and password, and the admin page
 // with the allowed emails and the users' roles.
 // Plain DOM, no framework; every value from the server goes in as text.
 
@@ -52,6 +52,15 @@ function onSubmit(form: HTMLFormElement, submit: (fields: Record<string, string>
     }
   });
 }
+
+/** How a trip to GitHub and back ended badly, as the account page says it (src/gateway/server.ts). */
+const GITHUB_OUTCOMES: Record<string, string> = {
+  cancelled: "GitHub was not connected: the sign-in there was cancelled.",
+  state: "GitHub was not connected: the sign-in did not start from this page, or took too long. Try again.",
+  failed: "GitHub was not connected: GitHub did not confirm the sign-in. Try again.",
+  taken:
+    "GitHub was not connected: that GitHub account is connected to another SpecDriven account. Disconnect it there first, or check which account you are signed in to here.",
+};
 
 function errorOf(data: Json): string {
   return typeof data.error === "string" ? data.error : "Something went wrong — try again";
@@ -145,6 +154,28 @@ const pages: Record<string, () => void> = {
       await refresh();
     });
 
+    // GitHub through the service's own app (src/gateway/githubApp.ts): the
+    // way there and back is a page load, and how it ended comes back in the url.
+    el("#github-connect").addEventListener("click", async () => {
+      const { ok, data } = await call("/auth/github/connect", "POST", {});
+      if (ok && typeof data.url === "string") location.assign(data.url);
+      else show(el("#github-app-error"), errorOf(data));
+    });
+    el("#github-disconnect").addEventListener("click", async () => {
+      if (!confirm("Disconnect GitHub? SpecDriven stops syncing your specs until you connect again.")) return;
+      await call("/auth/github/link", "DELETE");
+      await refresh();
+    });
+    el("#github-old-remove").addEventListener("click", async () => {
+      await call("/auth/secrets/github", "DELETE");
+      await refresh();
+    });
+    const outcome = new URLSearchParams(location.search).get("github");
+    if (outcome) {
+      show(el("#github-app-error"), GITHUB_OUTCOMES[outcome] ?? GITHUB_OUTCOMES.failed!);
+      history.replaceState(null, "", location.pathname);
+    }
+
     const keyForm = el<HTMLFormElement>("#key-form");
     onSubmit(keyForm, async ({ name, value }) => {
       const { ok, data } = await call(`/auth/secrets/agent-keys/${encodeURIComponent(name?.trim() ?? "")}`, "PUT", {
@@ -171,6 +202,27 @@ const pages: Record<string, () => void> = {
         ? `Connected as ${github.login} (token …${github.hint}).`
         : "No token yet.";
       el("#github-remove").hidden = !github;
+      // Where the service has a GitHub App the token form is gone: a token
+      // from before works until GitHub is connected, which deletes it.
+      const app = data.githubApp as { account: { login: string } | null; installUrl: string | null } | null;
+      el("#github-app").hidden = !app;
+      el("#github-token").hidden = Boolean(app);
+      if (app) {
+        el("#github-app-status").textContent = app.account
+          ? `Connected as ${app.account.login}.`
+          : github
+            ? "Not connected yet."
+            : "Not connected yet: your specs are not synced until you connect.";
+        el("#github-connect").textContent = app.account ? "Connect another account" : "Connect GitHub";
+        el("#github-connect").classList.toggle("secondary", Boolean(app.account));
+        el("#github-disconnect").hidden = !app.account;
+        el("#github-install").hidden = !app.account || !app.installUrl;
+        if (app.installUrl) el<HTMLAnchorElement>("#github-install-link").href = app.installUrl;
+        el("#github-old-token").hidden = !github;
+        el("#github-old-token-text").textContent = github
+          ? `The personal access token saved before (…${github.hint}) is still in use. Connecting GitHub replaces and deletes it.`
+          : "";
+      }
       const list = el("#keys");
       list.replaceChildren();
       const keys = (data.agentKeys as { name: string; hint: string; updatedAt: number }[]) ?? [];
