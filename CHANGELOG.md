@@ -4,6 +4,11 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.279 — 2026-11-15
+
+- Images pasted into a GitHub issue show on GitHub: they go to a branch of their own, not the protected default branch ([#469](https://github.com/SpecDriven/specdriven-app/pull/469))
+- An open scenario page on the public specs site shows a pushed change after the next refresh ([#468](https://github.com/SpecDriven/specdriven-app/pull/468))
+
 ## v0.1.278 — 2026-11-15
 
 - Hosted workers are walled in further: root stays out of their folders, a stop ends every process of the uid, and hosted git runs no hook and makes no symlink ([#466](https://github.com/SpecDriven/specdriven-app/pull/466))
