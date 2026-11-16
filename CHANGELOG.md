@@ -4,6 +4,11 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.281 — 2026-11-15
+
+- A hosted worker holds no GitHub token: where the service has a GitHub App, its git is handed an hour's token for the one repository it asks for ([#472](https://github.com/SpecDriven/specdriven-app/pull/472))
+- The deployment guide warns that an account host two levels under the zone has no certificate behind Cloudflare's proxy ([#471](https://github.com/SpecDriven/specdriven-app/pull/471))
+
 ## v0.1.280 — 2026-11-15
 
 - The hosted gateway that answers the internet is no longer root, the account pages can have a host of their own, and each worker is confined to its own folders and one way out ([#470](https://github.com/SpecDriven/specdriven-app/pull/470))
