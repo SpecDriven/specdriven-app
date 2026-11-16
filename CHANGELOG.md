@@ -4,6 +4,10 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.280 — 2026-11-15
+
+- The hosted gateway that answers the internet is no longer root, the account pages can have a host of their own, and each worker is confined to its own folders and one way out ([#470](https://github.com/SpecDriven/specdriven-app/pull/470))
+
 ## v0.1.279 — 2026-11-15
 
 - Images pasted into a GitHub issue show on GitHub: they go to a branch of their own, not the protected default branch ([#469](https://github.com/SpecDriven/specdriven-app/pull/469))
