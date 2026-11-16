@@ -307,6 +307,16 @@ import { importSummary, OpenSpecImportDialog } from "./OpenSpecImportDialog";
 import { HostedStartNav, hostedCloneHint, type HostedAccount } from "./HostedStartNav";
 import type { ScenarioRef } from "./route";
 import { copyText, copyWhenReady } from "./clipboard";
+import {
+  CLAUDE_CODE_WEB_URL,
+  CLAUDE_WEB_LABEL,
+  CLAUDE_WEB_TARGET,
+  claudeWebEnv,
+  openPendingTab,
+  startClaudeWebSession,
+} from "./claudeWeb";
+import { ClaudeWebNote } from "./ClaudeWebNote";
+import { openWebLink } from "./weblinks";
 
 interface Conflict {
   ours: string;
@@ -1503,7 +1513,7 @@ export function App() {
   /** The Pomodoro settings dialog, opened from the bar's ⋯ or the palette. */
   const [pomodoroSettings, setPomodoroSettings] = useState(false);
   /** Outcome line under the Start session button (started/finished). */
-  const [sessionNotice, setSessionNotice] = useState<string | null>(null);
+  const [sessionNotice, setSessionNotice] = useState<ReactNode>(null);
   /** A failed session's message, shown in an error box until dismissed. */
   const [sessionError, setSessionError] = useState<string | null>(null);
   /** Sidebar entry whose "⋯" menu is open (file name), if any. */
@@ -3634,32 +3644,39 @@ export function App() {
   // would run and hands it back; nothing is launched, so the selection stays
   // put only when the copy fails.
   // The fetch starts in the click's own turn and the clipboard is handed it
-  // straight away (copyWhenReady): Safari copies only during the click, which
-  // matters most where nothing comes first — the hosted app's button.
-  const copySessionPrompt = async (
+  // straight away (copyWhenReady): Safari copies only during the click.
+  /** The prompt a session would run, on its way; `cloud` for Claude Code on the web. */
+  const fetchSessionPrompt = (
     name: string,
     files: { fileName: string; scenarios?: ScenarioPick[] }[],
     attachments: Record<string, string[]>,
-    done = `Prompt for "${name}" copied to the clipboard.`,
-  ) => {
-    setSessionRunning(true);
-    setSessionNotice(`Building the prompt for "${name}"…`);
-    const prompt = fetch("/api/agent/session/prompt", {
+    cloud = false,
+  ): Promise<string> =>
+    fetch("/api/agent/session/prompt", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, files, attachments }),
+      body: JSON.stringify({ name, files, attachments, ...(cloud ? { cloud: true } : {}) }),
     }).then(async (res) => {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Could not build the prompt");
       return data.prompt as string;
     });
+
+  const copySessionPrompt = async (
+    name: string,
+    files: { fileName: string; scenarios?: ScenarioPick[] }[],
+    attachments: Record<string, string[]>,
+  ) => {
+    setSessionRunning(true);
+    setSessionNotice(`Building the prompt for "${name}"…`);
+    const prompt = fetchSessionPrompt(name, files, attachments);
     try {
       if (!(await copyWhenReady(prompt))) {
         setSessionNotice(null);
         setSessionError("Could not copy the prompt to the clipboard.");
         return;
       }
-      setSessionNotice(done);
+      setSessionNotice(`Prompt for "${name}" copied to the clipboard.`);
       setSpecSelection(new Map());
     } catch (e) {
       setSessionNotice(null);
@@ -3669,11 +3686,61 @@ export function App() {
     }
   };
 
+  // Claude Code on the web (src/frontend/claudeWeb.ts): nothing runs here —
+  // the person's own browser opens claude.ai/code with the prompt in the
+  // link, and the prompt is copied too, to paste when it is too long for
+  // one. Everything up to startClaudeWebSession happens in the click's own
+  // turn, which is when a browser lets a tab open and a copy start.
+  const openClaudeWebSession = async (
+    name: string,
+    files: { fileName: string; scenarios?: ScenarioPick[] }[],
+    attachments: Record<string, string[]>,
+  ) => {
+    const env = claudeWebEnv(navigator.userAgent);
+    const started = startClaudeWebSession({
+      prompt: fetchSessionPrompt(name, files, attachments, true),
+      copy: copyWhenReady,
+      openPending: () => openPendingTab(),
+      openUrl: openWebLink,
+      ...env,
+    });
+    setSessionRunning(true);
+    setSessionNotice(`Building the prompt for "${name}"…`);
+    try {
+      const outcome = await started;
+      setSessionNotice(<ClaudeWebNote outcome={outcome} desktop={env.desktop} onCopy={copyClaudeWebPrompt} />);
+      // A prompt that went nowhere leaves the selection to try again with.
+      if (outcome.kind !== "copy") setSpecSelection(new Map());
+    } catch (e) {
+      setSessionNotice(null);
+      setSessionError((e as Error).message);
+    } finally {
+      setSessionRunning(false);
+    }
+  };
+
+  /** The note's "Copy prompt": the prompt is in hand, so this click can copy it; the link is then theirs to click. */
+  const copyClaudeWebPrompt = async (prompt: string) => {
+    if (!(await copyText(prompt))) {
+      setSessionNotice(null);
+      setSessionError("Could not copy the prompt to the clipboard.");
+      return;
+    }
+    setSessionNotice(
+      <ClaudeWebNote
+        outcome={{ kind: "link", url: CLAUDE_CODE_WEB_URL, paste: true }}
+        desktop={claudeWebEnv(navigator.userAgent).desktop}
+        onCopy={copyClaudeWebPrompt}
+      />,
+    );
+    setSpecSelection(new Map());
+  };
+
   // The hosted app (specs/app/hosted-app.feature.md) runs no agent and keeps
-  // no agent's API key: its session button copies the prompt for the checked
-  // specs and scenarios — or the open feature — at once, with no dialog, to
-  // paste into the person's own agent in another browser tab.
-  const copyHostedSession = () => {
+  // no agent's API key: its session button sends the prompt for the checked
+  // specs and scenarios — or the open feature — to Claude Code on the web at
+  // once, with no dialog, in a tab of the person's own browser.
+  const openHostedSession = () => {
     if (sessionRunning) return;
     if (!codeGen) {
       toast.info("Code generation is switched off in Settings.");
@@ -3685,12 +3752,7 @@ export function App() {
       toast.info(pick.hint);
       return;
     }
-    void copySessionPrompt(
-      defaultSessionName(),
-      pick.files,
-      attachments,
-      "Prompt copied — paste it into your AI agent in its own browser tab.",
-    );
+    void openClaudeWebSession(defaultSessionName(), pick.files, attachments);
   };
 
   // The AI session's dialog, built from the selection at the time: the
@@ -3733,7 +3795,9 @@ export function App() {
     ];
     // The clipboard is always on offer, and first: it needs no agent
     // installed, and the prompt it copies is the same text a session would
-    // run — to paste into an agent the app doesn't drive.
+    // run — to paste into an agent the app doesn't drive. Claude Code on the
+    // web needs nothing installed either: the browser opens it with the
+    // prompt, and the work runs in the cloud.
     const choices = [
       {
         value: CLIPBOARD_TARGET,
@@ -3741,10 +3805,16 @@ export function App() {
         hint: `Copies the prompt for ${repoWord} — paste it into any agent`,
         confirmLabel: "Copy prompt",
       },
+      {
+        value: CLAUDE_WEB_TARGET,
+        label: CLAUDE_WEB_LABEL,
+        hint: "Opens claude.ai in your browser with the prompt — runs in the cloud, on the GitHub repository you pick there",
+        confirmLabel: "Open Claude Code",
+      },
       ...agentChoices,
     ];
-    // With no agent installed the clipboard is all there is, so the dialog
-    // asks for a name without a choice and says what it will do.
+    // The agent a session falls back on here; with none installed, the
+    // clipboard — which is also what the dialog then opens on.
     const only = (agentChoices[0]?.value ?? CLIPBOARD_TARGET) as CodeGenTarget;
     const dialog = {
       title: "Name the session",
@@ -3752,18 +3822,16 @@ export function App() {
       // names none of them; with only one, it names that one's agent.
       hint:
         agentChoices.length === 0
-          ? `Builds a prompt over ${describeSelection(files)}${where} to copy — no coding agent found to run it here.`
+          ? `Builds a prompt over ${describeSelection(files)}${where} to copy, or to open in ${CLAUDE_WEB_LABEL} — no coding agent found to run it here.`
           : `Runs ${agentChoices.length > 1 ? "the chosen agent" : only === "desktop" ? "Claude" : (agents.find((a) => a.id === only)?.label ?? only)} over ${describeSelection(files)}${where}, or copies the prompt.`,
       initial: defaultSessionName(),
       placeholder: "e.g. implement billing quotes",
       confirmLabel: "Start AI Session",
     };
-    // With no agent installed the dialog asks for a name without a choice
-    // and says what it will do; the hint only makes sense over a selection.
-    const opts: PromptOptions =
-      agentChoices.length > 0
-        ? { ...dialog, choicesLabel: "Run in", choices, initialChoice: sessionTarget }
-        : { ...dialog, confirmLabel: "Copy prompt" };
+    // "Run in" opens on the remembered target; one that is not on offer
+    // here (no agent installed, none chosen) leaves it on the first, the
+    // clipboard. The hint only makes sense over a selection.
+    const opts: PromptOptions = { ...dialog, choicesLabel: "Run in", choices, initialChoice: sessionTarget };
     if (files.length === 0 && bundle.count === 0) delete opts.hint;
     return { files, bundle, only, dialog: opts };
   };
@@ -3775,6 +3843,14 @@ export function App() {
     const { attachments } = bundle;
     if (choice === null || choice === CLIPBOARD_TARGET) {
       await copySessionPrompt(sessionName, files, attachments);
+      return;
+    }
+    if (choice === CLAUDE_WEB_TARGET) {
+      // Started before anything else: the tab opens in the click's own turn.
+      const opening = openClaudeWebSession(sessionName, files, attachments);
+      // Remembered, so the next dialog opens on the same choice.
+      if (codeGenTarget !== CLAUDE_WEB_TARGET) void patchSettings({ codeGenTarget: CLAUDE_WEB_TARGET });
+      await opening;
       return;
     }
     const target = readCodeGenTarget(choice, agents) ?? only;
@@ -3816,8 +3892,8 @@ export function App() {
     }
   };
 
-  /** Open the Start session dialog — every entry point lands here; the hosted app copies instead. */
-  const startSession = () => (hosted ? copyHostedSession() : setStartDialog(true));
+  /** Open the Start session dialog — every entry point lands here; the hosted app opens Claude Code on the web instead. */
+  const startSession = () => (hosted ? openHostedSession() : setStartDialog(true));
 
   /**
    * Start a pomodoro: one click, no dialog and no name. Called straight from
@@ -8586,7 +8662,7 @@ export function App() {
         ]
       : []),
     ...(codeGen && (specSelection.size > 0 || (hosted && selected)) && !sessionRunning
-      ? [action("session", hosted ? "Copy Prompt for AI Agent" : "Start AI Session", <StartSessionIcon size={14} />, () => startSession())]
+      ? [action("session", hosted ? "Open Prompt in Claude Code" : "Start AI Session", <StartSessionIcon size={14} />, () => startSession())]
       : []),
     // Off in Settings: the Pomodoro is not part of this app, so the palette
     // does not offer it either (src/frontend/pomodoroPref.ts).
@@ -11184,8 +11260,8 @@ export function App() {
                   ? "Session running…"
                   : hosted
                     ? sessionCount > 0 || selected
-                      ? `Copy a prompt with ${sessionCount > 0 ? selectionLabel : "the open feature"} for your AI agent`
-                      : "Copy a prompt for your AI agent"
+                      ? `Open Claude Code with a prompt for ${sessionCount > 0 ? selectionLabel : "the open feature"}`
+                      : "Open Claude Code with a prompt"
                     : codeGen && sessionCount > 0
                       ? `Start an AI session in ${codeGenTargetLabel(sessionTarget, agents)} with ${selectionLabel}`
                       : "Start an AI session"
@@ -11200,7 +11276,7 @@ export function App() {
                   sessionRunning
                     ? "Session running…"
                     : hosted
-                      ? "Copy prompt for your AI agent"
+                      ? "Open Claude Code with a prompt"
                       : `Start session…${codeGen && specSelection.size > 0 ? ` (${specSelection.size})` : ""}`
                 }
                 onClick={() => startSession()}
@@ -12427,9 +12503,9 @@ export function App() {
                         ? [
                             {
                               id: "session",
-                              label: hosted ? "Copy Prompt for AI Agent" : "Start AI Session",
+                              label: hosted ? "Open Prompt in Claude Code" : "Start AI Session",
                               icon: <StartSessionIcon size={13} />,
-                              // The hosted app copies the open feature when nothing is checked.
+                              // The hosted app takes the open feature when nothing is checked.
                               disabled: sessionRunning || (specSelection.size === 0 && !hosted),
                               onSelect: () => void startSession(),
                             },

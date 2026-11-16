@@ -238,7 +238,23 @@ test("the Run in choice round-trips through the settings file", async () => {
   expect(legacy.status).toBe(400);
   const bad = await api("/api/state", "PUT", { codeGenTarget: "x" });
   expect(bad.status).toBe(400);
-  expect((await bad.json()).error).toContain("codeGenTarget must be desktop, claude, codex or pi");
+  expect((await bad.json()).error).toContain("codeGenTarget must be desktop, claude-web, claude, codex or pi");
+});
+
+// Claude Code on the web (src/frontend/claudeWeb.ts): a "Run in" choice like
+// the others, so it is remembered — but the person's browser opens it, so
+// the server has nothing to run for it.
+test("Claude Code on the web is remembered as the Run in choice, and never run from the server", async () => {
+  const res = await api("/api/state", "PUT", { codeGenTarget: "claude-web" });
+  expect(res.status).toBe(200);
+  expect(((await res.json()) as { codeGenTarget: string }).codeGenTarget).toBe("claude-web");
+  expect((await readState(root)).codeGenTarget).toBe("claude-web");
+
+  const run = await api("/api/agent/session", "POST", { name: "s", files: FILES, target: "claude-web" });
+  expect(run.status).toBe(400);
+  expect((await run.json()).error).toContain("opens in the browser");
+  expect(calls).toHaveLength(0);
+  await expect(stat(join(root, ".specdriven", "sessions"))).rejects.toThrow();
 });
 
 // "Copy prompt to clipboard", the session dialog's top option: the same
@@ -257,6 +273,58 @@ test("the prompt route returns the session prompt and runs nothing", async () =>
   expect(calls).toHaveLength(0);
   // Nothing recorded either — a copied prompt is not a session.
   await expect(stat(join(root, ".specdriven", "sessions"))).rejects.toThrow();
+});
+
+// The prompt is the spec less its test links, wherever it goes: copied,
+// opened in Claude Code on the web, saved for the Claude app, or cut down to
+// picked scenarios.
+test("no session prompt carries the specs' test links", async () => {
+  const link = "[test: prices one car : https://github.com/acme/app/blob/main/tests/quote.test.ts#L3 ]";
+  await saveFeature(
+    data,
+    "specs/quote.feature.md",
+    `# Quote\n\n## Basic @v1\n\nbody\n\n${link}\n\n## Declined @v1\n\nother\n\n${link.replace("#L3", "#L9")}\n`,
+  );
+  const prompts: string[] = [];
+  for (const body of [
+    { name: "s", files: FILES },
+    { name: "s", files: FILES, cloud: true },
+    { name: "s", files: [{ fileName: "specs/quote.feature.md", scenarios: [{ name: "Basic", version: 1 }] }] },
+  ]) {
+    const res = await api("/api/agent/session/prompt", "POST", body);
+    expect(res.status).toBe(200);
+    prompts.push(((await res.json()) as { prompt: string }).prompt);
+  }
+  const desktop = await api("/api/agent/session", "POST", { name: "s", files: FILES, target: "desktop" });
+  expect(desktop.status).toBe(200);
+  prompts.push(await readFile(((await desktop.json()) as { promptPath: string }).promptPath, "utf8"));
+  for (const prompt of prompts) {
+    expect(prompt).toContain("body");
+    expect(prompt).not.toContain("[test:");
+    expect(prompt).not.toContain("quote.test.ts");
+  }
+  // The spec itself keeps its links: only the prompt goes without.
+  expect(await readFile(join(data, "specs", "quote.feature.md"), "utf8")).toContain("quote.test.ts#L3");
+});
+
+// For Claude Code on the web the work runs in the cloud, on a clone: the
+// prompt carries the specs in full and names no folder of this machine,
+// code repo or not.
+test("the prompt route builds the cloud prompt, with no folder of this machine in it", async () => {
+  const code = join(root, "code");
+  await mkdir(code);
+  await writeFile(join(data, PROJECT_SETTINGS_FILE), JSON.stringify({ "code-repo": "../code" }));
+  const here = await api("/api/agent/session/prompt", "POST", { name: "s", files: FILES });
+  expect(((await here.json()) as { prompt: string }).prompt).toContain(`data repository at ${data}`);
+
+  const res = await api("/api/agent/session/prompt", "POST", { name: "s", files: FILES, cloud: true });
+  expect(res.status).toBe(200);
+  const { prompt } = (await res.json()) as { prompt: string };
+  expect(prompt).toContain("The specifications are given in full below");
+  expect(prompt).toContain("## Spec: specs/quote.feature.md");
+  expect(prompt).not.toContain(data);
+  expect(prompt).not.toContain(code);
+  expect(calls).toHaveLength(0);
 });
 
 test("the prompt route refuses what a session refuses", async () => {

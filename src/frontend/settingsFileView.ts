@@ -3,6 +3,8 @@
 // sections — On / Off, seconds, folder lists — instead of YAML. Pure, so the
 // dialog (src/frontend/SettingsFileDialog.tsx) and its tests share it.
 
+import { CLAUDE_WEB_LABEL, CLAUDE_WEB_TARGET } from "./claudeWeb";
+
 /** One value as shown: a line of text, a bullet list, or nested rows. */
 export type SettingsValue =
   | { kind: "text"; text: string; muted?: boolean }
@@ -192,6 +194,7 @@ function logLevels(value: unknown, home: string): SettingsValue {
 function codeGenTarget(value: unknown, home: string): SettingsValue {
   if (typeof value !== "string") return formatValue(value, home);
   if (value === "desktop") return text("Claude Code Desktop");
+  if (value === CLAUDE_WEB_TARGET) return text(CLAUDE_WEB_LABEL);
   const name = { claude: "Claude Code", codex: "Codex" }[value] ?? value;
   return text(`${name} in the agent pane`);
 }

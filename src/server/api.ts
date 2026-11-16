@@ -136,6 +136,7 @@ import {
   sessionsDirectory,
 } from "./agent";
 import type { SessionPlace, SpecInput } from "./agent";
+import { CLAUDE_WEB_TARGET } from "../frontend/claudeWeb";
 import { folderGitInfo, WORKTREES_SUBDIR } from "./agentWorktree";
 import { refreshSource, sourceStatus } from "./agentSource";
 import {
@@ -1409,7 +1410,7 @@ const putState: Handler = async (req) => {
   if (body.codeGenTarget !== undefined) {
     const target = normalizeCodeGenTarget(body.codeGenTarget, agentIds());
     if (target === null) {
-      return json({ error: `codeGenTarget must be ${codeGenTargetList(agentIds())}` }, 400);
+      return json({ error: `codeGenTarget must be ${codeGenTargetList(agentIds(), true)}` }, 400);
     }
     state.codeGenTarget = target;
   }
@@ -3498,6 +3499,11 @@ const postAgentSession = withDataDir(async (dir, req) => {
     attachments?: unknown;
     target?: unknown;
   };
+  // Claude Code on the web is a stored target, but never one to run from
+  // here: the person's own browser opens it (src/frontend/claudeWeb.ts).
+  if (body.target === CLAUDE_WEB_TARGET) {
+    return json({ error: "Claude Code on the web opens in the browser, not from the server" }, 400);
+  }
   const resolved = await resolveSessionRequest(dir, body);
   if (resolved instanceof Response) return resolved;
   const target = normalizeCodeGenTarget(body.target, agentIds());
@@ -3536,13 +3542,14 @@ const postAgentSession = withDataDir(async (dir, req) => {
 // The same prompt, for the clipboard: the session dialog's "Copy prompt to
 // clipboard" option builds the prompt without running anything, so it can be
 // pasted into an agent the app doesn't drive. Nothing is launched and no
-// session is recorded — only the text comes back.
+// session is recorded — only the text comes back. With `cloud` it is the
+// prompt for Claude Code on the web, which names no folder of this machine.
 const postAgentSessionPrompt = withDataDir(async (dir, req) => {
-  const body = (await req.json()) as { name?: unknown; files?: unknown; attachments?: unknown };
+  const body = (await req.json()) as { name?: unknown; files?: unknown; attachments?: unknown; cloud?: unknown };
   const resolved = await resolveSessionRequest(dir, body);
   if (resolved instanceof Response) return resolved;
   const { name, specs, place, sections } = resolved;
-  return json({ name, prompt: buildSessionPrompt(name, specs, place, sections) });
+  return json({ name, prompt: buildSessionPrompt(name, specs, place, sections, { cloud: body.cloud === true }) });
 });
 
 // ---------------------------------------------------------------------------

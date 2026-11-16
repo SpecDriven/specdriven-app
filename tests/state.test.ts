@@ -20,6 +20,8 @@ import {
   APP_PACKAGE_NAME,
   HOME_SETTINGS_ENV,
 } from "../src/server/state";
+import { codeGenTargetList } from "../src/server/settingsModel";
+import { CLAUDE_WEB_TARGET } from "../src/frontend/claudeWeb";
 
 let dir: string;
 let home: string;
@@ -178,6 +180,19 @@ test("the session target is only ever desktop or a registered agent", () => {
   // The headless `claude -p` target is gone; a settings file that still
   // names it reads as "not chosen".
   expect(normalizeCodeGenTarget("cli", ids)).toBeNull();
+});
+
+// Claude Code on the web (src/frontend/claudeWeb.ts) is a target the
+// settings keep with no agent installed — the browser opens it. A refused
+// setting names it among the choices; a refused run does not, since the
+// server never runs it.
+test("Claude Code on the web is a session target the settings keep, listed for the setting alone", () => {
+  expect(normalizeCodeGenTarget(CLAUDE_WEB_TARGET, [])).toBe(CLAUDE_WEB_TARGET);
+  expect(normalizeCodeGenTarget(CLAUDE_WEB_TARGET, ["claude"])).toBe(CLAUDE_WEB_TARGET);
+  expect(codeGenTargetList(["claude", "codex"], true)).toBe("desktop, claude-web, claude or codex");
+  expect(codeGenTargetList(["claude", "codex"])).toBe("desktop, claude or codex");
+  expect(codeGenTargetList([], true)).toBe("desktop or claude-web");
+  expect(codeGenTargetList([])).toBe("desktop");
 });
 
 test("the session target round-trips through the settings file", async () => {

@@ -1,6 +1,7 @@
 import { test, expect } from "bun:test";
 import {
   extractScenarios,
+  withoutTestLinks,
   featureTextError,
   parseFeature,
   serializeFeature,
@@ -390,4 +391,59 @@ test("trimBlankLines drops blank edge lines and nothing else", () => {
   expect(trimBlankLines("   ")).toBe("");
   expect(trimBlankLines("")).toBe("");
   expect(trimBlankLines("a")).toBe("a");
+});
+
+// What a coding session is handed (src/server/agent.ts): the spec without
+// the links that say which tests automate each scenario.
+test("withoutTestLinks drops every test link and keeps the rest of the spec", () => {
+  const text = [
+    "# Quote",
+    "",
+    "A customer asks for a price.",
+    "",
+    "## S1: Basic quote @v1 [proposed]",
+    "",
+    "- Given: a customer with one car",
+    "- Then: the price is shown [test: shows the price : https://github.com/acme/app/blob/main/tests/quote.test.ts#L9 ]",
+    "- and it is saved",
+    "",
+    "[test: prices one car : https://github.com/acme/app/blob/main/tests/quote.test.ts#L3 ]",
+    "[test: https://github.com/acme/app/blob/main/tests/quote.test.ts#L20 ]",
+    "",
+    "## S2: Declined quote @v1 [proposed]",
+    "",
+    "- Then: the reason is shown",
+    "",
+    "```",
+    "[test: a sample : https://github.com/acme/app/blob/main/tests/sample.test.ts#L1 ]",
+    "```",
+    "",
+    "### Tests",
+    "",
+    "| Test |",
+    "| --- |",
+    "| https://github.com/acme/app/blob/main/tests/declined.test.ts#L5 |",
+    "",
+  ].join("\n");
+  const bare = withoutTestLinks(text);
+  expect(bare).not.toContain("quote.test.ts");
+  expect(bare).not.toContain("declined.test.ts");
+  expect(bare).not.toContain("### Tests");
+  // The rule whose own line carried a link keeps its words, and its place.
+  expect(bare).toContain("- Then: the price is shown\n- and it is saved");
+  expect(bare).toContain("## S1: Basic quote @v1 [proposed]");
+  expect(bare).toContain("## S2: Declined quote @v1 [proposed]");
+  expect(bare).toContain("A customer asks for a price.");
+  // A link shown as an example inside fenced code is content.
+  expect(bare).toContain("[test: a sample : https://github.com/acme/app/blob/main/tests/sample.test.ts#L1 ]");
+  // Nothing else of the spec is lost: the scenarios read back the same.
+  const strip = (f: ReturnType<typeof parseFeature>) => f.scenarios.map((s) => [s.name, s.version, s.status]);
+  expect(strip(parseFeature(bare))).toEqual(strip(parseFeature(text)));
+  expect(parseFeature(bare).scenarios.every((s) => s.tests.length === 0)).toBe(true);
+});
+
+test("withoutTestLinks hands a spec with no test link back as it is", () => {
+  const text = "# Search\n\nRanked   hits.\n\n## Basic search @v1\n\n- Then: hits  show\n";
+  expect(withoutTestLinks(text)).toBe(text);
+  expect(withoutTestLinks("")).toBe("");
 });

@@ -124,8 +124,10 @@ A copy of the volume, or a backup of it, reveals no secret without the master
 key.
 
 No AI agent's API key is stored. A hosted worker runs no agent: its Start AI
-Session button copies the prompt for the selected specs, to paste into the
-person's own agent in another browser tab. Keys saved before this was so are
+Session button opens Claude Code on the web (`claude.ai/code`) in another
+browser tab, under the person's own claude.ai sign-in, with the prompt for
+the selected specs in the link; the prompt is copied too, to paste when it is
+too long for a link. Keys saved before this was so are
 deleted when the database is migrated (`src/gateway/db.ts`).
 
 ## Datastore

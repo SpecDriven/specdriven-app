@@ -29,10 +29,11 @@ export function aiTabState(a: {
 }
 
 /**
- * What the hosted app's session button copies (specs/app/hosted-app.feature.md):
- * the specs and scenarios checked in the sidebar, or — with none checked and
- * nothing a plugin view bundles — the feature that is open. Null when there
- * is nothing to copy, with the words that say so.
+ * What the hosted app's session button sends to Claude Code on the web
+ * (specs/app/hosted-app.feature.md): the specs and scenarios checked in the
+ * sidebar, or — with none checked and nothing a plugin view bundles — the
+ * feature that is open. A hint when there is nothing to send, in the words
+ * that say so.
  */
 export function hostedSessionPick<F extends { fileName: string }>(a: {
   picked: F[];
