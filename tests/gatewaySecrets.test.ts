@@ -4,9 +4,12 @@
 // when the old one is retired.
 
 import { expect, test } from "bun:test";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { generateMasterKey, hashToken, loadKeyring, open, seal, secretAad } from "../src/gateway/crypto";
 import { openDatabase } from "../src/gateway/db";
-import { agentKeyNameProblem, SecretStore } from "../src/gateway/secrets";
+import { SecretStore } from "../src/gateway/secrets";
 
 const USER = "11111111-1111-4111-8111-111111111111";
 const OTHER = "22222222-2222-4222-8222-222222222222";
@@ -54,27 +57,22 @@ test("the store keeps ciphertext only and lists hints, never values", async () =
   addUsers(db);
   const store = new SecretStore(db, await loadKeyring({ SPECDRIVEN_MASTER_KEY: generateMasterKey() }));
   await store.put(USER, "github", "github", "ghp_abcdef1234", { login: "octo", name: "Octo", email: "o@x", id: 7 });
-  await store.put(USER, "anthropic", "agent_key", "sk-ant-zzzz9876");
-  await store.put(OTHER, "anthropic", "agent_key", "sk-other-0000");
+  await store.put(OTHER, "github", "github", "ghp_other0000", { login: "other" });
 
   const raw = db.query("SELECT ciphertext FROM secrets").all() as { ciphertext: Uint8Array }[];
-  for (const row of raw) expect(Buffer.from(row.ciphertext).toString("latin1")).not.toMatch(/ghp_|sk-/);
+  for (const row of raw) expect(Buffer.from(row.ciphertext).toString("latin1")).not.toMatch(/ghp_/);
 
   const listed = await store.list(USER);
-  expect(listed.map((s) => [s.name, s.hint])).toEqual([
-    ["anthropic", "9876"],
-    ["github", "1234"],
-  ]);
-  expect(JSON.stringify(listed)).not.toContain("sk-ant-zzzz9876");
+  expect(listed.map((s) => [s.name, s.hint])).toEqual([["github", "1234"]]);
+  expect(JSON.stringify(listed)).not.toContain("ghp_abcdef1234");
 
   const values = await store.values(USER);
   expect(values.github).toEqual({ token: "ghp_abcdef1234", login: "octo", name: "Octo", email: "o@x", id: 7 });
-  expect(values.agentKeys).toEqual({ anthropic: "sk-ant-zzzz9876" });
-  expect((await store.values(OTHER)).agentKeys).toEqual({ anthropic: "sk-other-0000" });
+  expect((await store.values(OTHER)).github?.token).toBe("ghp_other0000");
 
-  expect(store.delete(USER, "anthropic")).toBe(true);
-  expect(store.delete(USER, "anthropic")).toBe(false);
-  expect(store.agentKeyCount(USER)).toBe(0);
+  expect(store.delete(USER, "github")).toBe(true);
+  expect(store.delete(USER, "github")).toBe(false);
+  expect((await store.values(USER)).github).toBeNull();
 });
 
 test("rotating the master key re-seals old rows, which then need only the new key", async () => {
@@ -82,7 +80,7 @@ test("rotating the master key re-seals old rows, which then need only the new ke
   addUsers(db);
   const oldKey = generateMasterKey();
   const newKey = generateMasterKey();
-  await new SecretStore(db, await loadKeyring({ SPECDRIVEN_MASTER_KEY: oldKey })).put(USER, "k", "agent_key", "v1");
+  await new SecretStore(db, await loadKeyring({ SPECDRIVEN_MASTER_KEY: oldKey })).put(USER, "github", "github", "v1");
 
   const rotated = new SecretStore(
     db,
@@ -92,16 +90,27 @@ test("rotating the master key re-seals old rows, which then need only the new ke
   expect(await rotated.reseal()).toBe(0);
 
   const newOnly = new SecretStore(db, await loadKeyring({ SPECDRIVEN_MASTER_KEY: newKey }));
-  expect((await newOnly.values(USER)).agentKeys).toEqual({ k: "v1" });
+  expect((await newOnly.values(USER)).github?.token).toBe("v1");
 });
 
-test("agent key names are short lowercase slugs, and github is reserved", () => {
-  expect(agentKeyNameProblem("anthropic")).toBeNull();
-  expect(agentKeyNameProblem("openai-prod-2")).toBeNull();
-  expect(agentKeyNameProblem("github")).toMatch(/reserved/);
-  expect(agentKeyNameProblem("Bad_Name")).not.toBeNull();
-  expect(agentKeyNameProblem("../x")).not.toBeNull();
-  expect(agentKeyNameProblem("a".repeat(41))).not.toBeNull();
+test("agent API keys saved before are deleted when the database is migrated, and the GitHub token stays", async () => {
+  const path = join(await mkdtemp(join(tmpdir(), "sd-secrets-")), "gateway.db");
+  const keyring = await loadKeyring({ SPECDRIVEN_MASTER_KEY: generateMasterKey() });
+  const db = openDatabase(path);
+  addUsers(db);
+  const store = new SecretStore(db, keyring);
+  await store.put(USER, "github", "github", "ghp_abcdef1234", { login: "octo" });
+  // A key from before, as the account page used to save it.
+  db.query(
+    "INSERT INTO secrets (user_id, name, kind, ciphertext, iv, key_id, meta, updated_at) VALUES (?, 'anthropic', 'agent_key', x'00', x'00', 'k', '{}', 0)",
+  ).run(USER);
+  db.exec("PRAGMA user_version = 5");
+  db.close();
+
+  const again = openDatabase(path);
+  expect(again.query("SELECT name, kind FROM secrets").all()).toEqual([{ name: "github", kind: "github" }]);
+  expect((await new SecretStore(again, keyring).values(USER)).github?.token).toBe("ghp_abcdef1234");
+  again.close();
 });
 
 test("tokens are stored as SHA-256 hex", () => {

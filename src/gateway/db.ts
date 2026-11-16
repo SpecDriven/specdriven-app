@@ -114,6 +114,13 @@ export const MIGRATIONS: string[] = [
     linked_at INTEGER NOT NULL
   );
   `,
+  // The service keeps no AI agents' API keys: the hosted app hands the
+  // prompt to the person's own agent through the clipboard instead, so the
+  // keys saved before are deleted. ('agent_key' stays in the old CHECK: a
+  // table rebuild for it is not worth it, and nothing writes the kind.)
+  `
+  DELETE FROM secrets WHERE kind = 'agent_key';
+  `,
 ];
 
 /** Open (creating if needed) and migrate the database at path; ":memory:" for tests. */

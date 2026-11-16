@@ -1,7 +1,7 @@
 // Hosted mode (SPECDRIVEN_HOSTED=1): this server runs as one user's worker
 // behind the hosted gateway (src/gateway, docs/deployment-railway.md). The
-// gateway signs the user in, owns their GitHub token and agent keys, and
-// gives each user a worker of their own over a private socket. Several
+// gateway signs the user in, owns their GitHub access, and gives each user a
+// worker of their own over a private socket. Several
 // users' workers share one container, so nothing a worker serves may run
 // code or reach outside that user's folder: local coding agents, plugin
 // installs, the native folder chooser, IntelliJ and local-folder data repos

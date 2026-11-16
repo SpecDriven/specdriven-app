@@ -28,6 +28,22 @@ export function aiTabState(a: {
   return { enabled: true, hint: null };
 }
 
+/**
+ * What the hosted app's session button copies (specs/app/hosted-app.feature.md):
+ * the specs and scenarios checked in the sidebar, or — with none checked and
+ * nothing a plugin view bundles — the feature that is open. Null when there
+ * is nothing to copy, with the words that say so.
+ */
+export function hostedSessionPick<F extends { fileName: string }>(a: {
+  picked: F[];
+  bundled: number;
+  openFeature: string | null;
+}): { files: (F | { fileName: string })[] } | { hint: string } {
+  if (a.picked.length > 0 || a.bundled > 0) return { files: a.picked };
+  if (a.openFeature) return { files: [{ fileName: a.openFeature }] };
+  return { hint: "Open a feature, or select specs in the sidebar or single scenarios on their cards." };
+}
+
 export interface AiTabProps {
   /** The dialog's title, hint, name and "Run in". */
   dialog: PromptOptions;

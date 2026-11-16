@@ -303,6 +303,15 @@ transcript, the tool rows and the permission card are staged, and nothing
 runs or is written to disk. The pane shows a `Simulation` chip and a
 watermark, and the Code generation switch is hidden.
 
+### The hosted app
+
+The hosted app runs no coding agent and keeps no agent's API key. Its Start
+AI Session button opens no dialog: one click copies the prompt for the specs
+and scenarios you selected — or, with nothing selected, for the feature that
+is open — to the clipboard. Paste it into your AI agent running in another
+browser tab (Claude, ChatGPT, or any other). The note under the button says
+when the prompt is on the clipboard.
+
 ## 10. Troubleshooting
 
 Errors from starting a session show in a box under the Start AI Session

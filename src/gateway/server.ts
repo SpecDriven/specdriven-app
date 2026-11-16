@@ -36,13 +36,7 @@ import type { GithubLinks } from "./githubLinks";
 import type { Mailer } from "./mail";
 import { proxyToWorker } from "./proxy";
 import { HOUR_MS, MINUTE_MS, RateLimiter, type Limit } from "./rateLimit";
-import {
-  agentKeyNameProblem,
-  GITHUB_SECRET,
-  MAX_AGENT_KEYS,
-  MAX_SECRET_LENGTH,
-  type SecretStore,
-} from "./secrets";
+import { GITHUB_SECRET, MAX_SECRET_LENGTH, type SecretStore } from "./secrets";
 import { safeNextPath } from "./pages/next";
 import {
   APP_COOKIE,
@@ -242,9 +236,6 @@ export function createGateway(deps: GatewayDeps): Gateway {
             installUrl: await deps.github.app.installUrl().catch(() => null),
           }
         : null,
-      agentKeys: all
-        .filter((s) => s.kind === "agent_key")
-        .map((s) => ({ name: s.name, hint: s.hint, updatedAt: s.updatedAt })),
     };
   }
 
@@ -378,32 +369,6 @@ export function createGateway(deps: GatewayDeps): Gateway {
       }
     }
 
-    const keyMatch = url.pathname.match(/^\/auth\/secrets\/agent-keys\/([^/]+)$/);
-    if (keyMatch) {
-      const name = decodeURIComponent(keyMatch[1]!);
-      const problem = agentKeyNameProblem(name);
-      if (problem) return json({ error: problem }, 400);
-      if (req.method === "PUT") {
-        if (!limiter.hit(...limits.user("secrets", user.userId, 60))) return json(TOO_MANY, 429);
-        const value = (await body(req)).value;
-        if (typeof value !== "string" || !value.trim() || value.length > MAX_SECRET_LENGTH) {
-          return json({ error: "Paste the key" }, 400);
-        }
-        const exists = (await deps.secrets.list(user.userId)).some((s) => s.name === name);
-        if (!exists && deps.secrets.agentKeyCount(user.userId) >= MAX_AGENT_KEYS) {
-          return json({ error: `At most ${MAX_AGENT_KEYS} keys` }, 400);
-        }
-        await deps.secrets.put(user.userId, name, "agent_key", value.trim());
-        await deps.workers.restart(user.userId);
-        return json({ ok: true });
-      }
-      if (req.method === "DELETE") {
-        if (!limiter.hit(...limits.user("secrets", user.userId, 60))) return json(TOO_MANY, 429);
-        deps.secrets.delete(user.userId, name);
-        await deps.workers.restart(user.userId);
-        return json({ ok: true });
-      }
-    }
     return json({ error: "Not found" }, 404);
   }
 

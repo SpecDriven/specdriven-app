@@ -8,7 +8,6 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { agentKey, agentKeyEnvName, agentKeys } from "../src/server/agentKeys";
 import { handleApi } from "../src/server/api";
 import { normalizeCodeRepo } from "../src/server/members";
 import { currentEngine, setGitEngine } from "../src/server/git";
@@ -158,18 +157,6 @@ test("what a failed sync says to do names the app where the service has one", ()
     if (saved === undefined) delete process.env[GITHUB_APP_ENV];
     else process.env[GITHUB_APP_ENV] = saved;
   }
-});
-
-test("agent keys arrive as SPECDRIVEN_AGENT_KEY_<NAME> variables", () => {
-  expect(agentKeyEnvName("openai-prod")).toBe("SPECDRIVEN_AGENT_KEY_OPENAI_PROD");
-  const env = { SPECDRIVEN_AGENT_KEY_ANTHROPIC: "sk-a", SPECDRIVEN_AGENT_KEY_OPENAI_PROD: "sk-o", OTHER: "x" };
-  expect(agentKey("anthropic", env)).toBe("sk-a");
-  expect(agentKey("openai-prod", env)).toBe("sk-o");
-  expect(agentKey("missing", env)).toBeNull();
-  expect([...agentKeys(env).entries()]).toEqual([
-    ["ANTHROPIC", "sk-a"],
-    ["OPENAI_PROD", "sk-o"],
-  ]);
 });
 
 test("the user shown is the gateway's account, not the container's OS user", async () => {

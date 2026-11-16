@@ -20,7 +20,7 @@ Browser ──HTTPS──▶ Railway edge ──▶ gateway (src/gateway, :$PORT
                      worker per user = bun src/index.ts, SPECDRIVEN_HOSTED=1
                      unix socket /data/users/<id>/run/app.sock
                      HOME, settings, clones, temp files under /data/users/<id>/
-                     env: that user's agent keys only; no GitHub token
+                     env: no secrets; no GitHub token
                      GitHub: asks the gateway for an hour's token per repository
                      out: through the gateway's proxy, to GitHub only
 ```
@@ -116,12 +116,17 @@ Browser ──HTTPS──▶ Railway edge ──▶ gateway (src/gateway, :$PORT
 | Hand-over code | 32 random bytes in a redirect's url, from the account host to the app's. Stored as SHA-256 with the hash of a secret in that browser's cookie; works once, for a minute | `handover_codes` |
 | Email links (sign-up, reset) | 32 random bytes in the link's `#fragment`, so the token never reaches a server log or a `Referer` header. Stored as SHA-256, single use; sign-up links last 24 h, reset links 30 min | `email_tokens` |
 | GitHub account | With [the service's GitHub App](#github): the person's GitHub id and login, as they proved them once. No token is stored: each is made for an hour when a worker's git asks | `github_links` |
-| Agent API keys, and a GitHub token pasted before the app | AES-256-GCM with a fresh IV per secret. The owner's id and the secret's name are bound in as associated data | `secrets` |
+| A GitHub token pasted before the app | AES-256-GCM with a fresh IV per secret. The owner's id and the secret's name are bound in as associated data | `secrets` |
 | The GitHub App's private key and client secret | **Railway variables**, never on the volume or in the datastore | `SPECDRIVEN_GITHUB_APP_PRIVATE_KEY`, `SPECDRIVEN_GITHUB_APP_CLIENT_SECRET` |
 | Master key | 32 random bytes, a **Railway variable**, never on the volume | `SPECDRIVEN_MASTER_KEY` |
 
 A copy of the volume, or a backup of it, reveals no secret without the master
 key.
+
+No AI agent's API key is stored. A hosted worker runs no agent: its Start AI
+Session button copies the prompt for the selected specs, to paste into the
+person's own agent in another browser tab. Keys saved before this was so are
+deleted when the database is migrated (`src/gateway/db.ts`).
 
 ## Datastore
 
@@ -160,16 +165,11 @@ redeploy that loses the volume still knows everyone (`src/gateway/datastore.ts`)
   repo no longer open. Rotate it with `SPECDRIVEN_MASTER_KEYS_PREVIOUS` as
   usual. The re-sealed secrets are pushed on the next save.
 
-The browser can only write secrets: the account page shows each one's name
-and its last four characters. Secrets are decrypted only in the gateway,
-when it starts that person's worker. They reach the worker as environment
-variables:
-
-- each agent key as `SPECDRIVEN_AGENT_KEY_<NAME>`, read through
-  `src/server/agentKeys.ts`;
-- without [the service's GitHub App](#github), the pasted GitHub token as
-  `SPECDRIVEN_GITHUB_TOKEN_RECORD`, read through `createEnvBackend` in
-  `src/server/tokenStore.ts`.
+The browser can only write secrets: the account page shows a token's last
+four characters. Secrets are decrypted only in the gateway, when it starts
+that person's worker. Without [the service's GitHub App](#github), the pasted
+GitHub token reaches the worker as `SPECDRIVEN_GITHUB_TOKEN_RECORD`, read
+through `createEnvBackend` in `src/server/tokenStore.ts`.
 
 With the app, no GitHub token is in the environment at all: see
 [GitHub](#github).
@@ -566,7 +566,6 @@ When no variables are set:
 | `src/gateway/mail.ts` | Resend client and email texts |
 | `src/server/hostedMode.ts` | what a hosted worker refuses |
 | `src/server/hostedToken.ts`, `src/server/git/hostedCredential.ts` | a worker's side of the token socket, and git's credential helper that uses it |
-| `src/server/agentKeys.ts` | agent keys for future remote-agent integrations |
 
 ## Public read-only site
 

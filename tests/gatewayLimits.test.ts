@@ -30,7 +30,7 @@ function pool(name: string, limits: Partial<typeof DEFAULT_LIMITS>): { pool: Wor
       dataDir,
       entry: join(import.meta.dir, "..", "src", "index.ts"),
       idleMs: 60_000,
-      secrets: async (): Promise<UserSecrets> => ({ github: null, agentKeys: {} }),
+      secrets: async (): Promise<UserSecrets> => ({ github: null }),
       limits: { ...DEFAULT_LIMITS, ...limits },
       stdio: "ignore",
     }),

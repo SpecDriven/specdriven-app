@@ -40,10 +40,7 @@ beforeAll(async () => {
     dataDir,
     entry: join(import.meta.dir, "..", "src", "index.ts"),
     idleMs: 60_000,
-    secrets: async (userId): Promise<UserSecrets> => ({
-      github: null,
-      agentKeys: userId === A ? { anthropic: "sk-a" } : {},
-    }),
+    secrets: async (): Promise<UserSecrets> => ({ github: null }),
     baseEnv: { ...process.env, SPECDRIVEN_MASTER_KEY: "must-not-leak", RESEND_API_KEY: "must-not-leak" },
     emailOf: (userId) => (userId === A ? "a@example.com" : null),
     stdio: "ignore",
@@ -72,7 +69,7 @@ test("the worker environment carries the user's folders and secrets, not the gat
   const dirs = userDirs("/data", A);
   const env = workerEnv(
     dirs,
-    { github: { token: "ghp_x", login: "o", name: null, email: null, id: 1 }, agentKeys: { anthropic: "sk-a" } },
+    { github: { token: "ghp_x", login: "o", name: null, email: null, id: 1 } },
     {
       PATH: "/bin",
       TMPDIR: "/tmp/shared",
@@ -98,7 +95,8 @@ test("the worker environment carries the user's folders and secrets, not the gat
   expect(env.SPECDRIVEN_ROOT).toBe(`/data/users/${A}/root`);
   expect(env.SPECDRIVEN_HOSTED).toBe("1");
   expect(JSON.parse(env.SPECDRIVEN_GITHUB_TOKEN_RECORD!).token).toBe("ghp_x");
-  expect(env.SPECDRIVEN_AGENT_KEY_ANTHROPIC).toBe("sk-a");
+  // No AI agent's API key is kept, so none reaches a worker.
+  expect(Object.keys(env).filter((name) => name.startsWith("SPECDRIVEN_AGENT_KEY_"))).toEqual([]);
 });
 
 test("user ids that are not UUIDs never become paths", () => {
@@ -168,9 +166,9 @@ test("a worker refuses a request that does not carry its own key", async () => {
 test("the worker's environment sends git and its own requests through the gateway's proxy, when there is one", () => {
   const dirs = userDirs("/data", A);
   const base = { PATH: "/bin", HTTPS_PROXY: "http://corp:3128", NO_PROXY: "github.com", no_proxy: "github.com" };
-  const direct = workerEnv(dirs, { github: null, agentKeys: {} }, base);
+  const direct = workerEnv(dirs, { github: null }, base);
   expect(direct.HTTPS_PROXY).toBe("http://corp:3128");
-  const proxied = workerEnv(dirs, { github: null, agentKeys: {} }, base, null, [], { key: "k", egressPort: 4100 });
+  const proxied = workerEnv(dirs, { github: null }, base, null, [], { key: "k", egressPort: 4100 });
   for (const name of ["HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"]) expect(proxied[name]).toBe("http://127.0.0.1:4100");
   // Nothing goes round it.
   expect(proxied.NO_PROXY).toBeUndefined();
@@ -203,7 +201,7 @@ function isolatedPool(dataDir: string, spawner: { gatewayGid?: number } = {}): W
     spawner: new Spawner({ dataDir, entry, stdio: "ignore", ...spawner }),
     entry: join(import.meta.dir, "..", "src", "index.ts"),
     idleMs: 60_000,
-    secrets: async (): Promise<UserSecrets> => ({ github: null, agentKeys: {} }),
+    secrets: async (): Promise<UserSecrets> => ({ github: null }),
     emailOf: (userId) => (userId === A ? "a@example.com" : null),
     osUid: (userId) => uids[userId]!,
     repos: { get: () => [], set: (userId, repos) => noted.set(userId, repos) },
@@ -449,7 +447,7 @@ test.skipIf(!isolated)("a worker is confined to its own folders and the proxy's 
     dataDir: isoDir,
     entry,
     idleMs: 60_000,
-    secrets: async (): Promise<UserSecrets> => ({ github: null, agentKeys: {} }),
+    secrets: async (): Promise<UserSecrets> => ({ github: null }),
     osUid: () => UID_A,
     egressPort: proxy.port,
     // The system's own git: the tests' PATH is a folder outside what a worker may read.

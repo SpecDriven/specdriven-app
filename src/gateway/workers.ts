@@ -30,7 +30,6 @@
 // socket goes and the tokens it was given are revoked.
 
 import { join } from "node:path";
-import { agentKeyEnvName } from "../server/agentKeys";
 import { GITHUB_APP_ENV, IDENTITY_ENV, TOKEN_SOCKET_ENV } from "../server/hostedToken";
 import { TOKEN_ENV } from "../server/tokenStore";
 import { randomToken } from "./crypto";
@@ -208,7 +207,6 @@ export function workerEnv(
   } else if (secrets.github) {
     env[TOKEN_ENV] = JSON.stringify(secrets.github);
   }
-  for (const [name, value] of Object.entries(secrets.agentKeys)) env[agentKeyEnvName(name)] = value;
   return env;
 }
 

@@ -215,7 +215,7 @@ test("what stops a person's worker is limited, so it cannot be done without end"
   restarts = [];
   let refused = 0;
   for (let i = 0; i < 70; i++) {
-    const path = i % 2 ? "/auth/github/link" : "/auth/secrets/agent-keys/anthropic";
+    const path = i % 2 ? "/auth/github/link" : "/auth/secrets/github";
     if ((await call(path, { method: "DELETE", cookie: session })).status === 429) refused++;
   }
   expect(refused).toBe(10);

@@ -197,13 +197,13 @@ test("the app host's cookie reaches the worker and nothing else; the sign-in coo
   for (const path of ["/auth/me", "/auth/admin", "/auth/secrets/github", "/_gw/main.js"]) {
     expect((await call(APP, path, { cookie: app })).status).toBe(404);
   }
-  expect((await post(APP, "/auth/secrets/agent-keys/anthropic", { value: "sk" }, app)).status).toBe(404);
+  expect((await post(APP, "/auth/change-password", { current: "x", password: "y" }, app)).status).toBe(404);
   expect(seen.map((r) => new URL(r.url).pathname)).toEqual([]);
 
   // On the account host the app's token is no sign-in, under either cookie's name.
   for (const cookie of [app, `__Host-sd_session=${appToken}`]) {
     expect((await call(ACCOUNT, "/auth/me", { cookie })).status).toBe(401);
-    expect((await post(ACCOUNT, "/auth/secrets/agent-keys/anthropic", { value: "sk" }, cookie)).status).toBe(401);
+    expect((await post(ACCOUNT, "/auth/change-password", { current: "x", password: "y" }, cookie)).status).toBe(401);
   }
   // And the sign-in's token is no app session.
   for (const cookie of [signIn, `__Host-sd_app=${signIn.split("=")[1]}`]) {
