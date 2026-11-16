@@ -4,6 +4,10 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.285 — 2026-11-15
+
+- Start AI Session opens Claude Code on the web; the desktop app starts again ([#476](https://github.com/SpecDriven/specdriven-app/pull/476))
+
 ## v0.1.284 — 2026-11-15
 
 - Maintenance release.
