@@ -275,7 +275,7 @@ answer on two host names (`src/gateway/server.ts`):
 
 | Host | Serves | Its cookie |
 |---|---|---|
-| `ACCOUNT_URL`, e.g. `account.private.specdriven.app` | `/login`, `/signup`, `/forgot`, `/set-password`, `/account`, `/admin`, `/auth/*` | the sign-in: it can change secrets and roles |
+| `ACCOUNT_URL`, e.g. `account.specdriven.app` | `/login`, `/signup`, `/forgot`, `/set-password`, `/account`, `/admin`, `/auth/*` | the sign-in: it can change secrets and roles |
 | `PUBLIC_URL`, e.g. `private.specdriven.app` | the app's pages, `/api/*` to the person's worker, `/_session/me` and `/_session/logout` | reaches that person's worker and nothing else |
 
 - **Getting from one to the other.** A browser with no session on the app's
@@ -295,12 +295,41 @@ answer on two host names (`src/gateway/server.ts`):
 
 To turn it on:
 
-1. Add the account host as a second custom domain on the gateway's Railway
-   service ([on Cloudflare](#custom-domains-on-cloudflare): its own CNAME
-   and `_railway-verify` TXT record, same port).
-2. Set `ACCOUNT_URL` to it, with `https://`, and redeploy.
-3. Everyone signs in again: the sign-in cookie now belongs to the account
+1. **Pick the name.** Any host other than `PUBLIC_URL`'s will do. Behind
+   Cloudflare, pick one a single level under the zone, such as
+   `account.specdriven.app`: see the warning below.
+2. **Add it as a second custom domain** on the gateway's Railway service
+   ([on Cloudflare](#custom-domains-on-cloudflare): its own CNAME and
+   `_railway-verify` TXT record). Give it the **same port** as the service's
+   existing domain: both names reach the one gateway, which listens on
+   `PORT` (3000 in the image unless Railway sets another).
+3. **Open `https://<the account host>/healthz`** in a browser. It answers
+   `ok` once the certificate is in place. Do this before the next step.
+4. **Set `ACCOUNT_URL`** to it, with `https://`, and redeploy.
+5. Everyone signs in again: the sign-in cookie now belongs to the account
    host.
+
+**Set `ACCOUNT_URL` only once the name answers over https.** From then on
+every page of the app sends a browser with no session to the account host.
+If that host has no certificate, nobody can sign in. Unsetting `ACCOUNT_URL`
+and redeploying puts everything back on one host.
+
+**A name two levels under the zone fails behind Cloudflare's proxy.**
+Cloudflare's free certificate covers `specdriven.app` and one level below
+it (`*.specdriven.app`). A name such as `account.private.specdriven.app` is
+two levels down, so a proxied record for it (orange cloud) has no
+certificate, and the browser stops before any request is made:
+`SSL_ERROR_NO_CYPHER_OVERLAP` in Firefox, `ERR_SSL_VERSION_OR_CIPHER_MISMATCH`
+in Chrome. Three ways out:
+
+- use a one-level name, which the existing certificate covers;
+- or set that record to DNS only (grey cloud), so Railway serves its own
+  certificate for it;
+- or buy Cloudflare's Advanced Certificate Manager and issue a certificate
+  for the deeper name.
+
+The account host does not have to be under the app's host for the two to be
+kept apart: what matters is that they are different hosts.
 
 Without `ACCOUNT_URL` everything stays on `PUBLIC_URL`'s host, and the
 gateway logs at start that the account pages share it.
@@ -371,7 +400,7 @@ The services run under `specdriven.app`, whose DNS is on Cloudflare:
 
 | Service | Domain | Railway domain |
 |---|---|---|
-| gateway | `private.specdriven.app`, and `account.private.specdriven.app` for [the account host](#the-account-host) | `specdriven-app.up.railway.app` |
+| gateway | `private.specdriven.app`, and a second name for [the account host](#the-account-host) | `specdriven-app.up.railway.app` |
 | demo (`DEMO_MODE=1`) | `demo.specdriven.app` | `specdrivenapp-demo.up.railway.app` |
 | read-only site (`SPECDRIVEN_READONLY=1`) | `specs.specdriven.app` | assigned when the service is created |
 

@@ -101,7 +101,7 @@ everyone's.
 
 ```
 Browser
- ├─ account.private.specdriven.app ─▶ gateway (not root): sign-in, secrets, admin
+ ├─ account.specdriven.app ─────────▶ gateway (not root): sign-in, secrets, admin
  └─ private.specdriven.app ─────────▶ gateway (not root): app pages, /api proxy
                                           │ unix socket: start / stop / status
                                           ▼
@@ -265,9 +265,12 @@ The split and the worker's key need nothing. The other two parts do:
      step 1.
    - `BROKEN`: a worker could not do something it must. Set
      `SPECDRIVEN_WORKER_SANDBOX=off` and report it.
-2. **Add the account host.** Add `account.private.specdriven.app` as a
-   second custom domain on the same Railway service, then set `ACCOUNT_URL`
-   to it. Everyone signs in again. [Hosted SpecDriven on
+2. **Add the account host.** Add a second custom domain to the same Railway
+   service, check that it answers over https, and only then set
+   `ACCOUNT_URL` to it. Everyone signs in again. Behind Cloudflare's proxy
+   the name must be one level under the zone, such as
+   `account.specdriven.app`: the proposal's `account.private.specdriven.app`
+   has no certificate there. [Hosted SpecDriven on
    Railway](deployment-railway.md#the-account-host) has the steps.
 
 The tests are in `tests/gatewaySpawner.test.ts`, `tests/gatewaySandbox.test.ts`,
