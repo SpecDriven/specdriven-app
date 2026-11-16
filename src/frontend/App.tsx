@@ -2310,6 +2310,15 @@ export function App() {
     if (selected && !dirty && !editing && !conflict && !descPending && renameDraft === null) {
       loads.push(openFeature(selected));
     }
+    // The public specs site re-reads the open page too (specs/app/
+    // public-specs-site.feature.md "A change pushed to the spec repo shows up
+    // on the site"), and a scenario's page there is the editor pane — which
+    // the rule above leaves alone so a refresh cannot clobber an edit. Nothing
+    // is edited on that site, so the pane re-opens on the scenario as the
+    // server now has it, once the feature changed.
+    if (readOnly && selected && editing && editing.index !== null && !editing.isNew) {
+      loads.push(refreshReadOnlyPane(selected, editing.scenario));
+    }
     // A pulled README shows up too — unless the home editor holds an edit
     // that hasn't landed yet.
     if (!selected && !pluginViewRef.current && readmeText.current === readmeSaved.current) {
@@ -2323,6 +2332,20 @@ export function App() {
   };
   const refreshViewRef = useRef(refreshView);
   refreshViewRef.current = refreshView;
+
+  /**
+   * The read-only site's tick for an open scenario page: the feature as the
+   * server has it now, and when it differs from the one on screen, the same
+   * scenario's page opened again on it — by name and version, the way its
+   * link resolves, so a scenario that is gone says so and closes.
+   */
+  const refreshReadOnlyPane = async (file: string, open: Scenario): Promise<void> => {
+    const res = await fetch(`/api/features/${encodeURIComponent(file)}`).catch(() => null);
+    if (!res?.ok) return;
+    const fresh = featureFromResponse(await res.json(), file);
+    if (JSON.stringify(fresh) === JSON.stringify(feature)) return;
+    await openFeature(file, { scenario: { slug: slugify(open.name), version: open.version }, pane: true });
+  };
 
   // Mirror the server's cron reload: refresh on the same cadence so pulled
   // changes show up.
