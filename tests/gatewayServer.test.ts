@@ -28,6 +28,8 @@ let secrets: SecretStore;
 /** What each stand-in worker saw, by user id. */
 let seen: Map<string, Request[]>;
 let restarts: string[];
+let removes: [string, number | null][];
+let removeFails: boolean;
 const servers = new Map<string, ReturnType<typeof Bun.serve>>();
 
 beforeAll(async () => {
@@ -91,6 +93,8 @@ beforeEach(async () => {
   sent = [];
   seen = new Map();
   restarts = [];
+  removes = [];
+  removeFails = false;
   db = openDatabase(":memory:");
   // The admins' list (src/gateway/admin.ts) lets the whole test domain sign up.
   db.query("INSERT INTO allowed_emails (email, created_at) VALUES ('@example.com', 0)").run();
@@ -99,6 +103,10 @@ beforeEach(async () => {
     workerFor: async (userId) => ({ socket: standIn(userId), key: `key-of-${userId}` }),
     touch: () => {},
     restart: async (userId) => void restarts.push(userId),
+    remove: async (userId, uid) => {
+      if (removeFails) throw new Error("rm: busy");
+      removes.push([userId, uid]);
+    },
   };
   gateway = createGateway({
     db,
@@ -462,3 +470,46 @@ test("an admin gives and takes the admin role, which applies at once, but never 
   expect((await call("/auth/admin", { cookie: boss })).status).toBe(403);
 });
 
+
+test("an admin deletes an account, which is signed out and loses its worker and folder before the account goes", async () => {
+  const boss = await signUpAdmin();
+  const other = await signUp("b@example.com");
+  const list = (await (await call("/auth/admin", { cookie: boss })).json()) as {
+    you: string;
+    users: { id: string; email: string }[];
+  };
+  const otherId = list.users.find((u) => u.email === "b@example.com")!.id;
+  db.query("UPDATE users SET os_uid = 200001 WHERE id = ?").run(otherId);
+
+  // Not by a user, not yourself, not an account that is not there.
+  expect((await del(`/auth/admin/users/${list.you}`, other)).status).toBe(403);
+  const self = await del(`/auth/admin/users/${list.you}`, boss);
+  expect(self.status).toBe(400);
+  expect(((await self.json()) as { error: string }).error).toBe("You can't delete your own account");
+  expect((await del(`/auth/admin/users/${crypto.randomUUID()}`, boss)).status).toBe(404);
+  expect(removes).toEqual([]);
+
+  expect((await del(`/auth/admin/users/${otherId}`, boss)).status).toBe(200);
+  expect(removes).toEqual([[otherId, 200001]]);
+  expect((await call("/auth/me", { cookie: other })).status).toBe(401);
+  expect((await post("/auth/login", { email: "b@example.com", password: PASSWORD })).status).toBe(401);
+  const after = (await (await call("/auth/admin", { cookie: boss })).json()) as { users: { email: string }[] };
+  expect(after.users.map((u) => u.email)).toEqual(["boss@example.com"]);
+  expect((await del(`/auth/admin/users/${otherId}`, boss)).status).toBe(404);
+
+  // Still allowed (@example.com), so the address can make a new account.
+  await signUp("b@example.com");
+});
+
+test("when an account's folder cannot be deleted, the account stays, signed out", async () => {
+  const boss = await signUpAdmin();
+  const other = await signUp("b@example.com");
+  const list = (await (await call("/auth/admin", { cookie: boss })).json()) as { users: { id: string; email: string }[] };
+  const otherId = list.users.find((u) => u.email === "b@example.com")!.id;
+  removeFails = true;
+  const res = await del(`/auth/admin/users/${otherId}`, boss);
+  expect(res.status).toBe(500);
+  expect(((await res.json()) as { error: string }).error).toMatch(/account is kept, signed out/);
+  expect((await call("/auth/me", { cookie: other })).status).toBe(401);
+  expect((await post("/auth/login", { email: "b@example.com", password: PASSWORD })).status).toBe(200);
+});

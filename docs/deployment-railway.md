@@ -291,10 +291,18 @@ user menu, which opens `/admin`:
   (`name@example.com`) or a whole domain (`@example.com`). Adding an address
   can email it an invitation to the sign-up page. The list decides sign-up
   only: taking an address off it stops new sign-ups, while an account
-  already made stays.
+  already made stays until an admin deletes it.
 - **Users:** every account, with its role. An admin makes another account an
   admin, or an admin a user, and the change applies on that person's next
   request. The last admin can't stop being one, so there is always one.
+- **Delete** on another account (`DELETE /auth/admin/users/<id>`) signs that
+  person out everywhere, stops their worker and every process of their uid,
+  deletes their folder (`users/<id>`, through the root spawner), and only
+  then deletes the account with its sessions, secrets, GitHub link and
+  recent repos; the next datastore save drops it from the repo. If the
+  folder can't be deleted the account is kept, signed out, and the admin
+  can try again. Nobody deletes their own account there, and the last admin
+  can't be deleted. The address can sign up again while it is allowed.
 
 Only admins can open `/admin` or call `/auth/admin/*`; for anyone else they
 answer 403.
@@ -553,7 +561,7 @@ When no variables are set:
 | `src/gateway/appCsp.ts` | the Content-Security-Policy on the app's pages |
 | `src/gateway/volume.ts` | the volume's layout and the gateway's own folder |
 | `src/gateway/accounts.ts` | sign-up, login, reset and change password |
-| `src/gateway/admin.ts` | roles, the allowed emails and invitations, the first admin |
+| `src/gateway/admin.ts` | roles, the allowed emails and invitations, deleting an account, the first admin |
 | `src/gateway/sessions.ts`, `rateLimit.ts` | cookies and sessions; fixed-window limits |
 | `src/gateway/crypto.ts`, `secrets.ts` | AES-GCM keyring and the per-user secret store |
 | `src/gateway/githubApp.ts`, `githubLinks.ts` | the service's GitHub App: who a person is on GitHub, and an hour's token for one repository |

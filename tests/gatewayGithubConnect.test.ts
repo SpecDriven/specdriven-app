@@ -62,6 +62,7 @@ async function start(withApp = true): Promise<void> {
       workerFor: async () => ({ socket: workerSocket, key: "k" }),
       touch: () => {},
       restart: async (userId) => void restarts.push(userId),
+      remove: async () => {},
     },
     assets,
     appShell: { serve: async () => null },

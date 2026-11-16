@@ -3,6 +3,8 @@
 // list of who may create an account — whole addresses (a@b.c) or domains
 // (@b.c) — and give or take the admin role; users only use the app. The
 // list decides sign-up only: taking an address off it closes no account.
+// Deleting one does (server.ts): its sessions end, its worker stops, its
+// folder goes, and then its row, with everything tied to it.
 //
 // The first admin is written into the code: a database with no admin makes
 // ORIGINAL_ADMIN one, with a password chosen for it and kept here only as
@@ -143,15 +145,47 @@ export class Admin {
     return this.db.transaction((): { ok: true } | { error: string } => {
       const row = this.db.query("SELECT role FROM users WHERE id = ?").get(userId) as { role: Role } | null;
       if (!row) return { error: "There is no such account" };
-      if (row.role === "admin" && role !== "admin") {
-        const { count } = this.db.query("SELECT COUNT(*) AS count FROM users WHERE role = 'admin'").get() as {
-          count: number;
-        };
-        if (count <= 1) return { error: "Make someone else an admin first: there must always be one" };
+      if (row.role === "admin" && role !== "admin" && this.adminCount() <= 1) {
+        return { error: "Make someone else an admin first: there must always be one" };
       }
       this.db.query("UPDATE users SET role = ? WHERE id = ?").run(role, userId);
       return { ok: true };
     })();
+  }
+
+  /**
+   * Whether `actorId` may delete the account `userId`, and the uid it was
+   * given (null if it never had one). Nobody deletes their own account here,
+   * and the last admin stays.
+   */
+  canDelete(actorId: string, userId: string): { ok: true; uid: number | null } | { error: string } {
+    const row = this.db.query("SELECT role, os_uid AS uid FROM users WHERE id = ?").get(userId) as
+      | { role: Role; uid: number | null }
+      | null;
+    if (!row) return { error: "There is no such account" };
+    if (userId === actorId) return { error: "You can't delete your own account" };
+    if (row.role === "admin" && this.adminCount() <= 1) {
+      return { error: "Make someone else an admin first: there must always be one" };
+    }
+    return { ok: true, uid: row.uid };
+  }
+
+  /**
+   * Delete the account's row; its sessions, links, secrets, GitHub account
+   * and recent repos go with it (db.ts). Run it once its worker is stopped
+   * and its folder deleted (WorkerPool.remove). False when it was gone, or
+   * is the last admin.
+   */
+  deleteUser(userId: string): boolean {
+    return this.db.transaction(() => {
+      const row = this.db.query("SELECT role FROM users WHERE id = ?").get(userId) as { role: Role } | null;
+      if (!row || (row.role === "admin" && this.adminCount() <= 1)) return false;
+      return this.db.query("DELETE FROM users WHERE id = ?").run(userId).changes > 0;
+    })();
+  }
+
+  private adminCount(): number {
+    return (this.db.query("SELECT COUNT(*) AS count FROM users WHERE role = 'admin'").get() as { count: number }).count;
   }
 
   private emailOf(userId: string): string | null {

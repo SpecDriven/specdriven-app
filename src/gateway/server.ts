@@ -58,6 +58,8 @@ export interface Workers {
   workerFor(userId: string): Promise<WorkerAddress>;
   touch(userId: string): void;
   restart(userId: string): Promise<void>;
+  /** Stop the worker for good and delete the person's folder: their account is being deleted. */
+  remove(userId: string, uid: number | null): Promise<void>;
 }
 
 export interface GatewayDeps {
@@ -460,6 +462,25 @@ export function createGateway(deps: GatewayDeps): Gateway {
       if (role !== "admin" && role !== "user") return json({ error: "The role is admin or user" }, 400);
       const result = admin.setRole(decodeURIComponent(roleMatch[1]!), role);
       if ("error" in result) return json({ error: result.error }, 400);
+      return json({ ok: true });
+    }
+
+    // Delete an account: sign it out first, so nothing starts its worker
+    // again, then stop the worker and delete the folder; the row goes last,
+    // and only once the folder is gone, as its uid goes to the next account.
+    const userMatch = url.pathname.match(/^\/auth\/admin\/users\/([^/]+)$/);
+    if (userMatch && req.method === "DELETE") {
+      const id = decodeURIComponent(userMatch[1]!);
+      const check = admin.canDelete(user.userId, id);
+      if ("error" in check) return json({ error: check.error }, check.error === "There is no such account" ? 404 : 400);
+      sessions.revokeAll(id);
+      try {
+        await deps.workers.remove(id, check.uid);
+      } catch (e) {
+        console.error(`deleting the folder of ${id} failed: ${(e as Error).message}`);
+        return json({ error: "Their files could not be deleted, so the account is kept, signed out. Try again." }, 500);
+      }
+      if (!admin.deleteUser(id)) return json({ error: "There is no such account" }, 404);
       return json({ ok: true });
     }
     return json({ error: "Not found" }, 404);
