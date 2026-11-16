@@ -9,11 +9,16 @@ export interface HostedAccount {
   admin: boolean;
 }
 
-/** What to do about a clone the hosted worker could not make, or null. */
-export function hostedCloneHint(error: string | null): string | null {
+/**
+ * What to do about a clone the hosted worker could not make, or null.
+ * `githubApp`: the service reaches GitHub through its own app, not a pasted token.
+ */
+export function hostedCloneHint(error: string | null, githubApp = false): string | null {
   if (!error) return null;
   if (/write access to repository not granted|returned error: 40[13]|authentication (failed|required)/i.test(error)) {
-    return "The GitHub token on your account page cannot read and write this repository: give it access, or replace it.";
+    return githubApp
+      ? "SpecDriven cannot reach this repository: the SpecDriven GitHub App must be installed on it, and the GitHub account you connected must have access to it."
+      : "The GitHub token on your account page cannot read and write this repository: give it access, or replace it.";
   }
   return null;
 }

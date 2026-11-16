@@ -31,6 +31,8 @@ import { appCsp, type AppCspMode } from "./appCsp";
 import type { AppShell } from "./appShell";
 import { ASSET_PREFIX, type GatewayAssets, type PageName } from "./assets";
 import { hashToken, randomToken } from "./crypto";
+import type { GithubIdentity } from "./githubApp";
+import type { GithubLinks } from "./githubLinks";
 import type { Mailer } from "./mail";
 import { proxyToWorker } from "./proxy";
 import { HOUR_MS, MINUTE_MS, RateLimiter, type Limit } from "./rateLimit";
@@ -45,6 +47,7 @@ import { safeNextPath } from "./pages/next";
 import {
   APP_COOKIE,
   clearedCookie,
+  GITHUB_STATE_COOKIE,
   HANDOVER_COOKIE,
   HANDOVER_STATE_MS,
   readCookie,
@@ -83,8 +86,27 @@ export interface GatewayDeps {
   appCsp?: AppCspMode;
   /** Who a GitHub token belongs to (src/server/auth.ts); replaced in tests. */
   githubIdentity?: (token: string) => Promise<TokenRecord>;
+  /**
+   * The service's own GitHub App (githubApp.ts), where it has one: a person
+   * connects their GitHub account on the account page, and no token of
+   * theirs is pasted or stored (docs/hosted-tenant-isolation.md "Step 3").
+   */
+  github?: GithubConnect | null;
   now?: () => number;
 }
+
+/** What the account page needs of the GitHub App and of who has connected (githubApp.ts, githubLinks.ts). */
+export interface GithubConnect {
+  app: {
+    authorizeUrl(state: string, redirectUri: string): string;
+    identify(code: string, redirectUri: string): Promise<GithubIdentity>;
+    installUrl(): Promise<string>;
+  };
+  links: Pick<GithubLinks, "get" | "set" | "delete" | "ownerOf">;
+}
+
+/** How long a browser may take at GitHub before its way back is forgotten. */
+const GITHUB_STATE_MS = 10 * MINUTE_MS;
 
 export interface Gateway {
   fetch(req: Request, server?: { requestIP(req: Request): { address: string } | null }): Promise<Response>;
@@ -207,10 +229,19 @@ export function createGateway(deps: GatewayDeps): Gateway {
   async function me({ userId, email, role }: User) {
     const all = await deps.secrets.list(userId);
     const github = all.find((s) => s.name === GITHUB_SECRET);
+    const link = deps.github?.links.get(userId) ?? null;
     return {
       email,
       role,
       github: github ? { login: github.meta.login ?? null, hint: github.hint, updatedAt: github.updatedAt } : null,
+      // Present where GitHub goes through the service's app: the account
+      // the person connected, and where the app is installed on a repository.
+      githubApp: deps.github
+        ? {
+            account: link ? { login: link.login, linkedAt: link.linkedAt } : null,
+            installUrl: await deps.github.app.installUrl().catch(() => null),
+          }
+        : null,
       agentKeys: all
         .filter((s) => s.kind === "agent_key")
         .map((s) => ({ name: s.name, hint: s.hint, updatedAt: s.updatedAt })),
@@ -282,7 +313,17 @@ export function createGateway(deps: GatewayDeps): Gateway {
     }
     if (!url.pathname.startsWith("/auth/")) return null;
     if (route === "GET /auth/handover" && hosts) return handOver(ctx);
+    // The way back from GitHub is a page load, not a call: a browser that is
+    // not signed in is sent to sign in.
+    if (deps.github && route === "GET /auth/github/callback") {
+      if (!user) return redirect("/login?next=%2Faccount");
+      return githubCallback(ctx, user, deps.github);
+    }
     if (!user) return json({ error: "Sign in first" }, 401);
+    // Setting out is a write: it must come from the account page itself
+    // (the Origin check above), never from a link or a page somewhere else
+    // that a signed-in browser was sent to.
+    if (deps.github && route === "POST /auth/github/connect") return githubConnect(ctx, user, deps.github);
 
     if (route === "GET /auth/me") return json(await me(user));
 
@@ -299,7 +340,18 @@ export function createGateway(deps: GatewayDeps): Gateway {
       return adminApi(req, url, user);
     }
 
+    if (deps.github && route === "DELETE /auth/github/link") {
+      if (!limiter.hit(...limits.user("secrets", user.userId, 60))) return json(TOO_MANY, 429);
+      deps.github.links.delete(user.userId);
+      // Its worker stops, and the tokens it was given end with it (workers.ts).
+      await deps.workers.restart(user.userId);
+      return json({ ok: true });
+    }
+
     if (url.pathname === "/auth/secrets/github") {
+      if (req.method === "PUT" && deps.github) {
+        return json({ error: "This service reaches GitHub through its app — connect GitHub instead of pasting a token" }, 400);
+      }
       if (req.method === "PUT") {
         if (!limiter.hit(...limits.user("secrets", user.userId, 60))) return json(TOO_MANY, 429);
         const token = (await body(req)).token;
@@ -318,6 +370,8 @@ export function createGateway(deps: GatewayDeps): Gateway {
         return json({ ok: true, login });
       }
       if (req.method === "DELETE") {
+        // Each of these stops the person's worker: not without end.
+        if (!limiter.hit(...limits.user("secrets", user.userId, 60))) return json(TOO_MANY, 429);
         deps.secrets.delete(user.userId, GITHUB_SECRET);
         await deps.workers.restart(user.userId);
         return json({ ok: true });
@@ -344,12 +398,70 @@ export function createGateway(deps: GatewayDeps): Gateway {
         return json({ ok: true });
       }
       if (req.method === "DELETE") {
+        if (!limiter.hit(...limits.user("secrets", user.userId, 60))) return json(TOO_MANY, 429);
         deps.secrets.delete(user.userId, name);
         await deps.workers.restart(user.userId);
         return json({ ok: true });
       }
     }
     return json({ error: "Not found" }, 404);
+  }
+
+  // The secret a browser carries to GitHub and back is signed for the
+  // account that started: a code GitHub made for someone else's sign-in, sent
+  // to this browser, comes with no state this browser was given.
+  const githubState = (nonce: string, userId: string) =>
+    `${nonce}.${hashToken(`${stateKey}|github|${userId}|${nonce}`).slice(0, 32)}`;
+  const githubCallbackUrl = () => `${baseUrl}/auth/github/callback`;
+
+  /**
+   * Where to go at GitHub to say which account there is this person's, and
+   * the secret this browser must bring back with GitHub's answer.
+   */
+  function githubConnect(ctx: Ctx, user: User, github: GithubConnect): Response {
+    if (!limiter.hit(...limits.user("github", user.userId, 30))) return json(TOO_MANY, 429);
+    const state = githubState(randomToken(), user.userId);
+    return json({ url: github.app.authorizeUrl(state, githubCallbackUrl()) }, 200, {
+      "Set-Cookie": sessionCookie(state, cookieOpts, GITHUB_STATE_MS, GITHUB_STATE_COOKIE),
+    });
+  }
+
+  /**
+   * Back from GitHub with a code that stands for the account the person
+   * chose there. It is kept as who they are on GitHub (githubApp.ts), the
+   * token they pasted before is deleted, and their worker starts again
+   * without one. Every way this ends is the account page, which says how.
+   */
+  async function githubCallback(ctx: Ctx, user: User, github: GithubConnect): Promise<Response> {
+    const { req, url } = ctx;
+    const back = (problem?: string) =>
+      redirect(`/account${problem ? `?github=${problem}` : ""}`, { "Set-Cookie": clearedCookie(cookieOpts, GITHUB_STATE_COOKIE) });
+    const state = url.searchParams.get("state");
+    // GitHub also comes here after the app was installed on a repository,
+    // with no state of ours: nothing to do but show the account page.
+    if (!state && url.searchParams.has("setup_action")) return redirect("/account");
+    const kept = readCookie(req, cookieOpts, GITHUB_STATE_COOKIE);
+    const nonce = state?.split(".")[0] ?? "";
+    if (!state || state !== kept || githubState(nonce, user.userId) !== state) return back("state");
+    if (url.searchParams.has("error")) return back("cancelled");
+    const code = url.searchParams.get("code");
+    if (!code || code.length > 512) return back("state");
+    let who: GithubIdentity;
+    try {
+      who = await github.app.identify(code, githubCallbackUrl());
+    } catch (e) {
+      console.error(`connecting GitHub for ${user.userId} failed: ${(e as Error).message}`);
+      return back("failed");
+    }
+    // One GitHub account, one person here. Someone signed in to the wrong
+    // account — sent there by another person's link — would otherwise hand
+    // that account their own repositories.
+    const owner = github.links.ownerOf(who.id);
+    if (owner !== null && owner !== user.userId) return back("taken");
+    github.links.set(user.userId, who);
+    deps.secrets.delete(user.userId, GITHUB_SECRET);
+    await deps.workers.restart(user.userId);
+    return back();
   }
 
   /** The admin page's API (admin.ts), for a user the caller found to be an admin. */

@@ -1,8 +1,10 @@
-# Hosted tenant isolation: proposal
+# Hosted tenant isolation
 
-**Status:** 2026-11-15. Steps 1 and 2 are built, with tests, and not yet
+**Status:** 2026-11-15. All three steps are built, with tests, and not yet
 deployed. Step 2 needs two things done on Railway before it is all in force:
-see [Deploying step 2](#deploying-step-2). Step 3 is a proposal.
+see [Deploying step 2](#deploying-step-2). Step 3 is off until a GitHub App
+is registered and its three variables are set: see
+[Deploying step 3](#deploying-step-3).
 
 This is a plan for keeping people apart more firmly in the hosted app
 (`private.specdriven.app`, described in
@@ -97,6 +99,14 @@ everyone's.
   attacker's own requests to that person's worker.
 - Row 11 is open. Step 3 is for it.
 
+**After step 3**, once the service has its GitHub App:
+
+- Row 11 is closed for everyone who has connected GitHub. A worker holds no
+  GitHub token. What its git is handed lasts an hour and reaches one
+  repository, and ends when the worker stops.
+- A person who has not connected yet keeps the token they pasted before,
+  until they do. Connecting deletes it. No new token can be pasted.
+
 ## Target design
 
 ```
@@ -108,10 +118,10 @@ Browser
                                       spawner (root, no network, no HTTP)
                                           │ own uid + limits + file and network rules
                                           ▼
-                       worker per person: own folder, own tmp, no stored token
-                                          │ the only way out
-                                          ▼
-                                 outbound proxy ─▶ GitHub only
+                       worker per person: own folder, own tmp, no GitHub token
+                          │ own socket: "a token for owner/repo"      │ the only way out
+                          ▼                                           ▼
+                       gateway ─▶ GitHub App: one hour, one repo   outbound proxy ─▶ GitHub only
 ```
 
 ## Step 1: close the gaps inside the current container
@@ -284,23 +294,143 @@ one is started and has it try to read a file anyone may read, write to
 
 ## Step 3: make a stolen token worth little
 
-**Replace personal access tokens with a GitHub App.**
+Built. It replaces personal access tokens with a GitHub App of the
+service's own, and is in force once that app is registered: see
+[Deploying step 3](#deploying-step-3). Until then people paste a token as
+before.
 
-- A person installs the SpecDriven GitHub App on their specs repository, once.
-- When a worker needs to fetch or push, the gateway asks GitHub for a token
-  that lasts one hour and covers that one repository.
-- The token reaches git through a socket only that worker can open. The
-  gateway knows which tenant is asking from the uid on the other end of the
-  socket, which the worker cannot fake.
+| Change | Closes | Where |
+|---|---|---|
+| **A person connects GitHub once**, on the account page. They are sent to GitHub and back, and the gateway learns which GitHub account is theirs. The token that sign-in produces is used for that one question and revoked at once. What is kept is an id and a login, and no secret. | 11 | `identify` in `src/gateway/githubApp.ts`, `githubCallback` in `src/gateway/server.ts`, `src/gateway/githubLinks.ts` |
+| **Only the browser that set out comes back.** The trip to GitHub carries a secret that is signed for the account that started it and kept in that browser's cookie. A code GitHub made for someone else's sign-in, sent to this browser, links nothing. | 11 | `githubConnect`, `githubCallback` in `src/gateway/server.ts` |
+| **Only the account page sets out, and one GitHub account is one person's here.** Setting out for GitHub is a write that must come from the account page itself, so a link, or a page a worker serves, cannot send a signed-in browser on that trip. A GitHub account that is connected to one hosted account is refused for another. | 11 | `githubConnect`, `githubCallback` in `src/gateway/server.ts`, `ownerOf` in `src/gateway/githubLinks.ts` |
+| **A worker holds no GitHub token.** Its environment says who the person is on GitHub and where to ask. The pasted token is no longer handed over, and connecting deletes it. | 11 | `workerEnv` in `src/gateway/workers.ts` |
+| **A token is made when git asks, for the one repository it asks for.** It lasts an hour. The gateway makes it only when the app is installed on that repository and the person's GitHub account has access to it there, and it can write only if the person can. A person who can only read gets a token that can only read. | 11 | `repositoryToken` in `src/gateway/githubApp.ts` |
+| **What a person may reach is asked of GitHub each time a token is made**, never remembered. Access taken away on GitHub is gone here within the hour. The check goes by the account's id, since a login can pass to somebody else. | 11 | `repositoryToken` in `src/gateway/githubApp.ts` |
+| **The token reaches git through a socket only that worker can open.** The spawner makes a sixth folder for each person, `gate`, which belongs to the gateway; only that worker's group may pass through it. The gateway listens there. Git's credential helper connects, names the repository, and hands git the answer. The token is never in the worker's environment or on disk. | 11 | `src/gateway/tokenSocket.ts`, `prepareDirs` in `src/gateway/spawner.ts`, `src/server/git/hostedCredential.ts` |
+| **The gateway knows who is asking from the uid on the other end**, which the kernel reports and a worker cannot choose. Anyone else is hung up on before a byte is read: another worker cannot reach the socket at all, and root, which can, is not answered. | 11 | `peerUid` in `src/gateway/tokenSocket.ts` |
+| **A worker's tokens end with it.** When a worker stops, for any reason, the gateway revokes what it gave it. Disconnecting GitHub stops the worker. | 4, 11 | `release` in `src/gateway/workers.ts`, `forget` in `src/gateway/githubLinks.ts` |
+| **A worker cannot make the gateway ask GitHub without end.** A token is handed out again until its hour is nearly over, a refusal stands for a minute, and one person gets thirty questions to GitHub in ten minutes, however often their worker stops and starts. Everyone together gets two hundred. What stops a worker from the account page is limited too. | 7 | `RepoTokens` in `src/gateway/githubLinks.ts`, `authApi` in `src/gateway/server.ts` |
+| **A refusal says the same thing either way**: the app is not installed on the repository, or the person has no access to it. Told apart, the two would tell a guesser which private repositories exist. | 11 | `repositoryToken` in `src/gateway/githubApp.ts` |
+| **The token is for the repository GitHub named.** GitHub says which repository a token is for; one for any other is not handed on, the final token is asked for by that repository's id, and a repository that answers with a redirect, because it was renamed or moved, is not followed. | 11 | `mint` in `src/gateway/githubApp.ts` |
 
-Nothing long-lived is stored for GitHub any more, so the master key and the
-datastore repository protect much less. Whoever takes over a worker gets one
-repository for at most an hour. Closes row 11.
+Nothing long-lived is stored for a person's GitHub any more, so the master
+key and the datastore repository protect much less: agent keys only. Whoever
+takes over a worker gets the repositories that person can reach, one at a
+time, for at most an hour each, and only while the worker runs.
 
-Agent keys stay as they are, encrypted under the master key. A key of its
-own per person, wrapped by the master key, would let deleting an account
-make its stored secrets unreadable for good, including the copies in the
-datastore repository's history.
+### What a second read of the code found
+
+As in step 2, the new code was read once more by a reviewer who had not
+written it, looking only for ways in. It found no way to another person's
+files or to root. It found six weaknesses, all fixed and each with a test:
+
+- **The count of questions to GitHub began again with every new worker.**
+  An account holder could stop their worker from the account page in a
+  loop, and a taken-over worker could simply exit, and use up the allowance
+  at GitHub that every person shares. The count is now the person's and
+  outlives the worker, there is one for everyone together, and the calls
+  that stop a worker are limited.
+- **A GitHub account could be connected to the wrong hosted account.**
+  Someone sent another person's set-password link ends up signed in to
+  that person's account, where a page the other person's worker serves
+  could send the browser to GitHub and back. GitHub does not ask again
+  about an app a person has already approved, so the attacker's account
+  would have been handed the victim's repositories. Setting out is now a
+  write from the account page itself, and a GitHub account that is already
+  someone's here is refused. This closes it where the account pages have
+  their own host; on one shared host a worker's page is the account page's
+  own origin, which is why step 2 gives them two.
+- **The two refusals differed**, and so told a guesser which private
+  repositories exist in an organisation that installed the app.
+- **Revoking was fired and forgotten.** A shutdown now waits a few seconds
+  for GitHub to take the revocations, a failed one is logged, and a token
+  whose repository the person can no longer reach is ended when that is
+  found out.
+- **A renamed repository's redirect was followed** when looking it up. It
+  failed safely, but by luck of how the first token was scoped.
+- **A worker still starting was not stopped at shutdown.**
+
+### What is new to protect
+
+The app's **private key** is now the one secret that reaches every
+connected person's repositories: whoever holds it can make a token for any
+repository the app is installed on. It is a variable of the service, like
+the master key. It is never written to the volume or the datastore, and no
+worker's environment has it. The gateway holds it, and step 2 is what keeps
+the gateway apart from the workers.
+
+### What differs from the proposal
+
+- **A person connects their GitHub account**, which the proposal did not
+  say. Installing the app on a repository does not tell the gateway who
+  installed it: the number GitHub passes back afterwards can be typed in by
+  anyone. Without a proven account, one person could ask for a token for a
+  repository another person installed the app on.
+- **A token is for the person as well as the repository.** The proposal
+  gave one to whoever's worker asked for a repository the app was installed
+  on. Now the person's own access on GitHub decides, each time.
+- **The socket is one per worker**, in a folder of its own, and the uid on
+  the other end is checked as well. The proposal had the uid alone. Two
+  locks cost little here, and the folder keeps other workers from reaching
+  the socket in the first place.
+- **The open question is settled for the installation's token.** Only that
+  kind lasts an hour and can be held to one repository. A push is recorded
+  on GitHub as the app's; the commits in it are still the person's.
+
+### What it does not do
+
+- **A push shows the app's name** in GitHub's own record of who pushed. The
+  commit author is the person.
+- **A rule on GitHub that names people** (a branch only some may push to)
+  sees the app, not the person. The gateway checks that the person may write
+  to the repository, not to each branch.
+- **A taken-over worker still reaches every repository its person can**,
+  where the app is installed, by asking for each. It gets them one at a time
+  and each token dies within the hour, or sooner when the worker stops.
+- **An organisation's single sign-on and IP allow-list do not apply to the
+  app's tokens.** A person GitHub would turn away for lack of a single
+  sign-on session, but who is still a collaborator, gets a token through
+  the app. The organisation's owner chose to install the app.
+- **Someone knowingly signed in to another person's account** who presses
+  Connect GitHub there connects their own GitHub account to it, unless it
+  is connected somewhere already. The account page says who is signed in.
+- **It was not tried against github.com.** Every call was checked against
+  GitHub's documentation and runs in the tests against a stand-in. The first
+  real connection is the first real test.
+
+### Deploying step 3
+
+1. **Register a GitHub App** under the organisation that runs the service
+   (GitHub → Settings → Developer settings → GitHub Apps → New):
+   - **Callback URL:** `<ACCOUNT_URL>/auth/github/callback`, or
+     `<PUBLIC_URL>/auth/github/callback` while there is no account host.
+   - **Setup URL** (optional): `<ACCOUNT_URL>/account`.
+   - **Expire user authorization tokens:** on. **Request user authorization
+     during installation:** off. **Webhook:** not active.
+   - **Repository permissions:** Contents, read and write; Metadata, read.
+     Nothing else.
+   - **Where can it be installed:** any account, if people outside the
+     organisation keep their specs under their own.
+2. **Make a client secret and a private key** on the app's page. The key
+   downloads as a `.pem` file.
+3. **Set three variables** on the Railway service and redeploy:
+   `SPECDRIVEN_GITHUB_APP_CLIENT_ID`, `SPECDRIVEN_GITHUB_APP_CLIENT_SECRET`
+   and `SPECDRIVEN_GITHUB_APP_PRIVATE_KEY` (the file's whole text; its line
+   ends may be written as `\n`, or the file given in base64). With some but
+   not all of them set the gateway refuses to start.
+4. **Each person** opens their account page, presses **Connect GitHub**, and
+   installs the app on their specs repository from the link under it.
+   Their pasted token is deleted when they connect.
+
+The tests are in `tests/gatewayGithubApp.test.ts`,
+`tests/gatewayGithubConnect.test.ts`, `tests/gatewayTokenSocket.test.ts` and
+`tests/gatewayWorkerGithub.test.ts`. One starts the real app as a worker
+with no GitHub token of any kind and has it open a repository on a stand-in
+GitHub that lets in the hour's token only; in the hosted image that worker
+is also confined as in step 2. Another, in the hosted image only, has the
+gateway's uid listen in the folder the spawner made and asks as the worker's
+uid, as another worker's, and as root.
 
 ## Alternatives held back
 
@@ -325,9 +455,5 @@ then it costs:
 
 ## Open questions
 
-- **Which GitHub App token?** A token for the installation is simplest, but
-  the push is then recorded as the app's, with the person as commit author
-  only. A token for the person (through the app, eight hours, renewable)
-  keeps pushes theirs and needs a sign-in redirect to GitHub.
 - **Budgets.** How much disk and memory one person gets, and what the app
   shows when a worker is stopped for going over.

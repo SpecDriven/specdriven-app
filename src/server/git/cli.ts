@@ -18,11 +18,12 @@
 // its fetch and its merge (fetchThenMerge below).
 
 import { mkdir, readdir, rename, rm } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { getAuth } from "../auth";
 import { readTextFile, writeTextFile } from "../fsx";
 import { GITHUB_HOST, webBase } from "../github";
 import { isHostedMode } from "../hostedMode";
+import { usesGithubApp } from "../hostedToken";
 import { currentGitAccess } from "./access";
 import { run, which } from "../run";
 import { getLogger } from "../telemetry";
@@ -44,12 +45,15 @@ export function cliGitAvailable(): boolean {
  * is `gh auth login`; a personal access token is pasted in Settings; the
  * browser or device-code sign-in, only offered while the "GitHub account"
  * switch is on, is never named otherwise (specs/app/user-info-settings.feature.md).
- * A hosted worker's token comes from the gateway's account page, not Settings
- * (src/server/hostedMode.ts).
+ * A hosted worker's GitHub comes from the gateway's account page, not
+ * Settings (src/server/hostedMode.ts): the service's GitHub App where it has
+ * one (src/server/hostedToken.ts), else a token pasted there.
  */
 export function signInHint(): string {
   if (isHostedMode()) {
-    return "authentication required — add a GitHub token that can read and write it on your account page";
+    return usesGithubApp()
+      ? "authentication required — on your account page, connect GitHub and install the SpecDriven app on this repository"
+      : "authentication required — add a GitHub token that can read and write it on your account page";
   }
   switch (currentGitAccess()) {
     case "gh":
@@ -101,12 +105,17 @@ export function identityConfig(name: string, email: string): string[] {
 export async function appContext(): Promise<GitContext> {
   const auth = await getAuth();
   if (!auth) return { config: [], env: {} };
-  return tokenContext(
-    auth.token,
-    auth.name ?? auth.login,
-    auth.email ?? `${auth.login}@users.noreply.github.com`,
-    auth.host,
-  );
+  const name = auth.name ?? auth.login;
+  const email = auth.email ?? `${auth.login}@users.noreply.github.com`;
+  // A hosted worker whose gateway makes its tokens holds none itself.
+  if (auth.brokered) return brokeredContext(name, email);
+  return tokenContext(auth.token, name, email, auth.host);
+}
+
+/** Remotes written the ssh way go over https, where the credential is. */
+function httpsRewrites(base: string, host: string): string[] {
+  const sshHost = host.replace(/:\d+$/, "");
+  return ["-c", `url.${base}/.insteadOf=git@${sshHost}:`, "-c", `url.${base}/.insteadOf=ssh://git@${sshHost}/`];
 }
 
 /**
@@ -116,17 +125,44 @@ export async function appContext(): Promise<GitContext> {
  */
 export function tokenContext(token: string, name: string, email: string, host: string = GITHUB_HOST): GitContext {
   const base = webBase(host);
-  const sshHost = host.replace(/:\d+$/, "");
   return {
     config: [
-      "-c", `url.${base}/.insteadOf=git@${sshHost}:`,
-      "-c", `url.${base}/.insteadOf=ssh://git@${sshHost}/`,
+      ...httpsRewrites(base, host),
       "-c", `credential.${base}.helper=`,
       "-c",
       `credential.${base}.helper=!f(){ echo username=x-access-token; echo "password=$SPECDRIVEN_GIT_TOKEN"; };f`,
       ...identityConfig(name, email),
     ],
     env: { SPECDRIVEN_GIT_TOKEN: token },
+  };
+}
+
+/** The credential helper a hosted worker's git asks the gateway through (hostedCredential.ts). */
+export const HOSTED_CREDENTIAL_HELPER = join(import.meta.dir, "hostedCredential.ts");
+
+/** `text` as one word of a shell command. */
+function shellWord(text: string): string {
+  return `'${text.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * The context of a hosted worker whose service has a GitHub App
+ * (docs/hosted-tenant-isolation.md "Step 3"): no token is in it. Git runs
+ * the helper when GitHub asks who is calling and tells it the repository
+ * (`useHttpPath`), and the helper asks the gateway for that repository's
+ * token — an hour's, for it alone. The account authors the commits.
+ */
+export function brokeredContext(name: string, email: string): GitContext {
+  const base = webBase();
+  return {
+    config: [
+      ...httpsRewrites(base, GITHUB_HOST),
+      "-c", `credential.${base}.helper=`,
+      "-c", `credential.${base}.helper=!${shellWord(process.execPath)} ${shellWord(HOSTED_CREDENTIAL_HELPER)}`,
+      "-c", `credential.${base}.useHttpPath=true`,
+      ...identityConfig(name, email),
+    ],
+    env: {},
   };
 }
 

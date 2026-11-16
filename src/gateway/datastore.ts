@@ -7,8 +7,9 @@
 //
 // What is copied is what app.db already holds in a form safe to copy:
 // password hashes, session hashes (never the cookie), secrets still sealed
-// under SPECDRIVEN_MASTER_KEY, which never goes into the repo, and each
-// user's recent data repos (repos.ts).
+// under SPECDRIVEN_MASTER_KEY, which never goes into the repo, each user's
+// GitHub account (githubLinks.ts: who they are there, no token) and their
+// recent data repos (repos.ts).
 // Sessions lose their ip, user agent and last-seen time on the way; email
 // links and rate-limit counters are short-lived and stay behind.
 
@@ -85,6 +86,12 @@ const TABLES: Table[] = [
     columns: ["user_id", "name", "kind", "ciphertext", "iv", "key_id", "meta", "updated_at"],
     orderBy: "user_id, name",
     blobs: ["ciphertext", "iv"],
+  },
+  {
+    file: "github-links.json",
+    name: "github_links",
+    columns: ["user_id", "github_id", "login", "name", "email", "linked_at"],
+    orderBy: "user_id",
   },
   {
     file: "repos.json",

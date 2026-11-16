@@ -11,6 +11,7 @@
 import { tokenFile, TokenStore, tokenPath, parseRecord } from "./persistence/Credentials";
 import type { TokenBackend, TokenRecord } from "./persistence/Credentials";
 import { run, runSync } from "./persistence/runtime";
+import { IDENTITY_ENV, tokenSocket } from "./hostedToken";
 
 export { parseRecord, TOKEN_FILE, tokenPath } from "./persistence/Credentials";
 export type { TokenBackend, TokenRecord } from "./persistence/Credentials";
@@ -33,23 +34,48 @@ export function createFileBackend(fixedPath?: string): TokenBackend {
 export const TOKEN_ENV = "SPECDRIVEN_GITHUB_TOKEN_RECORD";
 
 /**
- * Hosted backend (src/server/hostedMode.ts): the gateway decrypts the user's
- * token and hands it to their worker in TOKEN_ENV, a TokenRecord as JSON.
- * Nothing is written to disk, and the worker cannot change the token — the
- * account page does that, and restarts the worker with the new one.
+ * Hosted backend (src/server/hostedMode.ts): the gateway hands its worker
+ * the person's GitHub sign-in in the environment, one of two ways.
+ *
+ * Where the service has a GitHub App (docs/hosted-tenant-isolation.md "Step
+ * 3") it is who the person is on GitHub and where to ask for tokens: the
+ * record says `brokered` and holds no token. Otherwise it is the personal
+ * access token from the account page, in TOKEN_ENV as a TokenRecord.
+ *
+ * Nothing is written to disk either way, and the worker cannot change the
+ * sign-in — the account page does that, and restarts the worker.
  */
 export function createEnvBackend(env: Record<string, string | undefined> = process.env): TokenBackend {
   const refuse = async () => {
-    throw new Error("The GitHub token is managed on the account page");
+    throw new Error("GitHub is managed on the account page");
   };
   return {
     async load() {
       const raw = env[TOKEN_ENV];
-      return raw ? parseRecord(raw) : null;
+      if (raw) return parseRecord(raw);
+      return tokenSocket(env) ? brokeredRecord(env[IDENTITY_ENV]) : null;
     },
     save: refuse,
     clear: refuse,
   };
+}
+
+/** The person's GitHub account as the gateway names it, with no token; null when it names none. */
+function brokeredRecord(raw: string | undefined): TokenRecord | null {
+  try {
+    const who = JSON.parse(raw ?? "") as Partial<TokenRecord> | null;
+    if (!who || typeof who.login !== "string" || !who.login) return null;
+    return {
+      token: "",
+      login: who.login,
+      name: typeof who.name === "string" ? who.name : null,
+      email: typeof who.email === "string" ? who.email : null,
+      id: typeof who.id === "number" ? who.id : 0,
+      brokered: true,
+    };
+  } catch {
+    return null;
+  }
 }
 
 /** Swap the storage backend (Electron safeStorage); resets the cache. */

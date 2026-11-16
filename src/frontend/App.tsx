@@ -1386,6 +1386,9 @@ export function App() {
   // Hosted mode (src/server/hostedMode.ts): the app runs behind the hosted
   // gateway, whose account page holds the GitHub token and agent keys.
   const [hosted, setHosted] = useState(false);
+  // Whether the hosted service reaches GitHub through its own app
+  // (src/server/hostedToken.ts) rather than a token pasted on the account page.
+  const [hostedGithubApp, setHostedGithubApp] = useState(false);
   // The signed-in hosted account (src/gateway): its email and whether it is
   // an admin (src/gateway/admin.ts), which puts Admin beside Settings in the
   // user menu. Null outside the hosted app, or until the gateway answers.
@@ -2206,6 +2209,7 @@ export function App() {
         setDemo(Boolean(state.demo));
         setReadOnly(Boolean(state.readOnly));
         setHosted(Boolean(state.hosted));
+        setHostedGithubApp(Boolean(state.hostedGithubApp));
         // The demo pins Vim mode off (src/frontend/vimPref.ts): any editor open
         // when this lands drops its Vim tab, and the Settings row hides.
         setVimDemoMode(Boolean(state.demo));
@@ -9057,10 +9061,19 @@ export function App() {
             : "Enter the path to the spec data directory:"}
         </p>
         {/* Hosted mode (src/server/hostedMode.ts): a GitHub repository
-            only, reached with the token from the account page. */}
+            only, reached through what the account page holds: the GitHub
+            account the person connected, or the token they pasted. */}
         {hosted && !auth?.signedIn && (
           <p className="hint">
-            First <a href="/account">add a GitHub token</a> that can read and write it.
+            {hostedGithubApp ? (
+              <>
+                First <a href="/account">connect GitHub</a>, and install the SpecDriven app on the repository.
+              </>
+            ) : (
+              <>
+                First <a href="/account">add a GitHub token</a> that can read and write it.
+              </>
+            )}
           </p>
         )}
         <div className="input-row">
@@ -9080,9 +9093,9 @@ export function App() {
           {settingRepo ? "Checking access…" : hosted ? "Open this repository" : "Use this directory"}
         </button>
         {repoError && <p className="error">{repoError}</p>}
-        {hosted && auth?.signedIn && hostedCloneHint(repoError) && (
+        {hosted && auth?.signedIn && hostedCloneHint(repoError, hostedGithubApp) && (
           <p className="hint">
-            {hostedCloneHint(repoError)} <a href="/account">Open your account page</a>.
+            {hostedCloneHint(repoError, hostedGithubApp)} <a href="/account">Open your account page</a>.
           </p>
         )}
       </>
@@ -9404,22 +9417,30 @@ export function App() {
         title="Git & GitHub"
         hint="The GitHub account the hosted app syncs and publishes with."
       >
-        {/* Hosted mode: the token is pasted on the gateway's account page,
-            stored encrypted there, and handed to this app on start. */}
+        {/* Hosted mode: GitHub is set up on the gateway's account page. With
+            the service's GitHub App the account is connected there and this
+            app is handed an hour's token per repository; without it a token
+            is pasted there, stored encrypted, and handed over on start. */}
         <div className="settings-row auth-section">
           <span className="auth-title">GitHub account</span>
           <p className="hint">
-            {auth?.signedIn ? (
+            {auth?.signedIn && hostedGithubApp ? (
+              <>
+                Connected as <strong>{auth.login}</strong> on your account page.
+              </>
+            ) : auth?.signedIn ? (
               <>
                 Using the token for <strong>{auth.login}</strong> from your account.
               </>
+            ) : hostedGithubApp ? (
+              <>GitHub is not connected yet — connect it to open and publish your specs repository.</>
             ) : (
               <>No GitHub token yet — add one to open and publish your specs repository.</>
             )}
           </p>
           <div className="auth-row">
             <a className="secondary" href="/account">
-              Manage GitHub token and agent keys
+              {hostedGithubApp ? "Manage GitHub and agent keys" : "Manage GitHub token and agent keys"}
             </a>
           </div>
         </div>

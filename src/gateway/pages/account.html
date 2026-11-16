@@ -17,7 +17,28 @@
       <h2>Account</h2>
       <p>Signed in as <strong id="email">…</strong></p>
 
-      <section>
+      <section id="github-app" hidden>
+        <h3>GitHub</h3>
+        <p class="hint">
+          SpecDriven reads and publishes your specs repository through its GitHub App: an hour at a time, one repository at a time, and only
+          where the app is installed and your GitHub account has access. No token of yours is stored.
+        </p>
+        <p id="github-app-status" class="status">…</p>
+        <p id="github-app-error" class="error" role="alert" hidden></p>
+        <div class="row">
+          <button id="github-connect" type="button">Connect GitHub</button>
+          <button id="github-disconnect" class="secondary" type="button" hidden>Disconnect</button>
+        </div>
+        <p id="github-install" class="hint" hidden>
+          Then <a id="github-install-link" target="_blank" rel="noreferrer">install the SpecDriven app on your specs repository</a>, if it is not there yet.
+        </p>
+        <p id="github-old-token" class="hint" hidden>
+          <span id="github-old-token-text"></span>
+          <button id="github-old-remove" class="link" type="button">Remove it now</button>
+        </p>
+      </section>
+
+      <section id="github-token">
         <h3>GitHub token</h3>
         <p class="hint">
           SpecDriven reads and publishes your specs repository with this token. Create a

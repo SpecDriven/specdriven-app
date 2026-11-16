@@ -191,6 +191,9 @@ export function userDirs(dataDir: string, userId: string) {
     run: join(base, "run"),
     tmp: join(base, "tmp"),
     socket: join(base, "run", "app.sock"),
+    // Not the worker's: the gateway's, where the worker asks it for GitHub tokens (tokenSocket.ts).
+    gate: join(base, "gate"),
+    tokenSocket: join(base, "gate", "github.sock"),
   };
 }
 
@@ -287,6 +290,12 @@ export interface SpawnerOptions {
    * one, besides the worker, let into the folder a worker's socket is in.
    */
   gatewayGid?: number | null;
+  /**
+   * The gateway's uid where it is a process of its own: the owner of the
+   * folder each worker's token socket is in (tokenSocket.ts). Root's own
+   * when absent.
+   */
+  gatewayUid?: number | null;
   /** Whether a worker with a uid is also confined by the kernel (sandbox.ts); on unless said otherwise. */
   sandbox?: boolean;
   /** Where a worker's output goes; the spawner's own by default. */
@@ -443,13 +452,19 @@ export class Spawner implements SpawnerApi {
    * worker, and must still reach the worker's socket: the top folder lets
    * others pass through (0751, still not list), and `run` belongs to the
    * gateway's group as well (0750). The other four stay the worker's alone.
+   *
+   * A sixth, `gate`, is the gateway's and not the worker's: the gateway
+   * listens there for this worker's requests for GitHub tokens
+   * (tokenSocket.ts). The worker's group may pass through it, no one else
+   * may, and what is made in it takes that group (set-group-id) — so the
+   * socket is one this worker can open and no other worker can.
    */
   private async prepareDirs(dirs: ReturnType<typeof userDirs>, uid: number | null): Promise<void> {
     const users = join(this.opts.dataDir, "users");
     await mkdir(users, { recursive: true, mode: 0o711 });
     const own = [dirs.home, dirs.root, dirs.repos, dirs.run, dirs.tmp];
     if (uid === null) {
-      for (const dir of [dirs.base, ...own]) await mkdir(dir, { recursive: true, mode: 0o700 });
+      for (const dir of [dirs.base, ...own, dirs.gate]) await mkdir(dir, { recursive: true, mode: 0o700 });
       return;
     }
     const gatewayGid = this.opts.gatewayGid ?? null;
@@ -482,6 +497,11 @@ export class Spawner implements SpawnerApi {
       await lchown(dirs.run, uid, gatewayGid);
       await chmod(dirs.run, 0o750);
     }
+    // In a folder only root can change, and never the worker's: nothing of
+    // the worker's is opened or followed here.
+    await folder(dirs.gate, 0o750);
+    await lchown(dirs.gate, this.opts.gatewayUid ?? 0, uid);
+    await chmod(dirs.gate, 0o2750);
   }
 }
 

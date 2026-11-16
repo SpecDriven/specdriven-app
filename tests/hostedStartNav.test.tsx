@@ -37,6 +37,12 @@ describe("hostedCloneHint", () => {
     expect(hostedCloneHint("Could not clone x: authentication required — add a GitHub token")).not.toBeNull();
   });
 
+  test("where the service has a GitHub App, the hint names the app and the connected account, not a token", () => {
+    const hint = hostedCloneHint("Could not clone x: authentication required — on your account page, connect GitHub", true);
+    expect(hint).toContain("SpecDriven GitHub App must be installed on it");
+    expect(hint).not.toContain("token");
+  });
+
   test("other errors and no error get no hint", () => {
     expect(hostedCloneHint(null)).toBeNull();
     expect(hostedCloneHint("Enter a GitHub url, such as https://github.com/owner/specs")).toBeNull();

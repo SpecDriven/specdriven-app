@@ -93,3 +93,45 @@ export function serveRepos(rootDir: string): GitHttpServer {
   });
   return { url: `http://127.0.0.1:${server.port}`, stop: () => server.stop(true) };
 }
+
+export interface GuardedGitHttpServer extends GitHttpServer {
+  /** One line a request: `token`, `wrong` or `none` for what it carried, then its path. */
+  seen: string[];
+}
+
+/**
+ * The repos under `rootDir` behind a stand-in GitHub that lets in one token,
+ * the way GitHub takes a GitHub App's: as the password of `x-access-token`.
+ * Anything else is asked who it is (401), which is when git turns to its
+ * credential helper.
+ */
+export function serveReposWithToken(rootDir: string, token: string): GuardedGitHttpServer {
+  const inner = serveRepos(rootDir);
+  const seen: string[] = [];
+  const wanted = `Basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`;
+  const front = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    async fetch(req) {
+      const url = new URL(req.url);
+      const given = req.headers.get("authorization");
+      seen.push(`${given === wanted ? "token" : given ? "wrong" : "none"} ${url.pathname}`);
+      if (given !== wanted) return new Response("no", { status: 401, headers: { "WWW-Authenticate": 'Basic realm="GitHub"' } });
+      const headers = new Headers(req.headers);
+      headers.delete("host");
+      return fetch(`${inner.url}${url.pathname}${url.search}`, {
+        method: req.method,
+        headers,
+        body: req.method === "GET" ? undefined : await req.arrayBuffer(),
+      });
+    },
+  });
+  return {
+    url: `http://127.0.0.1:${front.port}`,
+    seen,
+    stop() {
+      front.stop(true);
+      inner.stop();
+    },
+  };
+}

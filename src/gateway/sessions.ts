@@ -35,7 +35,9 @@ export interface CookieOptions {
 export const SESSION_COOKIE = "sd_session";
 export const APP_COOKIE = "sd_app";
 export const HANDOVER_COOKIE = "sd_handover";
-const GATEWAY_COOKIES = [SESSION_COOKIE, APP_COOKIE, HANDOVER_COOKIE];
+/** The secret a browser keeps while it is at GitHub saying whose account it is (server.ts). */
+export const GITHUB_STATE_COOKIE = "sd_github";
+const GATEWAY_COOKIES = [SESSION_COOKIE, APP_COOKIE, HANDOVER_COOKIE, GITHUB_STATE_COOKIE];
 
 export type SessionKind = "account" | "app";
 

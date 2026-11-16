@@ -20,6 +20,8 @@ import { loadKeyring } from "./crypto";
 import { Datastore, datastoreGit, readDatastoreConfig } from "./datastore";
 import { openDatabase } from "./db";
 import { egressTargets, startEgressProxy, type EgressProxy } from "./egress";
+import { GithubApp, readGithubAppConfig } from "./githubApp";
+import { GithubLinks, RepoTokens } from "./githubLinks";
 import { readWorkerLimits } from "./limits";
 import { RateLimiter } from "./rateLimit";
 import { RecentRepos } from "./repos";
@@ -98,6 +100,19 @@ export async function runGateway(config: GatewayConfig): Promise<void> {
     console.log(`workers reach ${[...allowed].join(", ")} through 127.0.0.1:${egress.port}, and nothing else`);
   }
 
+  // GitHub through the service's own app (githubApp.ts): a person connects
+  // their account, and their worker is handed an hour's token for one
+  // repository when its git asks. Without it, people paste a token that
+  // lasts months and sits in the worker's environment.
+  const githubConfig = readGithubAppConfig();
+  const githubApp = githubConfig ? new GithubApp(githubConfig) : null;
+  const githubLinks = new GithubLinks(db);
+  const repoTokens = githubApp ? new RepoTokens(githubApp, githubLinks) : null;
+  if (!githubApp) {
+    const say = config.production ? console.error : console.warn;
+    say("SPECDRIVEN_GITHUB_APP_* is not set — people paste a personal access token, kept sealed and handed to their worker");
+  }
+
   const workers = new WorkerPool({
     dataDir: config.dataDir,
     entry: config.workerEntry,
@@ -111,6 +126,7 @@ export async function runGateway(config: GatewayConfig): Promise<void> {
     osUid: spawner ? (userId) => gateway.accounts.osUid(userId) : undefined,
     spawner: spawner ?? undefined,
     egressPort: egress?.port ?? null,
+    github: repoTokens ?? undefined,
     // Kept in app.db, and so in the datastore: the next sign-in after a
     // redeploy opens the repo the user had open (repos.ts).
     repos: new RecentRepos(db),
@@ -128,6 +144,7 @@ export async function runGateway(config: GatewayConfig): Promise<void> {
     publicUrl: config.publicUrl,
     accountUrl: config.accountUrl,
     appCsp: readAppCspMode(),
+    github: githubApp ? { app: githubApp, links: githubLinks } : null,
   });
 
   // Expired sessions and old rate-limit windows, hourly.
@@ -155,6 +172,8 @@ export async function runGateway(config: GatewayConfig): Promise<void> {
     process.on(signal, async () => {
       await server.stop(true);
       await workers.stopAll().catch((e: Error) => console.error(`stopping the workers failed: ${e.message}`));
+      // The tokens the workers were given are ended at GitHub before the gateway goes.
+      await repoTokens?.settled();
       await egress?.close();
       if (datastore) {
         datastore.stop();
