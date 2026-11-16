@@ -14,6 +14,7 @@ import { normalizeCodeRepo } from "../src/server/members";
 import { currentEngine, setGitEngine } from "../src/server/git";
 import { signInHint } from "../src/server/git/cli";
 import { createEnvBackend, TOKEN_ENV } from "../src/server/tokenStore";
+import { workerKeyGuard } from "../src/server/hostedMode";
 
 let root: string;
 const saved = {
@@ -159,4 +160,20 @@ test("a refused clone points at the account page's token, not Settings", () => {
   delete process.env.SPECDRIVEN_HOSTED;
   expect(signInHint()).toBe("authentication required — add a GitHub personal access token in Settings");
   expect(signInHint()).not.toContain("sign in with GitHub");
+});
+
+// specs/app/hosted-app.feature.md "A worker serves only its own gateway's requests".
+test("a hosted worker given a key answers only a request that carries it", async () => {
+  const guard = workerKeyGuard("the-key-for-this-start");
+  const request = (key?: string) =>
+    new Request("http://localhost/api/state", { headers: key === undefined ? {} : { "x-specdriven-worker-key": key } });
+  expect(guard(request("the-key-for-this-start"))).toBeNull();
+  for (const key of [undefined, "", "another-workers-key", "the-key-for-this-start-and-more"]) {
+    const refused = guard(request(key));
+    expect(refused?.status).toBe(401);
+    expect(await refused!.text()).toContain("not from this workspace's gateway");
+  }
+  // A worker started with no key (an app on a person's own machine, or behind an older gateway) asks for none.
+  expect(workerKeyGuard(undefined)(request())).toBeNull();
+  expect(workerKeyGuard("  ")(request())).toBeNull();
 });

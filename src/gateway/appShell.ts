@@ -9,12 +9,15 @@
 
 import { existsSync } from "node:fs";
 import { join, normalize } from "node:path";
+import { inlineScriptHashes } from "./appCsp";
 
 export const APP_ASSET_PREFIX = "/_app/";
 
 export interface AppShell {
   /** The shell or one of its assets for this request, or null when it is the worker's. */
   serve(req: Request, url: URL): Promise<Response | null>;
+  /** The hash sources of the shell's inline scripts, for its Content-Security-Policy (appCsp.ts). */
+  inlineScripts?: string[];
 }
 
 /** Paths the worker answers: its API and the plugins' client bundles. */
@@ -61,8 +64,10 @@ export async function loadAppShell(opts: { production: boolean; distDir?: string
   const shell = await files.get("index.html");
   if (!shell) throw new Error("The app build has no index.html");
   const shellBody = shell.body instanceof Blob ? new Uint8Array(await shell.body.arrayBuffer()) : shell.body;
+  const shellText = typeof shellBody === "string" ? shellBody : new TextDecoder().decode(shellBody as Uint8Array);
 
   return {
+    inlineScripts: inlineScriptHashes(shellText),
     async serve(req, url) {
       if (req.method !== "GET" && req.method !== "HEAD") return null;
       if (url.pathname.startsWith(APP_ASSET_PREFIX)) {

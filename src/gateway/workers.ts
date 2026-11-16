@@ -3,47 +3,40 @@
 // GitHub token, one data repo — so instead of teaching it about users, each
 // user gets their own copy of it, started on first use with their own
 // folders and their own decrypted secrets, listening on a unix socket in a
-// folder only this process can read. The gateway proxies to it (proxy.ts)
-// and stops it after a while unused; it starts again on the next request.
+// folder of its own. The gateway proxies to it (proxy.ts) and stops it
+// after a while unused; it starts again on the next request.
 //
 // The worker's environment is built from scratch, never copied from the
 // gateway's: the master key, the mail service key and the other users'
 // secrets must not reach it.
 //
-// Where the gateway runs as root (the Railway image), each worker also runs
-// as a Linux uid of its own (`setpriv`), and its folders belong to that uid
-// with mode 0700. A user controls their data repo's contents, symlinks
-// included, so a folder kept apart only by convention would not be apart:
-// with separate uids the kernel refuses one worker another's files, the
-// gateway's database and the gateway's own environment.
+// This file is the policy: who has a worker, when it starts and stops, what
+// it may use. Making the folders and starting the process is the spawner's
+// (spawner.ts) — in the hosted image a root process of its own, which gives
+// each worker a Linux uid and confines it, while the gateway is not root
+// (docs/hosted-tenant-isolation.md "Step 2"). Elsewhere (development,
+// tests) the pool keeps a spawner in its own process and the workers share
+// its user.
 //
-// The same reasoning binds the gateway (docs/hosted-tenant-isolation.md
-// "Step 1"): as root it would follow a symlink a worker left anywhere it
-// looked. So root keeps each person's top folder for itself — its five
-// entries are fixed, the worker can read them but not rename or replace
-// them — and never opens anything inside them. What must happen in there
-// (the git author, the remembered repos, reading the settings, measuring
-// the folder) the worker does for itself (workerStart.ts) or the gateway
-// does as that person's uid (limits.ts runAs).
+// The gateway never opens anything inside a worker's folders but its
+// socket: the git author and the remembered repos the worker sets up for
+// itself (workerStart.ts), and its settings and folder size the spawner
+// reads as that worker's uid.
 
-import type { Subprocess } from "bun";
-import { chmod, lchown, lstat, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { agentKeyEnvName } from "../server/agentKeys";
 import { TOKEN_ENV } from "../server/tokenStore";
-import { OS_UID_BASE } from "./accounts";
-import {
-  asUser,
-  DEFAULT_LIMITS,
-  diskUsageMb,
-  freeMb,
-  residentMb,
-  runAs,
-  systemTool,
-  type WorkerLimits,
-} from "./limits";
-import { cleanRepos, HOSTED_REPOS_ENV, readWorkerRepos } from "./repos";
+import { randomToken } from "./crypto";
+import { DEFAULT_LIMITS, freeMb, type WorkerLimits } from "./limits";
+import { cleanRepos, HOSTED_REPOS_ENV, reposInSettings } from "./repos";
 import type { UserSecrets } from "./secrets";
+import { Spawner, userDirs, type SpawnerApi } from "./spawner";
+
+export { endProcessesOf, userDirs, workerCommand, workerIsolation } from "./spawner";
+
+/** The key a worker asks of every request, so only its own gateway's reach it (src/server/hostedMode.ts). */
+export const WORKER_KEY_ENV = "SPECDRIVEN_WORKER_KEY";
+export const WORKER_KEY_HEADER = "x-specdriven-worker-key";
 
 /** Variables a worker inherits from the gateway: runtime, logging, network. */
 const PASSTHROUGH = [
@@ -98,15 +91,28 @@ export interface WorkerPoolOptions {
   startTimeoutMs?: number;
   /** Where a worker's output goes; the gateway's own by default. */
   stdio?: "inherit" | "ignore";
+  /** What makes the folders and starts the workers; one in this process when absent (spawner.ts). */
+  spawner?: SpawnerApi;
+  /** The local port of the workers' one way out (egress.ts); absent leaves their network alone. */
+  egressPort?: number | null;
 }
 
-interface Running {
-  proc: Subprocess;
+/** Where a person's worker listens, and the key it asks of every request. */
+export interface WorkerAddress {
+  socket: string;
+  key: string;
+}
+
+interface Running extends WorkerAddress {
+  /** Names this start to the spawner, which names it back when the worker ends. */
+  instance: string;
   /** The uid it runs as; null when workers share the gateway's user. */
   uid: number | null;
-  socket: string;
   lastUsed: number;
   stopping: boolean;
+  /** Settles with the exit code once the worker's process has ended. */
+  ended: Promise<number | null>;
+  end(code: number | null): void;
 }
 
 /** Repeated crashes of one user's worker back off instead of looping. */
@@ -116,58 +122,6 @@ const CRASH_PAUSE_MS = 30_000;
 
 export class WorkerUnavailableError extends Error {}
 
-/**
- * Whether workers can run as uids of their own: the gateway is root and
- * `setpriv` is installed. SPECDRIVEN_WORKER_ISOLATION=off turns it off.
- */
-export function workerIsolation(env: Record<string, string | undefined> = process.env): boolean {
-  if (env.SPECDRIVEN_WORKER_ISOLATION === "off") return false;
-  return process.getuid?.() === 0 && systemTool("setpriv") !== null;
-}
-
-/**
- * The command that starts a worker, as `uid` when there is one — and then
- * under the kernel's own caps on how many processes that uid may have and
- * how many files each may hold open (`prlimit`, in the image beside
- * `setpriv`), so one person's runaway worker cannot starve the others.
- */
-export function workerCommand(entry: string, uid: number | null, limits: WorkerLimits = DEFAULT_LIMITS): string[] {
-  const bun = [process.execPath, entry];
-  if (uid === null) return bun;
-  const prlimit = systemTool("prlimit");
-  const capped = prlimit ? [prlimit, `--nproc=${limits.processes}`, `--nofile=${limits.openFiles}`, "--"] : [];
-  return [...capped, ...asUser(uid), ...bun];
-}
-
-/**
- * End every process running as a worker's uid (endProcesses.ts): the worker
- * itself is one process, but what it started and detached would otherwise
- * outlive a sign-out, a password reset or a changed token, still holding
- * the old token. Run as that uid, so the kernel keeps it to that person's
- * processes whatever uid it is handed.
- */
-export async function endProcessesOf(uid: number): Promise<void> {
-  if (!Number.isInteger(uid) || uid < OS_UID_BASE) throw new Error(`Not a worker uid: ${uid}`);
-  const res = await runAs(uid, [process.execPath, join(import.meta.dir, "endProcesses.ts")], 15_000);
-  if (res.exitCode !== 0) console.error(`ending the processes of uid ${uid} failed: ${res.stderr.trim()}`);
-}
-
-export function userDirs(dataDir: string, userId: string) {
-  // User ids are UUIDs the gateway made (accounts.ts); refuse anything else
-  // so no id can name a path outside users/.
-  if (!/^[0-9a-f-]{36}$/.test(userId)) throw new Error(`Not a user id: ${userId}`);
-  const base = join(dataDir, "users", userId);
-  return {
-    base,
-    home: join(base, "home"),
-    root: join(base, "root"),
-    repos: join(base, "repos"),
-    run: join(base, "run"),
-    tmp: join(base, "tmp"),
-    socket: join(base, "run", "app.sock"),
-  };
-}
-
 /** The environment a user's worker starts with. */
 export function workerEnv(
   dirs: ReturnType<typeof userDirs>,
@@ -175,6 +129,7 @@ export function workerEnv(
   base: Record<string, string | undefined> = process.env,
   email: string | null = null,
   repos: string[] = [],
+  own: { key?: string; egressPort?: number | null } = {},
 ): Record<string, string> {
   const env: Record<string, string> = {};
   for (const name of PASSTHROUGH) {
@@ -200,6 +155,15 @@ export function workerEnv(
     GIT_TERMINAL_PROMPT: "0",
     GIT_CONFIG_NOSYSTEM: "1",
   });
+  if (own.key) env[WORKER_KEY_ENV] = own.key;
+  if (own.egressPort) {
+    // Its one way out: git and the app's own requests go where these point,
+    // and nothing is to bypass it.
+    const proxy = `http://127.0.0.1:${own.egressPort}`;
+    for (const name of ["HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"]) env[name] = proxy;
+    delete env.NO_PROXY;
+    delete env.no_proxy;
+  }
   if (email) env.SPECDRIVEN_ACCOUNT_EMAIL = email;
   const remembered = cleanRepos(repos);
   if (remembered.length) env[HOSTED_REPOS_ENV] = JSON.stringify(remembered);
@@ -211,14 +175,21 @@ export function workerEnv(
 export class WorkerPool {
   private running = new Map<string, Running>();
   private starting = new Map<string, Promise<Running>>();
+  /** Every worker the spawner was asked for and has not yet said ended, by its instance. */
+  private instances = new Map<string, { userId: string; worker: Running }>();
   private crashes = new Map<string, number[]>();
   /** The clean-up after a worker that exited by itself; the next start waits for it. */
   private settling = new Map<string, Promise<void>>();
   /** People whose folder was over its budget when last measured, and by how much. */
   private overDisk = new Map<string, number>();
   private sweeper: ReturnType<typeof setInterval> | null = null;
+  private spawner: SpawnerApi;
 
-  constructor(private opts: WorkerPoolOptions) {}
+  constructor(private opts: WorkerPoolOptions) {
+    this.spawner =
+      opts.spawner ?? new Spawner({ dataDir: opts.dataDir, entry: opts.entry, stdio: opts.stdio });
+    this.spawner.onExit(({ instance, code }) => this.ended(instance, code));
+  }
 
   private get limits(): WorkerLimits {
     return this.opts.limits ?? DEFAULT_LIMITS;
@@ -228,12 +199,12 @@ export class WorkerPool {
     return this.opts.osUid ? this.opts.osUid(userId) : null;
   }
 
-  /** The socket of the user's worker, starting it when it is not running. */
-  async socketFor(userId: string): Promise<string> {
+  /** The user's worker, starting it when it is not running. */
+  async workerFor(userId: string): Promise<WorkerAddress> {
     const live = this.running.get(userId);
     if (live && !live.stopping) {
       live.lastUsed = Date.now();
-      return live.socket;
+      return live;
     }
     let pending = this.starting.get(userId);
     if (!pending) {
@@ -242,7 +213,12 @@ export class WorkerPool {
     }
     const worker = await pending;
     worker.lastUsed = Date.now();
-    return worker.socket;
+    return worker;
+  }
+
+  /** The socket of the user's worker, starting it when it is not running. */
+  async socketFor(userId: string): Promise<string> {
+    return (await this.workerFor(userId)).socket;
   }
 
   /** Mark the user's worker used — a streaming response keeps it alive. */
@@ -271,13 +247,10 @@ export class WorkerPool {
     if (live) {
       live.stopping = true;
       this.running.delete(userId);
-      live.proc.kill("SIGTERM");
-      const exited = await Promise.race([live.proc.exited.then(() => true), Bun.sleep(5_000).then(() => false)]);
-      if (!exited) live.proc.kill("SIGKILL");
     }
     await this.settling.get(userId);
     const uid = live ? live.uid : this.knownUid(userId);
-    if (uid !== null) await endProcessesOf(uid);
+    if (live || uid !== null) await this.spawner.stop({ userId, uid });
     if (live) await this.captureRepos(userId);
   }
 
@@ -294,7 +267,8 @@ export class WorkerPool {
   async captureRepos(userId: string): Promise<void> {
     if (!this.opts.repos) return;
     try {
-      const repos = await readWorkerRepos(userDirs(this.opts.dataDir, userId).root, this.knownUid(userId));
+      const report = await this.spawner.report({ userId, uid: this.knownUid(userId), settings: true });
+      const repos = reposInSettings(report.settings ?? null);
       if (repos) this.opts.repos.set(userId, repos);
     } catch (e) {
       console.error(`reading the repos of ${userId} failed: ${(e as Error).message}`);
@@ -320,7 +294,7 @@ export class WorkerPool {
   }
 
   startSweeper(everyMs = 60_000): void {
-    this.sweeper ??= setInterval(() => void this.sweepIdle(), everyMs);
+    this.sweeper ??= setInterval(() => void this.sweepIdle().catch((e: Error) => console.error(`the sweep failed: ${e.message}`)), everyMs);
     this.sweeper.unref?.();
   }
 
@@ -334,21 +308,18 @@ export class WorkerPool {
     const { maxDiskMb, maxMemoryMb } = this.limits;
     if (maxDiskMb === null && maxMemoryMb === null) return;
     for (const [userId, worker] of [...this.running.entries()]) {
-      if (maxMemoryMb !== null) {
-        const held = await residentMb(worker.proc.pid);
-        if (held !== null && held > maxMemoryMb) {
-          console.error(`worker for ${userId} holds ${Math.round(held)} MB of memory, over ${maxMemoryMb}: stopped`);
-          await this.stop(userId);
-          continue;
-        }
+      const report = await this.spawner.report({ userId, uid: worker.uid, disk: maxDiskMb !== null });
+      const held = report.residentMb;
+      if (maxMemoryMb !== null && held !== null && held > maxMemoryMb) {
+        console.error(`worker for ${userId} holds ${Math.round(held)} MB of memory, over ${maxMemoryMb}: stopped`);
+        await this.stop(userId);
+        continue;
       }
-      if (maxDiskMb !== null) {
-        const used = await diskUsageMb(userDirs(this.opts.dataDir, userId).base, worker.uid);
-        if (used !== null && used > maxDiskMb) {
-          console.error(`the folder of ${userId} holds ${Math.round(used)} MB, over ${maxDiskMb}: worker stopped`);
-          this.overDisk.set(userId, used);
-          await this.stop(userId);
-        }
+      const used = report.diskMb ?? null;
+      if (maxDiskMb !== null && used !== null && used > maxDiskMb) {
+        console.error(`the folder of ${userId} holds ${Math.round(used)} MB, over ${maxDiskMb}: worker stopped`);
+        this.overDisk.set(userId, used);
+        await this.stop(userId);
       }
     }
   }
@@ -358,7 +329,7 @@ export class WorkerPool {
    * the gateway's own database is on it — and for a person whose folder was
    * over its budget and still is.
    */
-  private async checkRoom(userId: string, base: string, uid: number | null): Promise<void> {
+  private async checkRoom(userId: string, uid: number | null): Promise<void> {
     const { maxDiskMb, minFreeMb } = this.limits;
     const free = await freeMb(this.opts.dataDir);
     if (free !== null && free < minFreeMb) {
@@ -366,7 +337,7 @@ export class WorkerPool {
       throw new WorkerUnavailableError("The service is out of disk space — tell its admin");
     }
     if (maxDiskMb === null || !this.overDisk.has(userId)) return;
-    const used = await diskUsageMb(base, uid);
+    const used = (await this.spawner.report({ userId, uid, disk: true })).diskMb ?? null;
     if (used !== null && used > maxDiskMb) {
       this.overDisk.set(userId, used);
       throw new WorkerUnavailableError(
@@ -376,108 +347,88 @@ export class WorkerPool {
     this.overDisk.delete(userId);
   }
 
+  private recentCrashes(userId: string): number[] {
+    return (this.crashes.get(userId) ?? []).filter((t) => Date.now() - t < CRASH_WINDOW_MS);
+  }
+
   private async start(userId: string): Promise<Running> {
-    const recent = (this.crashes.get(userId) ?? []).filter((t) => Date.now() - t < CRASH_WINDOW_MS);
+    const recent = this.recentCrashes(userId);
     if (recent.length >= CRASH_LIMIT && Date.now() - recent[recent.length - 1]! < CRASH_PAUSE_MS) {
       throw new WorkerUnavailableError("Your workspace keeps stopping — try again in a minute");
     }
     const dirs = userDirs(this.opts.dataDir, userId);
     const uid = this.uidOf(userId);
     const email = this.opts.emailOf?.(userId) ?? null;
-    // Nothing of an earlier worker's is left running as this uid — and so
-    // nothing of it can rearrange the folders while root prepares them.
     await this.settling.get(userId);
-    if (uid !== null) await endProcessesOf(uid);
-    await this.checkRoom(userId, dirs.base, uid);
-    await this.prepareDirs(dirs, uid);
-    // Unlinking never follows a link, and `run` is a folder root just checked.
-    await rm(dirs.socket, { force: true });
+    await this.checkRoom(userId, uid);
     const repos = this.opts.repos?.get(userId) ?? [];
-    const env = workerEnv(dirs, await this.opts.secrets(userId), this.opts.baseEnv, email, repos);
-    const stdio = this.opts.stdio ?? "inherit";
-    const proc = Bun.spawn(workerCommand(this.opts.entry, uid, this.limits), {
-      cwd: dirs.root,
-      env,
-      stdin: "ignore",
-      stdout: stdio,
-      stderr: stdio,
-    });
-    const worker: Running = { proc, uid, socket: dirs.socket, lastUsed: Date.now(), stopping: false };
-    void proc.exited.then((code) => {
-      if (this.running.get(userId) === worker) this.running.delete(userId);
-      if (worker.stopping) return;
-      console.error(`worker for ${userId} exited with code ${code}`);
-      this.crashes.set(userId, [...recent, Date.now()].slice(-CRASH_LIMIT));
-      // It went by itself: clear what it left running, then note its repos.
-      // The next start waits for this, so the clean-up never meets it.
-      const settled = (uid === null ? Promise.resolve() : endProcessesOf(uid))
-        .then(() => this.captureRepos(userId))
-        .catch((e: Error) => console.error(`clearing up after the worker of ${userId} failed: ${e.message}`))
-        .finally(() => {
-          if (this.settling.get(userId) === settled) this.settling.delete(userId);
-        });
-      this.settling.set(userId, settled);
-    });
+    const egressPort = this.opts.egressPort ?? null;
+    // A key of its own for every start: a request that reaches this worker
+    // through another worker's socket, or any other way, does not carry it.
+    const key = randomToken();
+    const env = workerEnv(dirs, await this.opts.secrets(userId), this.opts.baseEnv, email, repos, { key, egressPort });
+    let end!: (code: number | null) => void;
+    const ended = new Promise<number | null>((resolve) => (end = resolve));
+    const worker: Running = {
+      instance: randomToken().slice(0, 22),
+      uid,
+      socket: dirs.socket,
+      key,
+      lastUsed: Date.now(),
+      stopping: false,
+      ended,
+      end,
+    };
+    this.instances.set(worker.instance, { userId, worker });
     try {
+      const { processes, openFiles } = this.limits;
+      await this.spawner.start({ userId, uid, instance: worker.instance, env, limits: { processes, openFiles }, egressPort });
       await this.waitReady(worker);
     } catch (e) {
       worker.stopping = true;
-      proc.kill("SIGKILL");
-      if (uid !== null) await endProcessesOf(uid);
+      await this.spawner.stop({ userId, uid }).catch(() => {});
+      this.instances.delete(worker.instance);
       throw e;
     }
     this.running.set(userId, worker);
     return worker;
   }
 
-  /**
-   * The user's folders. Without separate uids they are the gateway's own,
-   * 0700. With them, the top folder is root's — the worker's group may pass
-   * through and list it, 0750, but only root can add, rename or replace an
-   * entry — and the five folders in it are the worker's, 0700. So each name
-   * root opens here is a folder root made, never a link a worker put in its
-   * place; the folders above are 0711, passable but not listable.
-   */
-  private async prepareDirs(dirs: ReturnType<typeof userDirs>, uid: number | null): Promise<void> {
-    const users = join(this.opts.dataDir, "users");
-    await mkdir(users, { recursive: true, mode: 0o711 });
-    const own = [dirs.home, dirs.root, dirs.repos, dirs.run, dirs.tmp];
-    if (uid === null) {
-      for (const dir of [dirs.base, ...own]) await mkdir(dir, { recursive: true, mode: 0o700 });
-      return;
-    }
-    await chmod(this.opts.dataDir, 0o711);
-    await chmod(users, 0o711);
-    await folder(dirs.base, 0o750);
-    // A top folder from before this rule belonged to the worker: take it back.
-    await lchown(dirs.base, 0, uid);
-    await chmod(dirs.base, 0o750);
-    for (const dir of own) {
-      const owner = (await folder(dir, 0o700)).uid;
-      if (owner === uid) continue;
-      // Root's own: just made, or from before workers had uids. No worker
-      // could write in it, so handing over what it holds follows no link of
-      // a worker's. Anyone else's is not this person's folder at all.
-      if (owner !== 0) throw new Error(`${dir} belongs to uid ${owner}, not to this worker's ${uid}`);
-      const chown = Bun.spawn([systemTool("chown") ?? "chown", "-R", "-h", `${uid}:${uid}`, dir], { stdout: "ignore", stderr: "pipe" });
-      if ((await chown.exited) !== 0) {
-        throw new Error(`chown of ${dir} failed: ${await new Response(chown.stderr).text()}`);
-      }
-    }
+  /** The spawner says a worker's process has ended, and nothing of its uid is left. */
+  private ended(instance: string, code: number | null): void {
+    const known = this.instances.get(instance);
+    if (!known) return;
+    this.instances.delete(instance);
+    const { userId, worker } = known;
+    worker.end(code);
+    if (this.running.get(userId) === worker) this.running.delete(userId);
+    if (worker.stopping) return;
+    console.error(`worker for ${userId} exited with code ${code}`);
+    this.crashes.set(userId, [...this.recentCrashes(userId), Date.now()].slice(-CRASH_LIMIT));
+    // It went by itself: note its repos. The next start waits for this.
+    const settled = this.captureRepos(userId).finally(() => {
+      if (this.settling.get(userId) === settled) this.settling.delete(userId);
+    });
+    this.settling.set(userId, settled);
   }
 
   /** Wait until the worker answers on its socket, or fail when it exits or takes too long. */
   private async waitReady(worker: Running): Promise<void> {
     const deadline = Date.now() + (this.opts.startTimeoutMs ?? 30_000);
+    let exited = false;
     let exitCode: number | null = null;
-    void worker.proc.exited.then((code) => {
+    void worker.ended.then((code) => {
+      exited = true;
       exitCode = code;
     });
     while (Date.now() < deadline) {
-      if (exitCode !== null) throw new WorkerUnavailableError(`Your workspace failed to start (exit ${exitCode})`);
+      if (exited) throw new WorkerUnavailableError(`Your workspace failed to start (exit ${exitCode})`);
       try {
         // Any answer will do — an unknown path is the app's quick 404.
-        const res = await fetch("http://localhost/__specdriven_ready", { unix: worker.socket });
+        const res = await fetch("http://localhost/__specdriven_ready", {
+          unix: worker.socket,
+          headers: { [WORKER_KEY_HEADER]: worker.key },
+        });
         await res.body?.cancel();
         return;
       } catch {
@@ -486,18 +437,4 @@ export class WorkerPool {
     }
     throw new WorkerUnavailableError("Your workspace took too long to start");
   }
-}
-
-/**
- * Make the folder at `path` unless something is there already, and answer
- * what is there — which must be a folder itself, not a link to one: root
- * goes on to change its owner.
- */
-async function folder(path: string, mode: number) {
-  await mkdir(path, { mode }).catch((e: NodeJS.ErrnoException) => {
-    if (e.code !== "EEXIST") throw e;
-  });
-  const info = await lstat(path);
-  if (!info.isDirectory()) throw new Error(`${path} is not a folder`);
-  return info;
 }

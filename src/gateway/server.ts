@@ -2,6 +2,24 @@
 // own pages and /auth/* API, and for a signed-in user everything else,
 // forwarded to that user's worker. Kept apart from index.ts, which reads the
 // configuration and listens, so tests can drive it with their own pieces.
+//
+// With an account url as well as a public one, the two halves answer on two
+// hosts (docs/hosted-tenant-isolation.md "Step 2",
+// specs/app/hosted-app.feature.md "The account pages have a host of their
+// own"):
+//
+//   the account host   sign-in, the account and admin pages, /auth/*. Its
+//                      session cookie is the one that can change secrets
+//                      and roles.
+//   the app's host     the app's pages and each person's worker. Its
+//                      cookie reaches that worker and nothing else.
+//
+// A worker runs on a repository its person, or a teammate of theirs,
+// controls, and what it answers is shown on the app's host. Script it gets
+// a browser to run there finds no cookie the account host accepts, and a
+// write it sends to the account host comes from another origin, which is
+// refused. A signed-in browser gets from one host to the other with a code
+// that works once (sessions.ts).
 
 import type { Database } from "bun:sqlite";
 import { fetchIdentity } from "../server/auth";
@@ -9,8 +27,10 @@ import type { TokenRecord } from "../server/tokenStore";
 import { rejectRequest } from "../server/requestGuard";
 import { Accounts, normalizeEmail } from "./accounts";
 import { Admin, normalizeAllowedEntry, type Role } from "./admin";
+import { appCsp, type AppCspMode } from "./appCsp";
 import type { AppShell } from "./appShell";
 import { ASSET_PREFIX, type GatewayAssets, type PageName } from "./assets";
+import { hashToken, randomToken } from "./crypto";
 import type { Mailer } from "./mail";
 import { proxyToWorker } from "./proxy";
 import { HOUR_MS, MINUTE_MS, RateLimiter, type Limit } from "./rateLimit";
@@ -21,19 +41,24 @@ import {
   MAX_SECRET_LENGTH,
   type SecretStore,
 } from "./secrets";
+import { safeNextPath } from "./pages/next";
 import {
+  APP_COOKIE,
   clearedCookie,
-  readSessionToken,
+  HANDOVER_COOKIE,
+  HANDOVER_STATE_MS,
+  readCookie,
+  SESSION_COOKIE,
   sessionCookie,
   Sessions,
   type CookieOptions,
   type SessionUser,
 } from "./sessions";
-import { WorkerUnavailableError } from "./workers";
+import { WorkerUnavailableError, type WorkerAddress } from "./workers";
 
 /** The slice of the worker pool the handler uses (workers.ts). */
 export interface Workers {
-  socketFor(userId: string): Promise<string>;
+  workerFor(userId: string): Promise<WorkerAddress>;
   touch(userId: string): void;
   restart(userId: string): Promise<void>;
 }
@@ -49,6 +74,13 @@ export interface GatewayDeps {
   production: boolean;
   /** e.g. https://specs.example.com; null in development (links use the request's origin). */
   publicUrl: string | null;
+  /**
+   * e.g. https://account.specs.example.com: the account pages' own host.
+   * Absent, they share the app's.
+   */
+  accountUrl?: string | null;
+  /** The policy on the app's own pages (appCsp.ts): enforced unless said otherwise. */
+  appCsp?: AppCspMode;
   /** Who a GitHub token belongs to (src/server/auth.ts); replaced in tests. */
   githubIdentity?: (token: string) => Promise<TokenRecord>;
   now?: () => number;
@@ -65,6 +97,9 @@ export interface Gateway {
 type User = SessionUser & { role: Role };
 
 type Ctx = { req: Request; url: URL; ip: string; user: User | null; token: string | null };
+
+/** What the app's host answers for itself, beside the app's pages and the worker's API. */
+const SESSION_PREFIX = "/_session/";
 
 const PAGE_ROUTES: Record<string, PageName> = {
   "/login": "login",
@@ -101,25 +136,51 @@ export function createGateway(deps: GatewayDeps): Gateway {
   const githubIdentity = deps.githubIdentity ?? fetchIdentity;
   // Development without PUBLIC_URL: links point wherever the request came in.
   let baseUrl = deps.publicUrl ?? "http://localhost:3000";
+  // Two hosts when both urls are given; the emailed links then lead to the
+  // account host, where the pages they open are.
+  const hosts =
+    deps.publicUrl && deps.accountUrl
+      ? { app: deps.publicUrl, account: deps.accountUrl, appHost: new URL(deps.publicUrl).host, accountHost: new URL(deps.accountUrl).host }
+      : null;
+  if (hosts) baseUrl = hosts.account;
   const accounts = new Accounts(deps.db, sessions, deps.mailer, { baseUrl: () => baseUrl, now });
   const admin = new Admin(deps.db, deps.mailer, { baseUrl: () => baseUrl, now });
   const allowedHosts = deps.publicUrl ? [new URL(deps.publicUrl).host] : ["*"];
+  const shellCsp = appCsp(deps.appCsp ?? "enforce", deps.appShell.inlineScripts ?? []);
 
-  function secure(res: Response, kind: "page" | "api" | "app"): Response {
+  // The secret a browser keeps through a hand-over is signed with a key of
+  // this process's own. A cookie of that name which script on the app's
+  // host managed to set — the real one is hidden from it, but may have
+  // expired — is not one the gateway made, and is never used.
+  const stateKey = randomToken();
+  const signedState = (nonce: string) => `${nonce}.${hashToken(`${stateKey}|${nonce}`).slice(0, 32)}`;
+  const ownState = (state: string | null): state is string => {
+    const [nonce, , extra] = (state ?? "").split(".");
+    return Boolean(nonce) && extra === undefined && /^[A-Za-z0-9_-]{32,64}$/.test(nonce!) && signedState(nonce!) === state;
+  };
+
+  /** `shell`: the app's own page or one of its bundled files, which carry its policy. */
+  function secure(res: Response, kind: "page" | "api" | "app" | "shell"): Response {
     const h = res.headers;
     h.set("X-Content-Type-Options", "nosniff");
     if (deps.production) h.set("Strict-Transport-Security", "max-age=31536000");
-    if (kind === "app") {
+    if (kind === "app" || kind === "shell") {
       if (!h.has("X-Frame-Options")) h.set("X-Frame-Options", "SAMEORIGIN");
       if (!h.has("Referrer-Policy")) h.set("Referrer-Policy", "same-origin");
+      if (kind === "shell" && shellCsp) h.set(shellCsp.header, shellCsp.value);
       return res;
     }
     h.set("X-Frame-Options", "DENY");
     h.set("Referrer-Policy", "no-referrer");
     h.set("Cache-Control", "no-store");
+    // No other origin embeds or reads what the gateway itself answers.
+    h.set("Cross-Origin-Resource-Policy", "same-origin");
     if (kind === "page") h.set("Content-Security-Policy", PAGE_CSP);
     return res;
   }
+
+  const redirect = (location: string, headers?: Record<string, string>) =>
+    secure(new Response(null, { status: 302, headers: { Location: location, ...headers } }), "api");
 
   const json = (data: unknown, status = 200, headers?: Record<string, string>) =>
     secure(Response.json(data, { status, headers }), "api");
@@ -220,6 +281,7 @@ export function createGateway(deps: GatewayDeps): Gateway {
       }
     }
     if (!url.pathname.startsWith("/auth/")) return null;
+    if (route === "GET /auth/handover" && hosts) return handOver(ctx);
     if (!user) return json({ error: "Sign in first" }, 401);
 
     if (route === "GET /auth/me") return json(await me(user));
@@ -337,28 +399,49 @@ export function createGateway(deps: GatewayDeps): Gateway {
     return server?.requestIP(req)?.address ?? "unknown";
   }
 
-  async function handle(req: Request, server?: Parameters<Gateway["fetch"]>[1]): Promise<Response> {
-    const url = new URL(req.url);
-    // The platform's health check comes from its own host name.
-    if (url.pathname === "/healthz") return new Response("ok");
-    // Browsers ask for it on every page, the sign-in pages included.
-    if (url.pathname === "/favicon.ico") return new Response(null, { status: 204 });
-    if (!deps.publicUrl) baseUrl = url.origin;
+  /** The path asked for, as a `?next=` value; nothing for the app's front page. */
+  function nextOf(url: URL): string {
+    return url.pathname === "/" ? "" : `?next=${encodeURIComponent(url.pathname + url.search)}`;
+  }
 
-    // Host, Origin and body type, the app's own trust boundary
-    // (src/server/requestGuard.ts), checked here for everything.
-    const refused = rejectRequest(req, allowedHosts);
-    if (refused) {
-      // Another name for this service, such as its *.up.railway.app domain
-      // once PUBLIC_URL names a custom one: a page load moves to the same
-      // path on PUBLIC_URL. A GET or HEAD is refused only for its Host.
-      if (deps.publicUrl && (req.method === "GET" || req.method === "HEAD")) {
-        const location = `${deps.publicUrl}${url.pathname}${url.search}`;
-        return secure(new Response(null, { status: 301, headers: { Location: location } }), "api");
-      }
-      return secure(refused, "api");
+  /**
+   * The account host's half of a hand-over: a signed-in browser is sent
+   * back to the app's host with a code that works once; any other signs in
+   * first and comes back here.
+   */
+  function handOver(ctx: Ctx): Response {
+    const state = ctx.url.searchParams.get("state");
+    if (!ownState(state)) return json({ error: "This link is incomplete" }, 400);
+    const code = sessions.issueHandover(ctx.token, state);
+    if (!code) return redirect(`/login?next=${encodeURIComponent(ctx.url.pathname + ctx.url.search)}`);
+    const next = safeNextPath(ctx.url.searchParams.get("next"), hosts!.app);
+    return redirect(`${hosts!.app}${SESSION_PREFIX}handover?code=${code}&next=${encodeURIComponent(next)}`);
+  }
+
+  /**
+   * The app host's half: the code and the secret in this browser's cookie
+   * make an app session. The cookie stays for its few minutes, so every tab
+   * that was sent off together comes back signed in.
+   */
+  function takeOver(ctx: Ctx): Response {
+    const next = safeNextPath(ctx.url.searchParams.get("next"), hosts!.app);
+    const state = readCookie(ctx.req, cookieOpts, HANDOVER_COOKIE);
+    const token = sessions.redeemHandover(ctx.url.searchParams.get("code"), ownState(state) ? state : null, {
+      ip: ctx.ip,
+      userAgent: ctx.req.headers.get("user-agent"),
+    });
+    if (!token) {
+      // No way on from here by itself: a browser that keeps no cookie would
+      // go round for ever.
+      const page = `<!doctype html><meta charset="utf-8"><title>SpecDriven</title><p>Signing in did not finish. <a href="/">Try again</a>.</p>`;
+      return secure(new Response(page, { status: 400, headers: { "Content-Type": "text/html; charset=utf-8" } }), "page");
     }
+    return redirect(next, { "Set-Cookie": sessionCookie(token, cookieOpts, undefined, APP_COOKIE) });
+  }
 
+  /** The gateway's own pages and the /auth/* API; null when the path is neither. */
+  async function ownPages(ctx: Ctx): Promise<Response | null> {
+    const { req, url, user } = ctx;
     if (req.method === "GET" && url.pathname.startsWith(ASSET_PREFIX)) {
       const asset = deps.assets.file(url.pathname);
       if (!asset) return secure(new Response("Not Found", { status: 404 }), "api");
@@ -369,23 +452,13 @@ export function createGateway(deps: GatewayDeps): Gateway {
         "app",
       );
     }
-
-    const token = readSessionToken(req, cookieOpts);
-    const session = sessions.lookup(token);
-    const user = session ? { ...session, role: admin.roleOf(session.userId) } : null;
-    const ctx: Ctx = { req, url, ip: clientIp(req, server), user, token };
-
     const page = PAGE_ROUTES[url.pathname];
     if (page && req.method === "GET") {
       // Signed in already: the sign-in pages lead on to the app.
-      if (user && SIGN_IN_PAGES.has(page)) {
-        return secure(new Response(null, { status: 302, headers: { Location: "/" } }), "api");
-      }
+      if (user && SIGN_IN_PAGES.has(page)) return redirect("/");
       // The admin page is for admins only (admin.ts).
       if (page === "admin" && user?.role !== "admin") {
-        if (!user) {
-          return secure(new Response(null, { status: 302, headers: { Location: "/login?next=%2Fadmin" } }), "api");
-        }
+        if (!user) return redirect("/login?next=%2Fadmin");
         const refused = new Response("Only admins can open this page.", {
           status: 403,
           headers: { "Content-Type": "text/plain; charset=utf-8" },
@@ -395,25 +468,34 @@ export function createGateway(deps: GatewayDeps): Gateway {
       const asset = deps.assets.page(page);
       return secure(new Response(asset.body, { headers: { "Content-Type": asset.type } }), "page");
     }
+    return authApi(ctx);
+  }
 
-    const auth = await authApi(ctx);
-    if (auth) return auth;
-
-    if (!user) {
-      const wantsPage = req.method === "GET" && (req.headers.get("accept") ?? "").includes("text/html");
-      if (wantsPage) {
-        const next = url.pathname === "/" ? "" : `?next=${encodeURIComponent(url.pathname + url.search)}`;
-        return secure(new Response(null, { status: 302, headers: { Location: `/login${next}` } }), "api");
-      }
-      return json({ error: "Sign in first" }, 401);
+  /** What the app's host answers about the session itself: who is signed in, and signing out. */
+  function sessionApi(ctx: Ctx): Response | null {
+    const route = `${ctx.req.method} ${ctx.url.pathname}`;
+    if (!ctx.url.pathname.startsWith(SESSION_PREFIX)) return null;
+    // The email and the role, and nothing else of the account: this is the
+    // host a worker's answers are shown on.
+    if (route === `GET ${SESSION_PREFIX}me`) {
+      return ctx.user ? json({ email: ctx.user.email, role: ctx.user.role }) : json({ error: "Sign in first" }, 401);
     }
+    if (route === `POST ${SESSION_PREFIX}logout`) {
+      if (hosts) sessions.revokeWithSignIn(ctx.token);
+      else sessions.revoke(ctx.token);
+      return json({ ok: true }, 200, { "Set-Cookie": clearedCookie(cookieOpts, hosts ? APP_COOKIE : SESSION_COOKIE) });
+    }
+    return json({ error: "Not found" }, 404);
+  }
 
+  /** The app for a signed-in user: its pages from the gateway, the rest from their worker. */
+  async function app(ctx: Ctx, user: User): Promise<Response> {
+    const { req, url } = ctx;
     const shell = await deps.appShell.serve(req, url);
-    if (shell) return secure(shell, "app");
-
+    if (shell) return secure(shell, "shell");
     try {
-      const socket = await deps.workers.socketFor(user.userId);
-      const res = await proxyToWorker(req, socket, cookieOpts);
+      const worker = await deps.workers.workerFor(user.userId);
+      const res = await proxyToWorker(req, worker, cookieOpts);
       deps.workers.touch(user.userId);
       return secure(res, "app");
     } catch (e) {
@@ -422,6 +504,89 @@ export function createGateway(deps: GatewayDeps): Gateway {
       console.error(`proxy for ${user.userId} failed: ${(e as Error).message}`);
       return json({ error: "Your workspace did not answer — try again" }, 502);
     }
+  }
+
+  const wantsPage = (req: Request) => req.method === "GET" && (req.headers.get("accept") ?? "").includes("text/html");
+
+  function userOf(req: Request, cookie: string, kind: "account" | "app"): { user: User | null; token: string | null } {
+    const token = readCookie(req, cookieOpts, cookie);
+    const session = sessions.lookup(token, kind);
+    return { token, user: session ? { ...session, role: admin.roleOf(session.userId) } : null };
+  }
+
+  async function handle(req: Request, server?: Parameters<Gateway["fetch"]>[1]): Promise<Response> {
+    const url = new URL(req.url);
+    // The platform's health check comes from its own host name.
+    if (url.pathname === "/healthz") return new Response("ok");
+    // Browsers ask for it on every page, the sign-in pages included.
+    if (url.pathname === "/favicon.ico") return new Response(null, { status: 204 });
+    if (!deps.publicUrl) baseUrl = url.origin;
+
+    // Which half this request is for. A write must come from the page's own
+    // origin (below), so nothing shown on the app's host can write to the
+    // account host.
+    const host = (req.headers.get("host") ?? "").toLowerCase();
+    const side = !hosts ? "both" : host === hosts.accountHost ? "account" : "app";
+
+    // Host, Origin and body type, the app's own trust boundary
+    // (src/server/requestGuard.ts), checked here for everything.
+    const refused = rejectRequest(req, side === "account" ? [hosts!.accountHost] : allowedHosts);
+    if (refused) {
+      // Another name for this service, such as its *.up.railway.app domain
+      // once PUBLIC_URL names a custom one: a page load moves to the same
+      // path on PUBLIC_URL. A GET or HEAD is refused only for its Host.
+      if (deps.publicUrl && (req.method === "GET" || req.method === "HEAD")) {
+        const location = `${deps.publicUrl}${url.pathname}${url.search}`;
+        return secure(new Response(null, { status: 301, headers: { Location: location } }), "api");
+      }
+      return secure(refused, "api");
+    }
+    const ip = clientIp(req, server);
+
+    if (side === "account") {
+      const ctx: Ctx = { req, url, ip, ...userOf(req, SESSION_COOKIE, "account") };
+      const own = await ownPages(ctx);
+      if (own) return own;
+      // Everything else lives on the app's host.
+      if (req.method === "GET" || req.method === "HEAD") return redirect(`${hosts!.app}${url.pathname}${url.search}`);
+      return json({ error: "Not found" }, 404);
+    }
+
+    if (side === "app") {
+      // The account pages, and links to them from before they moved: the
+      // browser keeps a link's #token across the redirect.
+      if (PAGE_ROUTES[url.pathname] && (req.method === "GET" || req.method === "HEAD")) {
+        return redirect(`${hosts!.account}${url.pathname}${url.search}`);
+      }
+      // Nothing of the account is served here, to any session.
+      if (url.pathname.startsWith("/auth/") || url.pathname.startsWith(ASSET_PREFIX)) return json({ error: "Not found" }, 404);
+      if (req.method === "GET" && url.pathname === `${SESSION_PREFIX}handover`) {
+        return takeOver({ req, url, ip, user: null, token: null });
+      }
+      const ctx: Ctx = { req, url, ip, ...userOf(req, APP_COOKIE, "app") };
+      const session = sessionApi(ctx);
+      if (session) return session;
+      if (ctx.user) return app(ctx, ctx.user);
+      if (!wantsPage(req)) return json({ error: "Sign in first" }, 401);
+      // Off to the account host for a code, with a secret left in this
+      // browser that the code will only work together with.
+      const kept = readCookie(req, cookieOpts, HANDOVER_COOKIE);
+      const state = ownState(kept) ? kept : signedState(randomToken());
+      const next = nextOf(url).replace("?", "&");
+      return redirect(`${hosts!.account}/auth/handover?state=${state}${next}`, {
+        "Set-Cookie": sessionCookie(state, cookieOpts, HANDOVER_STATE_MS, HANDOVER_COOKIE),
+      });
+    }
+
+    // One host for both halves.
+    const ctx: Ctx = { req, url, ip, ...userOf(req, SESSION_COOKIE, "account") };
+    const own = await ownPages(ctx);
+    if (own) return own;
+    const session = sessionApi(ctx);
+    if (session) return session;
+    if (ctx.user) return app(ctx, ctx.user);
+    if (wantsPage(req)) return redirect(`/login${nextOf(url)}`);
+    return json({ error: "Sign in first" }, 401);
   }
 
   return { fetch: handle, sessions, accounts, admin };

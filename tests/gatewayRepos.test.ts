@@ -12,7 +12,7 @@ import { serializeSettings } from "../src/server/settingsFormat";
 import { readSettings } from "./helpers/settingsFile";
 import { openDatabase } from "../src/gateway/db";
 import { proxyToWorker } from "../src/gateway/proxy";
-import { cleanRepos, readWorkerRepos, RecentRepos, seedWorkerRepos } from "../src/gateway/repos";
+import { cleanRepos, readSettingsText, readWorkerRepos, RecentRepos, reposInSettings, seedWorkerRepos } from "../src/gateway/repos";
 import { userDirs, WorkerPool } from "../src/gateway/workers";
 import { SETTINGS_VERSION } from "../src/server/state";
 
@@ -90,6 +90,25 @@ test("a worker's settings give the open repo first, then its recent ones; no fil
   expect(await readWorkerRepos(root)).toEqual([]);
 });
 
+// Where the gateway is not root, the spawner reads the file and the gateway
+// makes sense of it (specs/app/hosted-app.feature.md "The part that answers
+// the internet is not root"): the text crosses between them unparsed.
+test("a worker's settings are read as text by one side and made sense of by the other", async () => {
+  const root = await freshRoot("text");
+  expect(await readSettingsText(root)).toBeNull();
+  expect(reposInSettings(null)).toBeNull();
+  await writeSettings(root, { dataRepo: SPECS, recentFolders: [{ path: OLDER, kind: "spec" }] });
+  const found = await readSettingsText(root);
+  expect(found?.file).toEndWith("settings.yaml");
+  expect(found?.text).toContain(SPECS);
+  expect(reposInSettings(found)).toEqual([SPECS, OLDER]);
+  // What arrives is whatever the other side sent: only repo urls are taken from it.
+  expect(reposInSettings({ file: "settings.yaml", text: "dataRepo: [not, a, url]\nmasterKey: secret\n" })).toEqual([]);
+  expect(reposInSettings({ file: "settings.yaml", text: "{ not: yaml" })).toBeNull();
+  expect(reposInSettings({ file: "settings.yaml", text: `dataRepo: ${SPECS}\n# ${"x".repeat(1024 * 1024)}` })).toBeNull();
+  expect(reposInSettings({ file: "settings.yaml", text: 7 as unknown as string })).toBeNull();
+});
+
 test("a settings file that is a symlink is not followed", async () => {
   const root = await freshRoot("link");
   const elsewhere = join(dir, "elsewhere.json");
@@ -142,8 +161,8 @@ test("after the volume is lost, the user's next worker opens the repo they had o
 
     // A redeploy without the volume: the user's folder is gone.
     await rm(dataDir, { recursive: true, force: true });
-    const socket = await pool.socketFor(A);
-    const res = await proxyToWorker(new Request("http://localhost/api/state"), socket, { secure: false });
+    const worker = await pool.workerFor(A);
+    const res = await proxyToWorker(new Request("http://localhost/api/state"), worker, { secure: false });
     const state = (await res.json()) as Record<string, unknown>;
     expect(state.needsDataRepo).toBe(false);
     expect(state.dataRepo).toBe(SPECS);

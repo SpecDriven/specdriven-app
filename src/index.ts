@@ -6,11 +6,12 @@ if (process.argv[2] === "plugin") {
   process.exit(await runPluginCli(process.argv.slice(3)));
 }
 
+import { chmodSync } from "node:fs";
 import index from "./index.html";
 import { applyStartupState, handleApi } from "./server/api";
 import { shell } from "./plugins/host/loader";
 import { installDemoPlugins, isDemoMode, setupDemo } from "./server/demo";
-import { isHostedMode } from "./server/hostedMode";
+import { isHostedMode, workerKeyGuard } from "./server/hostedMode";
 import { isReadOnlyMode } from "./server/readOnlyMode";
 import { createEnvBackend, setTokenBackend } from "./server/tokenStore";
 import { allowedHosts, listenHostname, rejectRequest } from "./server/requestGuard";
@@ -104,7 +105,12 @@ const shellRoutes = () => ({
 // (src/server/requestGuard.ts): Host names this machine, writes come from
 // the app's own origin and carry JSON or a file upload.
 const extraHosts = allowedHosts();
+// A hosted worker also asks every request for the key its gateway gave it
+// (src/server/hostedMode.ts): no request meant for another worker is served.
+const refuseWithoutKey = workerKeyGuard(isHostedMode() ? process.env.SPECDRIVEN_WORKER_KEY : undefined);
+delete process.env.SPECDRIVEN_WORKER_KEY;
 const fetch = async (req: Request) =>
+  refuseWithoutKey(req) ??
   rejectRequest(req, extraHosts) ??
   (await handleApi(req)) ??
   new Response("Not Found", { status: 404 });
@@ -138,6 +144,11 @@ const server = unixSocket
       // sets 0.0.0.0).
       hostname: listenHostname(),
     });
+
+// The hosted gateway is not this worker's user, and connects all the same:
+// the folder the socket is in lets in the worker, the gateway and no one
+// else (src/gateway/spawner.ts), so the socket itself is open.
+if (unixSocket && isHostedMode()) chmodSync(unixSocket, 0o666);
 
 // A plugin folder that appears while the server runs brings its url
 // prefixes with it: the route table is swapped for one that serves the

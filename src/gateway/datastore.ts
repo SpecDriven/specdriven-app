@@ -52,6 +52,8 @@ interface Table {
   orderBy: string;
   /** Columns holding bytes, written as base64. */
   blobs?: string[];
+  /** Which rows go into the repo; all of them when absent. */
+  where?: string;
 }
 
 // In insert order: the rows below reference users.
@@ -95,6 +97,9 @@ const TABLES: Table[] = [
     name: "sessions",
     columns: ["id_hash", "user_id", "created_at", "expires_at"],
     orderBy: "id_hash",
+    // The sign-ins only. An app session (sessions.ts) is made again from its
+    // sign-in when needed, and read back here it would count as a sign-in.
+    where: "kind = 'account'",
   },
 ];
 
@@ -128,7 +133,8 @@ export function upgradeSnapshot(files: Record<string, string>): Record<string, s
 export function exportSnapshot(db: Database): Record<string, string> {
   const files: Record<string, string> = {};
   for (const table of TABLES) {
-    const rows = db.query(`SELECT ${table.columns.join(", ")} FROM ${table.name} ORDER BY ${table.orderBy}`).all() as Row[];
+    const where = table.where ? ` WHERE ${table.where}` : "";
+    const rows = db.query(`SELECT ${table.columns.join(", ")} FROM ${table.name}${where} ORDER BY ${table.orderBy}`).all() as Row[];
     for (const row of rows) {
       for (const column of table.blobs ?? []) row[column] = Buffer.from(row[column] as Uint8Array).toString("base64");
     }

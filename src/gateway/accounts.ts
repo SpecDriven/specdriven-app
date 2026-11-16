@@ -10,6 +10,7 @@
 
 import type { Database } from "bun:sqlite";
 import { hashToken, randomToken } from "./crypto";
+import { OS_UID_BASE } from "./limits";
 import { templates, type Mailer } from "./mail";
 import type { Sessions } from "./sessions";
 
@@ -17,8 +18,7 @@ export const VERIFY_TTL_MS = 24 * 60 * 60 * 1000;
 export const RESET_TTL_MS = 30 * 60 * 1000;
 export const PASSWORD_MIN = 12;
 export const PASSWORD_MAX = 256;
-/** Workers run as uids from here up — clear of any account the image has. */
-export const OS_UID_BASE = 200_000;
+export { OS_UID_BASE };
 
 const COMMON_PASSWORDS = new Set([
   "123456789012",

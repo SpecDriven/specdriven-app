@@ -100,7 +100,7 @@ function settingsPaths(root: string) {
  * settings.json only without one; nothing that is not a plain file in a
  * plain folder, and nothing over the size limit.
  */
-async function settingsText(root: string): Promise<{ file: string; text: string } | null> {
+async function settingsText(root: string): Promise<SettingsText | null> {
   const { dir, file: yaml, json } = settingsPaths(root);
   const [dirStat, yamlStat, jsonStat] = await Promise.all(
     [dir, yaml, json].map((path) => lstat(path).catch(() => null)),
@@ -115,7 +115,7 @@ async function settingsText(root: string): Promise<{ file: string; text: string 
  * that path — a link, a pipe — reaches nothing the worker could not read
  * itself, and a read that never ends is stopped.
  */
-async function settingsTextAs(uid: number, root: string): Promise<{ file: string; text: string } | null> {
+async function settingsTextAs(uid: number, root: string): Promise<SettingsText | null> {
   const { file: yaml, json } = settingsPaths(root);
   for (const file of [yaml, json]) {
     const res = await runAs(uid, ["head", "-c", String(MAX_SETTINGS_BYTES + 1), file], 10_000);
@@ -125,14 +125,28 @@ async function settingsTextAs(uid: number, root: string): Promise<{ file: string
   return null;
 }
 
+/** A worker's settings file as it was read: which one, and its text. */
+export interface SettingsText {
+  file: string;
+  text: string;
+}
+
 /**
- * The repos a worker's settings file names, the open one first; null when
- * there is no settings file to read (nothing to learn, so nothing to forget).
- * `uid` is the worker's own where workers have one (workers.ts).
+ * The text of a worker's settings file, or null when there is none to read.
+ * `uid` is the worker's own where workers have one (workers.ts): the file
+ * is then read as that uid. Where the gateway is split (spawner.ts) only
+ * the spawner can do that, and it hands the text on unparsed.
  */
-export async function readWorkerRepos(root: string, uid: number | null = null): Promise<string[] | null> {
-  const found = uid === null ? await settingsText(root) : await settingsTextAs(uid, root);
-  if (!found) return null;
+export function readSettingsText(root: string, uid: number | null = null): Promise<SettingsText | null> {
+  return uid === null ? settingsText(root) : settingsTextAs(uid, root);
+}
+
+/**
+ * The repos a settings file names, the open one first; null when there is
+ * no settings file to read (nothing to learn, so nothing to forget).
+ */
+export function reposInSettings(found: SettingsText | null): string[] | null {
+  if (!found || typeof found.text !== "string" || found.text.length > MAX_SETTINGS_BYTES) return null;
   let state: unknown;
   try {
     state = parseSettingsText(found.text, found.file);
@@ -152,6 +166,11 @@ export async function readWorkerRepos(root: string, uid: number | null = null): 
     return kind === "spec" ? [path] : [];
   });
   return cleanRepos([dataRepo, ...listed, ...(Array.isArray(recentDataRepos) ? recentDataRepos : [])]);
+}
+
+/** The repos a worker's settings file names (readSettingsText, reposInSettings). */
+export async function readWorkerRepos(root: string, uid: number | null = null): Promise<string[] | null> {
+  return reposInSettings(await readSettingsText(root, uid));
 }
 
 /**
