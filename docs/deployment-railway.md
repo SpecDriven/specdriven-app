@@ -7,17 +7,29 @@ secrets encrypted, and runs **one app server (a worker) per person**. Each
 worker has its own folders and its own credentials.
 
 ```
-Browser ──HTTPS──▶ Railway edge ──▶ gateway (src/gateway, :$PORT)
+Browser ──HTTPS──▶ Railway edge ──▶ gateway (src/gateway, :$PORT, not root)
                                       │  /login /signup /forgot /set-password /account /admin
                                       │  /auth/* API, session cookie → user
                                       │  the app's frontend (built once, /_app/*)
+                                      │
+                                      │  unix socket: start / stop / report
+                                      ▼
+                     spawner (root: the image's first process, no HTTP, no network)
+                                      │  a uid, caps and a sandbox for each worker
                                       ▼
                      worker per user = bun src/index.ts, SPECDRIVEN_HOSTED=1
                      unix socket /data/users/<id>/run/app.sock
                      HOME, settings, clones, temp files under /data/users/<id>/
                      env: that user's GitHub token and agent keys only
+                     out: through the gateway's proxy, to GitHub only
 ```
 
+- **Two processes.** The image starts as root. That first process, the
+  **spawner**, starts the gateway as a uid that is not root (199000) and
+  from then on only starts, stops and reports on workers when the gateway
+  asks over a unix socket (`src/gateway/spawner.ts`). The gateway answers
+  the internet, signs people in and holds the master key. A bug in request
+  handling therefore does not run as root.
 - **Starting and stopping workers.** The gateway starts a person's worker on
   their first request. It stops the worker after 30 idle minutes
   (`SPECDRIVEN_WORKER_IDLE_MINUTES`) and restarts it whenever that person
@@ -46,21 +58,41 @@ Browser ──HTTPS──▶ Railway edge ──▶ gateway (src/gateway, :$PORT
   supplementary groups and `no_new_privs`. Inside `/data/users/<id>` its
   five folders (`home`, `root`, `repos`, `run`, `tmp`) belong to that uid
   with mode 0700; `/data` and `/data/users` are 0711, so a worker can pass
-  through to its own folder but can't list the others; and `app.db` is
-  root-only (0600).
+  through to its own folder but can't list the others. `app.db` is in the
+  gateway's own folder, `/data/gateway` (0700, the gateway's uid), which no
+  worker can enter.
   - This is what makes the folders separate. A user controls their data
     repo's contents, symlinks included, so a link to another user's folder,
     to the database or to `/proc/<gateway>/environ` (where the master key
     is) is refused by the kernel, not by convention.
-  - **Root stays out of those folders.** As root the gateway would follow a
-    link a worker left anywhere it wrote or read. So `/data/users/<id>`
-    itself is root's (mode 0750, the worker's group): the worker can list
-    it, and only root can add, rename or replace one of the five folders.
-    Root makes those and never opens anything inside them. The worker sets
-    up its own git author and settings as it starts
-    (`src/gateway/workerStart.ts`), and the gateway reads a worker's
-    settings and measures its folder as that worker's uid. A volume from
+  - **Root stays out of those folders.** Root would follow a link a worker
+    left anywhere it wrote or read. So `/data/users/<id>` itself is root's
+    (mode 0751, the worker's group): the worker can list it, and only root
+    can add, rename or replace one of the five folders. Root makes those
+    and never opens anything inside them. The worker sets up its own git
+    author and settings as it starts (`src/gateway/workerStart.ts`), and
+    the spawner reads a worker's settings and measures its folder as that
+    worker's uid, handing the text to the gateway unparsed. A volume from
     before this rule is brought in line the next time each worker starts.
+  - **The gateway reaches a worker's socket and nothing else of it.** The
+    `run` folder also belongs to the gateway's group (0750), so the gateway
+    can connect to the socket in it. No other worker can.
+  - **A worker serves only its own gateway's requests.** A worker owns the
+    folder its socket is in and could put a link to another person's socket
+    there. So the gateway gives each worker a fresh key at every start and
+    sends it with every request, and a worker refuses a request without its
+    own key (`src/server/hostedMode.ts`).
+  - **A worker is confined to its own folders and one way out**, where the
+    kernel allows. A launcher applies Landlock and seccomp before the app
+    starts (`src/gateway/launcher.ts`): the worker reads the system and the
+    app's code, writes its own five folders and nowhere else (`/tmp`
+    included), makes no call that reaches another process, a mount or a
+    namespace, and connects to one TCP port, the gateway's outbound proxy
+    (`src/gateway/egress.ts`), which lets through `github.com` and
+    `api.github.com` only. The service logs at each start what its kernel
+    holds a worker to; `bun src/gateway/index.ts probe` prints the same.
+    [Hosted tenant isolation](hosted-tenant-isolation.md#what-the-network-rule-cannot-do)
+    says what the network rule cannot do.
   - **Stopping a worker ends every process of its uid**, not only the
     worker: anything it started and detached goes too, on a stop, a restart
     and before the next start (`src/gateway/endProcesses.ts`).
@@ -68,9 +100,9 @@ Browser ──HTTPS──▶ Railway edge ──▶ gateway (src/gateway, :$PORT
     open files, with a temp folder of its own, and no worker starts while
     the volume is nearly full. A disk and a memory budget per person are
     off until you set them (see the variables below).
-  - Separate uids need the gateway to run as root with `setpriv` installed,
-    as in the image. Elsewhere (development, tests) the workers share the
-    gateway's user and the gateway logs a warning.
+  - Separate uids need the image to start as root with `setpriv` installed,
+    as it does. Elsewhere (development, tests) there is one process, the
+    workers share its user, and it logs a warning.
   - Hosted mode still runs no user-supplied code. Running agents or plugins
     would need more than a uid: a container or sandbox per person.
 
@@ -79,7 +111,8 @@ Browser ──HTTPS──▶ Railway edge ──▶ gateway (src/gateway, :$PORT
 | What | How it is stored | Where |
 |---|---|---|
 | Password | argon2id hash (`Bun.password`), per-hash salt. At least 12 characters, common passwords refused | `users.password_hash` in `/data/app.db` |
-| Session | 32 random bytes in an `HttpOnly; Secure; SameSite=Lax` `__Host-` cookie. The database keeps only its SHA-256. Expires after 14 idle days and 30 days at most | `sessions` |
+| Session | 32 random bytes in an `HttpOnly; Secure; SameSite=Lax` `__Host-` cookie. The database keeps only its SHA-256. Expires after 14 idle days and 30 days at most. With [an account host](#the-account-host) there are two: the sign-in on the account host, and one made from it for the app's host, which ends with it | `sessions` |
+| Hand-over code | 32 random bytes in a redirect's url, from the account host to the app's. Stored as SHA-256 with the hash of a secret in that browser's cookie; works once, for a minute | `handover_codes` |
 | Email links (sign-up, reset) | 32 random bytes in the link's `#fragment`, so the token never reaches a server log or a `Referer` header. Stored as SHA-256, single use; sign-up links last 24 h, reset links 30 min | `email_tokens` |
 | GitHub token, agent API keys | AES-256-GCM with a fresh IV per secret. The owner's id and the secret's name are bound in as associated data | `secrets` |
 | Master key | 32 random bytes, a **Railway variable**, never on the volume | `SPECDRIVEN_MASTER_KEY` |
@@ -98,19 +131,20 @@ redeploy that loses the volume still knows everyone (`src/gateway/datastore.ts`)
   ciphertext, in base64), `repos.json` (each user's recent data repos, GitHub
   urls only, the open one first), and `sessions.json` (the session hash, owner,
   created and expiry times only; no IP address, user agent or last-seen
-  time). Email links and rate-limit counters stay behind. A repo saved before
+  time; sign-ins only, never the sessions made from them for the app's
+  host). Email links and rate-limit counters stay behind. A repo saved before
   the roles is still read: its accounts are users, its `invites.json` becomes
   the allowed emails, and the next save replaces it with `allowed-emails.json`.
-- **On start:** the gateway clones the repo into `/data/datastore` (root-only,
-  like `app.db`). If `app.db` has no accounts, it is filled from the repo. If it
+- **On start:** the gateway clones the repo into `/data/gateway/datastore`
+  (the gateway's alone, like `app.db`). If `app.db` has no accounts, it is filled from the repo. If it
   already has accounts, the volume survived and is newer, so its copy is pushed
   over the repo's.
 - **While running:** every 30 s, a change worth keeping (sign-up, password,
   secret, allowed email, role, recent repos, sign-in, sign-out) is committed
   as "Save accounts" and pushed. A session's sliding expiry alone is not pushed.
-- **Recent repos** (`src/gateway/repos.ts`): the gateway reads them from each
-  running worker's settings file every minute and when the worker stops,
-  as that worker's uid. A worker that starts with no settings file (its
+- **Recent repos** (`src/gateway/repos.ts`): the gateway learns them from each
+  running worker's settings file every minute and when the worker stops.
+  The spawner reads the file as that worker's uid. A worker that starts with no settings file (its
   folder was on the lost volume) is handed the list and writes one naming
   them, the most recent open, so the next sign-in goes straight to that
   repo instead of asking for its url. A settings file that is already there
@@ -224,6 +258,53 @@ gets HSTS and `nosniff`. What a worker answers is passed on without any
 cookie it set, and an API answer carries a policy that keeps it from running
 as a page (`src/gateway/proxy.ts`).
 
+The app's own pages carry a Content-Security-Policy too
+(`src/gateway/appCsp.ts`): only script from the service's own host runs, no
+`eval`, and nothing is sent to or framed by another site. The one host
+outside it is `esm.sh`, for the diagram editor's fonts.
+`SPECDRIVEN_APP_CSP=report` sends the policy as report-only and `=off` sends
+none.
+
+## The account host
+
+A worker runs on a repository its person, or a teammate of theirs, controls,
+and what it answers is shown in the browser. With one host name, script it
+got a browser to run would be on the same origin as the account and admin
+pages and could call `/auth/*` as the signed-in person. So the gateway can
+answer on two host names (`src/gateway/server.ts`):
+
+| Host | Serves | Its cookie |
+|---|---|---|
+| `ACCOUNT_URL`, e.g. `account.private.specdriven.app` | `/login`, `/signup`, `/forgot`, `/set-password`, `/account`, `/admin`, `/auth/*` | the sign-in: it can change secrets and roles |
+| `PUBLIC_URL`, e.g. `private.specdriven.app` | the app's pages, `/api/*` to the person's worker, `/_session/me` and `/_session/logout` | reaches that person's worker and nothing else |
+
+- **Getting from one to the other.** A browser with no session on the app's
+  host is sent to the account host, which sends it back with a code that
+  works once, for a minute. The app's host then sets its own cookie. The
+  code only works together with a secret the app's host left in that
+  browser, so a code made for one browser cannot sign another one in.
+- **What script on the app's host cannot do.** It finds no cookie the
+  account host accepts, and a write it sends to the account host comes from
+  another origin and is refused. `/auth/*` is not served on the app's host
+  at all. It can still act as the person inside the app itself: that is the
+  worker's own reach.
+- **Signing out** on either host ends both sessions. So does changing the
+  password.
+- **Old links** to `/account`, `/admin` and the sign-in pages on the app's
+  host redirect to the account host, and email links lead there directly.
+
+To turn it on:
+
+1. Add the account host as a second custom domain on the gateway's Railway
+   service ([on Cloudflare](#custom-domains-on-cloudflare): its own CNAME
+   and `_railway-verify` TXT record, same port).
+2. Set `ACCOUNT_URL` to it, with `https://`, and redeploy.
+3. Everyone signs in again: the sign-in cookie now belongs to the account
+   host.
+
+Without `ACCOUNT_URL` everything stays on `PUBLIC_URL`'s host, and the
+gateway logs at start that the account pages share it.
+
 ## Deploying on Railway
 
 1. **Create a service from this repository.** `railway.json` points Railway at
@@ -232,17 +313,22 @@ as a page (`src/gateway/proxy.ts`).
    public demo from the same image instead of the gateway, needs none of the
    variables below and no volume (`src/gateway/demo.ts`); so does one with
    `SPECDRIVEN_READONLY=1`, the [public read-only site](#public-read-only-site).
-2. **Add a volume mounted at `/data`.** It holds `app.db` and every user's
+2. **Add a volume mounted at `/data`.** It holds the gateway's folder
+   (`/data/gateway`: `app.db` and the datastore's clone) and every user's
    folders. A service with a volume runs as a single replica, and a redeploy
    has a short gap while the volume moves to the new container. That suits a
-   small team. Railway mounts volumes as root. The gateway runs as root, which
-   it needs in order to give each worker its own uid; the workers do not.
+   small team. Railway mounts volumes as root. The image's first process
+   runs as root, which it needs in order to give each worker its own uid;
+   the gateway it starts and the workers do not. A volume from before the
+   gateway had its own folder is brought in line on the first start:
+   `app.db` and `datastore` move into `/data/gateway`.
 3. **Set the variables:**
 
    | Variable | Value |
    |---|---|
    | `SPECDRIVEN_MASTER_KEY` | output of `bun src/gateway/index.ts genkey` — keep a copy in your password manager; without it the stored secrets are lost |
-   | `PUBLIC_URL` | `https://specs.example.com` (or the `*.up.railway.app` domain) — email links and the Host check use it, and page loads on any other host redirect to it |
+   | `PUBLIC_URL` | `https://specs.example.com` (or the `*.up.railway.app` domain) — the app's host: the Host check uses it, and page loads on any other host redirect to it |
+   | `ACCOUNT_URL` | optional but recommended: `https://account.specs.example.com`, [a host of their own](#the-account-host) for sign-in, the account page and the admin page. Unset, they share `PUBLIC_URL`'s host |
    | `RESEND_API_KEY` | from [resend.com](https://resend.com), with your sending domain verified |
    | `MAIL_FROM` | e.g. `SpecDriven <no-reply@specs.example.com>` on that verified domain |
    | `SPECDRIVEN_WORKER_IDLE_MINUTES` | optional, default 30 |
@@ -251,6 +337,9 @@ as a page (`src/gateway/proxy.ts`).
    | `SPECDRIVEN_MIN_FREE_MB` | optional, default 256: no worker starts while the volume has less free, so `app.db` keeps room |
    | `SPECDRIVEN_WORKER_MAX_DISK_MB` | optional, no budget unless set: a worker whose folder holds more is stopped, and stays stopped until the folder is under it |
    | `SPECDRIVEN_WORKER_MAX_MEMORY_MB` | optional, no budget unless set: a worker holding more memory is stopped, and starts again on its person's next request |
+   | `SPECDRIVEN_WORKER_EGRESS_HOSTS` | optional: more hosts a worker may reach besides GitHub, comma-separated, https unless a port is given (`otel.example.com:4318`) |
+   | `SPECDRIVEN_WORKER_SANDBOX` | optional: `off` runs workers with a uid of their own and nothing more — no Landlock, no seccomp, no outbound proxy. For when the start log says the confinement is `BROKEN` |
+   | `SPECDRIVEN_APP_CSP` | optional: `report` sends the app's Content-Security-Policy as report-only, `off` sends none |
    | `SPECDRIVEN_DATASTORE_TOKEN` | a GitHub token that can read and write the [datastore](#datastore) repo: a fine-grained token with resource owner **SpecDriven**, access to `hosted-app` only, and the **Contents: Read and write** permission. Unset, accounts live only on the volume |
    | `SPECDRIVEN_DATASTORE_REPO` | optional, default `https://github.com/SpecDriven/hosted-app` |
 
@@ -282,7 +371,7 @@ The services run under `specdriven.app`, whose DNS is on Cloudflare:
 
 | Service | Domain | Railway domain |
 |---|---|---|
-| gateway | `private.specdriven.app` | `specdriven-app.up.railway.app` |
+| gateway | `private.specdriven.app`, and `account.private.specdriven.app` for [the account host](#the-account-host) | `specdriven-app.up.railway.app` |
 | demo (`DEMO_MODE=1`) | `demo.specdriven.app` | `specdrivenapp-demo.up.railway.app` |
 | read-only site (`SPECDRIVEN_READONLY=1`) | `specs.specdriven.app` | assigned when the service is created |
 
@@ -348,6 +437,9 @@ When no variables are set:
 
 - emails are printed to the console instead of being sent;
 - a throwaway master key is used, so stored secrets don't survive a restart;
+- there is one process and one host: no spawner, no sandbox, no account host
+  (set `PUBLIC_URL` and `ACCOUNT_URL` to two local names to try the two
+  hosts);
 - the frontend is bundled in memory at start;
 - the first admin is made as on Railway; sign in as it to allow addresses.
 
@@ -355,14 +447,20 @@ When no variables are set:
 
 | File | Role |
 |---|---|
-| `src/gateway/index.ts` | entry: config, database, keyring, workers, `Bun.serve` |
-| `src/gateway/server.ts` | routing: pages, `/auth/*`, the session check, proxying |
+| `src/gateway/index.ts` | entry: as root the spawner, otherwise the gateway |
+| `src/gateway/spawnerMain.ts`, `spawner.ts`, `spawnerSocket.ts` | the root process: the volume, the gateway's start, and starting, stopping and reporting on workers over a socket |
+| `src/gateway/main.ts` | the gateway: config, database, keyring, workers, `Bun.serve` |
+| `src/gateway/server.ts` | routing: the two hosts, pages, `/auth/*`, the hand-over, the session check, proxying |
+| `src/gateway/launcher.ts`, `sandbox.ts`, `sandboxCheck.ts` | what a worker starts through: Landlock and seccomp; trying them at start |
+| `src/gateway/egress.ts` | the workers' outbound proxy |
+| `src/gateway/appCsp.ts` | the Content-Security-Policy on the app's pages |
+| `src/gateway/volume.ts` | the volume's layout and the gateway's own folder |
 | `src/gateway/accounts.ts` | sign-up, login, reset and change password |
 | `src/gateway/admin.ts` | roles, the allowed emails and invitations, the first admin |
 | `src/gateway/sessions.ts`, `rateLimit.ts` | cookies and sessions; fixed-window limits |
 | `src/gateway/crypto.ts`, `secrets.ts` | AES-GCM keyring and the per-user secret store |
 | `src/gateway/datastore.ts` | the accounts' mirror in the datastore repo |
-| `src/gateway/workers.ts`, `proxy.ts` | the per-user worker pool and the streaming proxy |
+| `src/gateway/workers.ts`, `proxy.ts` | the per-user worker pool (when a worker starts and stops, what it may use) and the streaming proxy |
 | `src/gateway/workerStart.ts` | what a worker sets up in its own folder as it starts |
 | `src/gateway/limits.ts`, `endProcesses.ts` | a worker's caps and budgets; ending every process of a worker's uid |
 | `src/gateway/appShell.ts`, `assets.ts`, `pages/` | the app's frontend and the gateway's own pages |

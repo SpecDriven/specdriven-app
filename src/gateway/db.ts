@@ -1,5 +1,5 @@
 // The gateway's database (bun:sqlite on the Railway volume): accounts and
-// their roles, sessions, email links, the allowed emails, the users'
+// their roles, sessions and hand-over codes, email links, the allowed emails, the users'
 // encrypted secrets and recent data repos, and the rate limiter's counters.
 // Tokens of every kind are stored as SHA-256 hashes only, so a copy of the
 // file cannot be replayed; secrets are AES-GCM ciphertext under a key that
@@ -81,6 +81,21 @@ export const MIGRATIONS: string[] = [
     -- A JSON array of GitHub urls, most recent first.
     repos TEXT NOT NULL,
     updated_at INTEGER NOT NULL
+  );
+  `,
+  // A host of its own for the account pages (sessions.ts): the app's host
+  // gets a session of its own kind, made from the sign-in through a code
+  // that works once, and gone when that sign-in ends.
+  `
+  ALTER TABLE sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'account' CHECK (kind IN ('account', 'app'));
+  ALTER TABLE sessions ADD COLUMN parent_hash TEXT REFERENCES sessions(id_hash) ON DELETE CASCADE;
+  CREATE INDEX sessions_parent ON sessions(parent_hash);
+  CREATE TABLE handover_codes (
+    code_hash TEXT PRIMARY KEY,
+    session_hash TEXT NOT NULL REFERENCES sessions(id_hash) ON DELETE CASCADE,
+    state_hash TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
   );
   `,
 ];

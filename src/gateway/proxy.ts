@@ -13,6 +13,7 @@
 // none — and nothing it answers on the API can run as a page there.
 
 import { cookiesWithout, type CookieOptions } from "./sessions";
+import { WORKER_KEY_HEADER } from "./workers";
 
 const HOP_BY_HOP = [
   "connection",
@@ -33,10 +34,23 @@ const HOP_BY_HOP = [
  */
 export const WORKER_API_CSP = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
 
-export async function proxyToWorker(req: Request, socket: string, cookies: CookieOptions): Promise<Response> {
+/**
+ * `worker` is where the person's worker listens and the key it asks for
+ * (workers.ts): a worker owns the folder its socket is in and could put a
+ * link to another person's socket there, and that worker would refuse a
+ * request carrying this one's key.
+ */
+export async function proxyToWorker(
+  req: Request,
+  worker: { socket: string; key?: string },
+  cookies: CookieOptions,
+): Promise<Response> {
   const url = new URL(req.url);
   const headers = new Headers(req.headers);
   for (const name of HOP_BY_HOP) headers.delete(name);
+  // The key is the gateway's to send, never the browser's.
+  headers.delete(WORKER_KEY_HEADER);
+  if (worker.key) headers.set(WORKER_KEY_HEADER, worker.key);
   const cookie = cookiesWithout(headers.get("cookie"), cookies);
   if (cookie) headers.set("cookie", cookie);
   else headers.delete("cookie");
@@ -49,11 +63,14 @@ export async function proxyToWorker(req: Request, socket: string, cookies: Cooki
     body: hasBody ? req.body : undefined,
     redirect: "manual",
     signal: req.signal,
-    unix: socket,
+    unix: worker.socket,
   } as RequestInit);
   const out = new Headers(upstream.headers);
   for (const name of HOP_BY_HOP) out.delete(name);
   out.delete("set-cookie");
+  // Nor may a script it serves become a service worker for the whole host,
+  // which would see every later request, a hand-over's code included.
+  out.delete("service-worker-allowed");
   if (url.pathname.startsWith("/api/")) {
     out.set("content-security-policy", WORKER_API_CSP);
     out.set("x-content-type-options", "nosniff");

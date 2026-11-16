@@ -2270,7 +2270,9 @@ export function App() {
   useEffect(() => {
     if (!askGateway) return;
     let live = true;
-    fetch("/auth/me")
+    // The app's own host answers this much of the account and no more
+    // (src/gateway/server.ts): the account pages are on a host of their own.
+    fetch("/_session/me")
       .then((res) => (res.ok ? res.json() : null))
       .then((me: { email?: unknown; role?: unknown } | null) => {
         if (!live || typeof me?.email !== "string") return;
@@ -2283,7 +2285,7 @@ export function App() {
   }, [askGateway]);
 
   const signOutHosted = () => {
-    void fetch("/auth/logout", { method: "POST" }).finally(() => window.location.assign("/login"));
+    void fetch("/_session/logout", { method: "POST" }).finally(() => window.location.assign("/login"));
   };
 
   // Each failed try sets a fresh error, which schedules the next one.

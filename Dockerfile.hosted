@@ -2,10 +2,13 @@
 # server per user. Sign-in, the encrypted secrets and every user's folders
 # live on the volume mounted at /data; nothing else in the image is state.
 #
-# The gateway runs as root: Railway mounts volumes owned by root, and root is
-# what lets the gateway start each user's worker as a uid of its own
-# (setpriv, from util-linux in the base image), owning only that user's
-# folder (src/gateway/workers.ts).
+# The image starts as root: Railway mounts volumes owned by root, and root is
+# what lets each user's worker run as a uid of its own (setpriv and prlimit,
+# from util-linux in the base image), owning only that user's folder. That
+# first process only starts and stops workers (src/gateway/spawner.ts); the
+# gateway that answers requests is started by it as a uid that is not root
+# (docs/hosted-tenant-isolation.md "Step 2"). No USER line: dropping root
+# here would take the uids away.
 FROM oven/bun:1.4-slim@sha256:1846adf22496bd711036aae8be147e57bdebbaea2e5264e3e0b5af1db187d9a4
 
 # git for the system-git engine; without it the bundled JS engine is used.

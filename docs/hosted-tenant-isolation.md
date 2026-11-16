@@ -1,7 +1,8 @@
 # Hosted tenant isolation: proposal
 
-**Status:** 2026-11-15. Step 1 is built, with tests, and not yet deployed.
-Steps 2 and 3 are proposals.
+**Status:** 2026-11-15. Steps 1 and 2 are built, with tests, and not yet
+deployed. Step 2 needs two things done on Railway before it is all in force:
+see [Deploying step 2](#deploying-step-2). Step 3 is a proposal.
 
 This is a plan for keeping people apart more firmly in the hosted app
 (`private.specdriven.app`, described in
@@ -16,7 +17,7 @@ folder and an environment built from scratch. That is a real wall, and it is
 the only one. Everything else assumes that a worker never runs code its
 tenant controls.
 
-The proposal keeps one worker per person and adds walls around it, in three
+The plan keeps one worker per person and adds walls around it, in three
 steps:
 
 1. **Close the gaps inside the current container.** Small changes to the
@@ -81,6 +82,21 @@ everyone's.
   which still come from the worker.
 - Rows 9 and 11 are open. Steps 2 and 3 are for those.
 
+**After step 2:**
+
+- Row 9 is closed: the process that answers the internet is not root.
+- Row 10 is closed once the account pages have their own host name
+  (`ACCOUNT_URL`). Until that is set they still share the app's host.
+- Row 8 is closed where the kernel has Landlock with TCP rules, with one
+  limit that Landlock itself sets: see
+  [what the network rule cannot do](#what-the-network-rule-cannot-do).
+- A twelfth row, found while building step 2 and closed by it: a worker owns
+  the folder its socket is in, and `/proc/net/unix` shows every worker's
+  socket path. A taken-over worker could put a link to another person's
+  socket where its own belongs, and the gateway would have forwarded the
+  attacker's own requests to that person's worker.
+- Row 11 is open. Step 3 is for it.
+
 ## Target design
 
 ```
@@ -116,11 +132,12 @@ Built. No new services and no change for the people using the app.
 | **A temp folder per tenant:** `TMPDIR` points inside the person's own folder. | 8 (part) | `workerEnv` in `src/gateway/workers.ts` |
 | **The proxy cleans what a worker sends back:** it drops every `Set-Cookie`, and an API answer carries a policy that stops it running as a page. | 10 (part) | `src/gateway/proxy.ts` |
 
-**Left for step 2:** a Content-Security-Policy on the app's own pages. The
-frontend has an inline script, uses WebAssembly and starts workers from
-blobs, and plugin scripts come from the worker on the same origin. A policy
-strict enough to matter needs a run through every screen in a browser, and
-it protects little until the account pages are on their own host.
+**Left for step 2, and done there:** a Content-Security-Policy on the app's
+own pages. The frontend has an inline script, uses WebAssembly and starts
+workers from blobs, and plugin scripts come from the worker on the same
+origin. A policy strict enough to matter needed a run through every screen
+in a browser, and protects little until the account pages are on their own
+host.
 
 The tests are in `tests/gatewayWorkers.test.ts`, `tests/gatewayLimits.test.ts`,
 `tests/gatewayWorkerStart.test.ts`, `tests/hostedGit.test.ts` and
@@ -131,53 +148,136 @@ file is untouched.
 
 ## Step 2: separate privileges and origins
 
-**Split the gateway in two.**
+Built. The first two parts change what runs; the last two need something of
+the platform and are in force only where it is there.
 
-- A process that is **not root** answers HTTP, signs people in and holds the
-  master key.
-- A small **spawner**, the only part that stays root, listens on a unix
-  socket and knows three requests: start a worker with this uid and this
-  environment, stop it, report on it. It never parses HTTP and never touches
-  the network.
+| Change | Closes | Where |
+|---|---|---|
+| **The gateway is two processes.** The image starts as root, as before. That process is now the **spawner**: it readies the volume, starts the gateway as uid 199000, and from then on does three things when asked over a unix socket: start a person's worker, stop it, report on it. It parses no HTTP and opens no network connection. The **gateway** answers HTTP, signs people in and holds the master key, and is not root. | 9 | `src/gateway/spawnerMain.ts`, `spawner.ts`, `spawnerSocket.ts`, `main.ts` |
+| **Nothing in a request picks what root does.** The gateway may be taken over, so the spawner checks every request: the user id must be a UUID, the uid a worker's (200000 and up, never root's or the gateway's), and the program is the one the spawner was started with. The worker's environment is the gateway's to choose, and no program that runs as root sees it: the tools that drop to the worker's uid get `PATH` alone, and the worker's environment is applied after the drop. | 9 | `checkStart` in `src/gateway/spawner.ts`, `src/gateway/launcher.ts` |
+| **The spawner's socket takes one client.** A connection must first say a key the spawner made at start and handed only to the gateway, and a line that is not one of its messages ends the connection, with nothing after it read. This matters because the gateway connects to sockets in folders workers own. | 9 | `src/gateway/spawnerSocket.ts` |
+| **The gateway has a folder of its own**, `/data/gateway`, for `app.db` and the datastore's clone. Root hands it over once and stays out of it afterwards. An older volume's files are moved in on the first start. | 9 | `src/gateway/volume.ts` |
+| **Each worker asks every request for a key** the gateway made for that start. A request that reaches a worker through another worker's socket carries the wrong key and is refused. The gateway reaches a worker's socket as its own uid: the folder the socket is in belongs to the worker and the gateway's group, and to no other worker. | 12 | `workerKeyGuard` in `src/server/hostedMode.ts`, `prepareDirs` in `src/gateway/spawner.ts` |
+| **Two host names**, when `ACCOUNT_URL` is set. The account host serves sign-in, the account page, the admin page and `/auth/*`; its session cookie is the one that can change secrets and roles. The app's host serves the app and each person's worker. A write must come from the page's own origin, so script shown on the app's host cannot write to the account host, with the person's cookies or without. | 10 | `handle` in `src/gateway/server.ts` |
+| **A code that works once** takes a signed-in browser from the account host to the app's, where it gets a cookie of that host's own. The cookie reaches the person's worker and nothing else. The code works for a minute, and only with a secret the app's host left in that browser, so a code made for one browser cannot sign another one in. The app's session ends with the sign-in it came from. | 10 | `issueHandover`, `redeemHandover` in `src/gateway/sessions.ts` |
+| **The app's host answers who is signed in, and no more:** `/_session/me` gives the email and role, which is what the user menu needs. `/auth/*` is not served there at all. | 10 | `sessionApi` in `src/gateway/server.ts` |
+| **A Content-Security-Policy on the app's pages.** Only script from this host runs, the one inline script by its hash; no `eval`; nothing is sent to another host or framed by one. | 10 | `src/gateway/appCsp.ts` |
+| **Each worker confines itself before it starts.** A launcher applies Landlock (the worker may read the system and the app's code, write its own five folders and nothing else, `/tmp` included, and connect to one TCP port) and seccomp (no call that reaches another process, a mount, a namespace or the kernel, and no socket but a unix one or plain TCP). Then it becomes the worker, which keeps every rule. | 8 | `src/gateway/launcher.ts`, `sandbox.ts` |
+| **One way out.** The gateway runs a proxy on a local port that lets a connection through to `github.com` and `api.github.com` and refuses the rest. Git and the app's own requests go through it. That port is the one a worker may connect to. | 8 | `src/gateway/egress.ts` |
 
-A bug in request handling then no longer runs as root. Closes row 9.
+### How the policy on the app's pages was tried
 
-**Two host names.**
+Screen by screen, in a browser, with the policy enforced: the real build of
+the app's pages behind a stand-in gateway, in front of the demo data. Each
+screen below loaded and worked with no violation reported:
 
-- `account.private.specdriven.app` serves sign-in, the account page, the
-  admin page and `/auth/*`. Its session cookie is the one that can change
-  secrets and roles.
-- `private.specdriven.app` serves the app and forwards to the worker. After
-  sign-in the account host hands the browser over with a one-time code, and
-  the app host sets a cookie of its own that can reach the worker and nothing
-  else.
+- the specs tree, a feature page, the scenario editor, Write and Preview;
+- Settings, Project settings, Plugins, Observability, Data, Images, What's
+  new, Updates;
+- the Roadmap, Tasks, Notebook, Tests and Event models tabs, the last of
+  them a plugin from the marketplace with its own script;
+- the command palette, the coding agent pane, the user menu.
 
-The app's pages also get a Content-Security-Policy here, tested screen by
-screen. Script that a worker manages to serve then runs on a host with no
-power over the account. The app's user menu, which reads `/auth/me` today, needs a small
-endpoint on the app host that returns the email and role only. Closes row 10.
+Two things came out of it:
 
-**Confine each worker's files and network.** Linux has two features a
-process can apply to itself without being root: Landlock, which limits the
-files and network ports a process may use, and seccomp, which limits the
-system calls it may make. A small launcher applies both before starting the
-worker:
+- **The diagram editor's fonts** come from `esm.sh`, pinned to the library's
+  version. The policy allows that one path, for fonts and for the fetch that
+  puts them into an exported drawing. Nothing else outside the host is
+  allowed.
+- **Excalidraw's font subsetter asks for `eval`** when a drawing is
+  exported. It is refused, and the drawing is still exported with its font.
 
-- read-only access to the app's code and the system folders;
-- write access to the worker's own folder and nowhere else, `/tmp` included;
-- outbound connections to one local port only: a proxy the gateway runs,
-  which lets through `github.com` and `api.github.com` and refuses the rest.
+The demo is not the hosted app: it shows more screens, not fewer. If a
+screen turns out to be blocked in production, `SPECDRIVEN_APP_CSP=report`
+sends the policy as report-only, where the browser's console says what would
+be blocked and nothing is.
 
-Workers already honour `HTTPS_PROXY`. Without the Landlock rule the proxy is
-a convention a taken-over worker can ignore, so this item depends on the
-check below. Closes row 8.
+### What a second read of the code found
 
-**Check Railway first.** Whether Railway's kernel offers Landlock, and with
-network rules (Linux 6.7 or later), was not checked for this proposal. A
-one-off deploy that prints the kernel version and tries a Landlock rule
-settles it. If Landlock is missing, the file rules fall back to what the uid
-already gives, and the network rule is the reason to bring forward the
+Before this was called done, the new code was read once more by a reviewer
+who had not written it, looking only for ways in. It found no way to root.
+It found five weaknesses, all fixed and each with a test:
+
+- **A worker could stop the whole service.** A settings file filled with
+  control characters made the spawner's answer longer than the gateway
+  accepts on that socket, and the gateway, having lost the spawner, exits.
+  The limit now fits the longest honest answer, and an answer over it fails
+  that one request only.
+- **The system-call filter looked at a socket's kind and not its protocol.**
+  An MPTCP socket is a stream socket that Landlock's port rule does not
+  cover. Only plain TCP passes now.
+- **A process could end whatever was sent to end it.** Ending a uid's
+  processes is done as that uid. On a kernel older than 6.12 a detached
+  process looping on "end everything" could end that helper first and
+  survive a stop. Root now checks afterwards and ends what is left itself.
+  This one dates from step 1.
+- **The outbound proxy had no limit.** It now holds at most 256 connections
+  and closes one that does not say where it wants to go within 15 seconds.
+- **The hand-over's secret could be planted** by script on the app's host
+  once the real cookie had expired. The secret is now signed by the gateway,
+  and one it did not make is never used. A worker's answer also no longer
+  carries the header that lets a script become a service worker for the
+  whole host.
+
+### What differs from the proposal
+
+- **The worker's key** was not in the proposal. It closes the twelfth row
+  above.
+- **The network rule is weaker than the proposal said.** See the next
+  section.
+- **Railway's kernel was not checked.** There was no way to do that from
+  here without a deploy. Instead the service checks itself: at every start
+  the spawner runs a throwaway process through the same launcher, has it try
+  what a worker must and must not be able to do, and logs one line saying
+  what held. `bun src/gateway/index.ts probe` prints the same line.
+
+### What the network rule cannot do
+
+A Landlock TCP rule names a port, not an address. So "the worker may connect
+to the proxy's port" really means "to that port number on any host". Three
+things follow:
+
+- A worker cannot reach the gateway's own port, or another service on
+  Railway's private network, unless that service happens to listen on the
+  same port number. The proxy takes a free port at each start, so this is
+  unlikely.
+- A taken-over worker **can** still reach a host on the internet that
+  listens on that port number. Its owner would have to learn the number
+  first, and the only way out to tell them is through GitHub.
+- It cannot use UDP at all: the seccomp filter refuses the socket. A worker
+  needs none, since the proxy looks names up for it.
+
+Sending data out through GitHub itself was always possible, since GitHub is
+on the list. What the rule protects is the gateway and the private network.
+A rule by address needs a network of its own per worker, which is the
 [container per tenant](#alternatives-held-back).
+
+### Deploying step 2
+
+The split and the worker's key need nothing. The other two parts do:
+
+1. **Read the first start's log.** The line starting `workers: a uid each;`
+   says which kernel it found and what holds. It reads one of four ways:
+   - `Landlock 4` or higher, `tried, and it holds`: everything is in force.
+   - `Landlock 1` to `3`: files are confined and the proxy is a convention
+     only.
+   - `Landlock absent`: neither. The uid still keeps files apart, as after
+     step 1.
+   - `BROKEN`: a worker could not do something it must. Set
+     `SPECDRIVEN_WORKER_SANDBOX=off` and report it.
+2. **Add the account host.** Add `account.private.specdriven.app` as a
+   second custom domain on the same Railway service, then set `ACCOUNT_URL`
+   to it. Everyone signs in again. [Hosted SpecDriven on
+   Railway](deployment-railway.md#the-account-host) has the steps.
+
+The tests are in `tests/gatewaySpawner.test.ts`, `tests/gatewaySandbox.test.ts`,
+`tests/gatewayEgress.test.ts`, `tests/gatewayHosts.test.ts` and
+`tests/gatewayWorkers.test.ts`. As in step 1, the ones about uids and the
+kernel run in the hosted image and are skipped on a developer's machine. One
+starts the image's own entry point as root and checks that the process
+listening is not root. Another starts a stand-in worker exactly as a real
+one is started and has it try to read a file anyone may read, write to
+`/tmp`, connect to a second port and reach a host that is not on the list.
 
 ## Step 3: make a stolen token worth little
 

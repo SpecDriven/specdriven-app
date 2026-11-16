@@ -70,6 +70,7 @@ function standIn(userId: string): string {
             const headers = new Headers({ "Content-Type": "text/html", "Content-Security-Policy": "script-src *" });
             headers.append("Set-Cookie", "__Host-sd_session=theirs; Path=/; Secure; HttpOnly");
             headers.append("Set-Cookie", "other=1; Path=/");
+            headers.set("Service-Worker-Allowed", "/");
             return new Response("<script>fetch('/auth/admin')</script>", { headers });
           }
           return Response.json({
@@ -95,7 +96,7 @@ beforeEach(async () => {
   db.query("INSERT INTO allowed_emails (email, created_at) VALUES ('@example.com', 0)").run();
   secrets = new SecretStore(db, await loadKeyring({ SPECDRIVEN_MASTER_KEY: generateMasterKey() }));
   const workers: Workers = {
-    socketFor: async (userId) => standIn(userId),
+    workerFor: async (userId) => ({ socket: standIn(userId), key: `key-of-${userId}` }),
     touch: () => {},
     restart: async (userId) => void restarts.push(userId),
   };
@@ -254,6 +255,8 @@ test("a worker's answer sets no cookie, and on the API cannot run as a page", as
     const res = await call(path, { cookie, method: path.startsWith("/api/") ? "GET" : "POST" });
     expect(await res.text()).toContain("<script>");
     expect(res.headers.getSetCookie()).toEqual([]);
+    // Nor can a script it serves become a service worker for the whole host.
+    expect(res.headers.get("service-worker-allowed")).toBeNull();
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
   }
   const api = await call("/api/hostile", { cookie });

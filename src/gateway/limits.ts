@@ -13,6 +13,11 @@ import { run, type RunResult } from "../server/run";
 
 type Env = Record<string, string | undefined>;
 
+/** Workers run as uids from here up — clear of any account the image has. */
+export const OS_UID_BASE = 200_000;
+/** The uid the gateway itself runs as once the spawner has started it (spawner.ts): no worker's, and not root. */
+export const GATEWAY_UID = 199_000;
+
 export interface WorkerLimits {
   /** Processes and threads one person's uid may have at once. */
   processes: number;
@@ -54,7 +59,7 @@ export function readWorkerLimits(env: Env = process.env): WorkerLimits {
 }
 
 /** Where the operating system's own tools are, whatever PATH the gateway was started with. */
-const SYSTEM_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+export const SYSTEM_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 
 /**
  * The full path of one of the system's tools (setpriv, prlimit, chown, du,
