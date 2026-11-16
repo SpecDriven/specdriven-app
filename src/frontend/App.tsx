@@ -121,7 +121,6 @@ import { applyVimPref, setVimDemoMode, useVimMode } from "./vimPref";
 import { applySpellCheckPref, useSpellCheck } from "./spellCheckPref";
 import {
   applyExcalidrawPref,
-  setExcalidrawDemoMode,
   useExcalidrawEnabled,
 } from "./excalidrawPref";
 import { markText } from "./highlight";
@@ -2223,10 +2222,6 @@ export function App() {
         // The demo pins Vim mode off (src/frontend/vimPref.ts): any editor open
         // when this lands drops its Vim tab, and the Settings row hides.
         setVimDemoMode(Boolean(state.demo));
-        // Excalidraw goes the other way (src/frontend/excalidrawPref.ts): the
-        // demo defaults it on so a visitor finds the diagram button without
-        // first finding Settings. Turning it off there still sticks.
-        setExcalidrawDemoMode(Boolean(state.demo));
         setAppVersion(typeof state.version === "string" ? state.version : null);
         applyUpdateAvailable(state);
         setSourceUrl(typeof state.sourceUrl === "string" ? state.sourceUrl : null);

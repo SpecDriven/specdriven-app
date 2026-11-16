@@ -6,25 +6,12 @@ import { useSyncExternalStore } from "react";
 // (localStorage), not in the settings file — it is a habit of the person at
 // the keyboard, not a property of the project.
 //
-// Demo mode (src/server/demo.ts) differs from Vim mode, which the demo pins
-// off: drawing is the feature a visitor came to see and a button in a toolbar
-// traps nobody, so here the demo only moves the DEFAULT to on. The switch
-// still works and a visitor who turns it off keeps it off — the choice is
-// stored either way, so "off" is a decision rather than the absence of one.
+// It is ON by default: a device that has never chosen gets the button. Off is
+// stored, not erased, so a person who turns it off keeps it off.
 
 const KEY = "sd-excalidraw";
 /** Fired on window when the preference changes, so open editors follow. */
 const EVENT = "sd-excalidraw-change";
-
-/** Demo mode: on unless this device says otherwise. */
-let demoDefaultOn = false;
-
-/** Told by App.tsx once /api/state reports demo mode. */
-export function setExcalidrawDemoMode(on: boolean): void {
-  if (demoDefaultOn === on) return;
-  demoDefaultOn = on;
-  if (typeof window !== "undefined") window.dispatchEvent(new Event(EVENT));
-}
 
 export function readExcalidrawPref(): boolean {
   try {
@@ -32,9 +19,9 @@ export function readExcalidrawPref(): boolean {
     if (stored === "on") return true;
     if (stored === "off") return false;
   } catch {
-    // Storage unavailable (private mode): fall through to the default.
+    // Storage unavailable (private mode): fall through to the default (on).
   }
-  return demoDefaultOn;
+  return true;
 }
 
 export function applyExcalidrawPref(on: boolean): void {
