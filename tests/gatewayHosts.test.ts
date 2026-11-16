@@ -77,7 +77,7 @@ async function makeGateway(over: Partial<Parameters<typeof createGateway>[0]> = 
     db,
     secrets: new SecretStore(db, await loadKeyring({ SPECDRIVEN_MASTER_KEY: generateMasterKey() })),
     mailer: { send: async (m) => void sent.push(m) },
-    workers: { workerFor: async () => ({ socket, key: "k" }), touch: () => {}, restart: async () => {} },
+    workers: { workerFor: async () => ({ socket, key: "k" }), touch: () => {}, restart: async () => {}, remove: async () => {} },
     assets,
     appShell: {
       inlineScripts: inlineScriptHashes(SHELL),

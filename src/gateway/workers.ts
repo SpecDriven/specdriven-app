@@ -220,6 +220,8 @@ export class WorkerPool {
   private settling = new Map<string, Promise<void>>();
   /** People whose folder was over its budget when last measured, and by how much. */
   private overDisk = new Map<string, number>();
+  /** People whose account is being deleted: no worker starts for them again. */
+  private removing = new Set<string>();
   private sweeper: ReturnType<typeof setInterval> | null = null;
   private spawner: SpawnerApi;
 
@@ -244,6 +246,7 @@ export class WorkerPool {
       live.lastUsed = Date.now();
       return live;
     }
+    if (this.removing.has(userId)) throw new Error("This account is being deleted");
     let pending = this.starting.get(userId);
     if (!pending) {
       pending = this.start(userId).finally(() => this.starting.delete(userId));
@@ -292,6 +295,26 @@ export class WorkerPool {
     if (live) this.release(userId, live);
     if (live || uid !== null) await this.spawner.stop({ userId, uid });
     if (live) await this.captureRepos(userId);
+  }
+
+  /**
+   * The account is being deleted (admin.ts): stop the worker, clear the uid
+   * and delete the person's folder. `uid` is the one the account was given,
+   * or null if it never had one — read before, as the row may go next.
+   * No worker starts for them while this runs; if it fails, one can again.
+   */
+  async remove(userId: string, uid: number | null): Promise<void> {
+    this.removing.add(userId);
+    try {
+      await this.starting.get(userId)?.catch(() => {});
+      if (this.running.has(userId)) await this.stop(userId);
+      await this.settling.get(userId);
+      await this.spawner.remove({ userId, uid });
+      this.crashes.delete(userId);
+      this.overDisk.delete(userId);
+    } finally {
+      this.removing.delete(userId);
+    }
   }
 
   /**

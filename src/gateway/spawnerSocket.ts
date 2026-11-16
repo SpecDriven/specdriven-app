@@ -20,6 +20,7 @@ import { dirname } from "node:path";
 import {
   checkReport,
   checkStart,
+  checkRemove,
   checkStop,
   type ReportRequest,
   type SpawnerApi,
@@ -95,6 +96,7 @@ export async function serveSpawner(
     if (op === "start") return spawner.start(checkStart(req, { requireUid }));
     if (op === "stop") return spawner.stop(checkStop(req, { requireUid }));
     if (op === "report") return spawner.report(checkReport(req, { requireUid }));
+    if (op === "remove") return spawner.remove(checkRemove(req));
     throw new Error("No such request");
   };
 
@@ -243,6 +245,7 @@ export async function connectSpawner(path: string, key: string): Promise<Spawner
     start: (req: StartRequest) => ask<void>("start", req),
     stop: (req: StopRequest) => ask<void>("stop", req),
     report: (req: ReportRequest) => ask<WorkerReport>("report", req),
+    remove: (req: StopRequest) => ask<void>("remove", req),
     onExit: (listener) => void listeners.push(listener),
     closed,
     close: end,

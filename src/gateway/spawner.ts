@@ -93,6 +93,12 @@ export interface SpawnerApi {
   /** Stop the worker and every other process of its uid; with no worker, the uid is still cleared. */
   stop(req: StopRequest): Promise<void>;
   report(req: ReportRequest): Promise<WorkerReport>;
+  /**
+   * Delete the person's folder, users/<id>, once their worker is stopped and
+   * nothing of the uid is left: their account is being deleted (admin.ts).
+   * Refused while their worker runs.
+   */
+  remove(req: StopRequest): Promise<void>;
   /** Told when a worker's process has ended, however it ended, and nothing of its uid is left. */
   onExit(listener: (exit: WorkerExit) => void): void;
 }
@@ -273,6 +279,14 @@ export function checkStop(raw: unknown, opts: CheckOptions = {}): StopRequest {
   return { userId, uid: workerUid(req.uid, opts.requireUid ?? false) };
 }
 
+/**
+ * A remove request: like a stop, but an account that never ran a worker has
+ * no uid even where every worker has one, and its folder (if any) still goes.
+ */
+export function checkRemove(raw: unknown): StopRequest {
+  return checkStop(raw, { requireUid: false });
+}
+
 export function checkReport(raw: unknown, opts: CheckOptions = {}): ReportRequest {
   const req = object(raw, "The request");
   return { ...checkStop(raw, opts), settings: req.settings === true, disk: req.disk === true };
@@ -372,6 +386,19 @@ export class Spawner implements SpawnerApi {
       // With no worker there may still be something one left behind.
       await this.settling.get(req.userId);
       if (req.uid !== null) await endProcessesOf(req.uid);
+    });
+  }
+
+  remove(req: StopRequest): Promise<void> {
+    return this.serial(req.userId, async () => {
+      if (this.children.has(req.userId)) throw new Error("Their worker is running: stop it first");
+      await this.settling.get(req.userId);
+      // Nothing of the uid may outlive its folder: a uid goes to the next
+      // account once this one's row is gone (accounts.ts osUid).
+      if (req.uid !== null) await endProcessesOf(req.uid);
+      // userDirs only names a folder under users/, and rm does not follow
+      // the links it finds in there.
+      await rm(userDirs(this.opts.dataDir, req.userId).base, { recursive: true, force: true });
     });
   }
 

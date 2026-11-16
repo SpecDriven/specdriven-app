@@ -265,16 +265,27 @@ const pages: Record<string, () => void> = {
         const you = user.id === data.you ? " (you)" : "";
         const pending = user.hasPassword ? "" : " · has not set a password yet";
         const next = user.role === "admin" ? "user" : "admin";
-        userList.append(
-          item(`${user.email}${you} — ${user.role}${pending}`, `Make ${next}`, async () => {
-            show(el("#users-error"), null);
-            const { ok, data } = await call(`/auth/admin/users/${encodeURIComponent(user.id)}/role`, "PUT", {
-              role: next,
-            });
-            if (!ok) show(el("#users-error"), errorOf(data));
-            await refresh();
-          }),
-        );
+        const row = item(`${user.email}${you} — ${user.role}${pending}`, `Make ${next}`, async () => {
+          show(el("#users-error"), null);
+          const { ok, data } = await call(`/auth/admin/users/${encodeURIComponent(user.id)}/role`, "PUT", {
+            role: next,
+          });
+          if (!ok) show(el("#users-error"), errorOf(data));
+          await refresh();
+        });
+        if (!you) {
+          row.append(
+            button("Delete", async () => {
+              const sure = `Delete ${user.email}? This signs them out and deletes their account and their files on the service. It can't be undone. They can sign up again only while their address is allowed.`;
+              if (!confirm(sure)) return;
+              show(el("#users-error"), null);
+              const { ok, data } = await call(`/auth/admin/users/${encodeURIComponent(user.id)}`, "DELETE");
+              if (!ok) show(el("#users-error"), errorOf(data));
+              await refresh();
+            }),
+          );
+        }
+        userList.append(row);
       }
     }
 
@@ -289,13 +300,17 @@ const pages: Record<string, () => void> = {
       const li = document.createElement("li");
       const label = document.createElement("span");
       label.textContent = text;
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "link";
-      button.textContent = action;
-      button.addEventListener("click", () => void onClick());
-      li.append(label, button);
+      li.append(label, button(action, onClick));
       return li;
+    }
+
+    function button(action: string, onClick: () => Promise<void>): HTMLButtonElement {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "link";
+      b.textContent = action;
+      b.addEventListener("click", () => void onClick());
+      return b;
     }
   },
 };

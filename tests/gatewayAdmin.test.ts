@@ -127,3 +127,39 @@ test("an invite goes only to an address without an account", async () => {
   ]);
   expect(admin.users().find((u) => u.email === "pending@example.com")?.hasPassword).toBe(false);
 });
+
+test("an admin may delete another account, but not their own, a missing one or the last admin", () => {
+  const boss = addUser("boss@example.com", "admin");
+  const user = addUser("u@example.com");
+  db.query("UPDATE users SET os_uid = 200003 WHERE id = ?").run(user);
+  expect(admin.canDelete(boss, user)).toEqual({ ok: true, uid: 200003 });
+  expect(admin.canDelete(boss, crypto.randomUUID())).toEqual({ error: "There is no such account" });
+  expect(admin.canDelete(boss, boss)).toEqual({ error: "You can't delete your own account" });
+  // The last admin stays even when someone else asks (an admin demoted in between).
+  expect(admin.canDelete(user, boss)).toEqual({ error: expect.stringMatching(/someone else an admin first/) });
+  expect(admin.deleteUser(boss)).toBe(false);
+  const second = addUser("second@example.com", "admin");
+  expect(admin.canDelete(second, boss)).toEqual({ ok: true, uid: null });
+});
+
+test("deleting an account takes everything tied to it, and its allowed entries stay without who added them", () => {
+  const boss = addUser("boss@example.com", "admin");
+  const user = addUser("u@example.com", "admin");
+  admin.allow(user, "friend@example.com");
+  const sessions = new Sessions(db, () => NOW);
+  sessions.create(user, { ip: null, userAgent: null });
+  db.query("INSERT INTO email_tokens (token_hash, user_id, purpose, created_at, expires_at) VALUES ('t', ?, 'reset', 0, 1)").run(user);
+  db.query(
+    "INSERT INTO secrets (user_id, name, kind, ciphertext, iv, key_id, updated_at) VALUES (?, 'github', 'github', x'00', x'00', 'k', 0)",
+  ).run(user);
+  db.query("INSERT INTO github_links (user_id, github_id, login, email, linked_at) VALUES (?, 7, 'u', 'u@example.com', 0)").run(user);
+  db.query("INSERT INTO user_repos (user_id, repos, updated_at) VALUES (?, '[]', 0)").run(user);
+
+  expect(admin.deleteUser(user)).toBe(true);
+  expect(admin.deleteUser(user)).toBe(false);
+  for (const table of ["sessions", "email_tokens", "secrets", "github_links", "user_repos"]) {
+    expect(db.query(`SELECT COUNT(*) AS n FROM ${table} WHERE user_id = ?`).get(user)).toEqual({ n: 0 });
+  }
+  expect(admin.users().map((u) => u.id)).toEqual([boss]);
+  expect(admin.allowed()).toEqual([{ email: "friend@example.com", addedBy: null, createdAt: NOW }]);
+});

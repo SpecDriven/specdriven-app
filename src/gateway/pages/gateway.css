@@ -201,6 +201,11 @@ a {
   overflow-wrap: anywhere;
 }
 
+/* The text takes the room, so a row's buttons sit together at its end. */
+.keys li > span {
+  flex: 1;
+}
+
 label.check {
   display: flex;
   align-items: center;

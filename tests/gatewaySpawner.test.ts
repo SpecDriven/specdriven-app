@@ -16,6 +16,7 @@ import { GATEWAY_UID, OS_UID_BASE } from "../src/gateway/limits";
 import { proxyToWorker } from "../src/gateway/proxy";
 import type { UserSecrets } from "../src/gateway/secrets";
 import {
+  checkRemove,
   checkReport,
   checkStart,
   checkStop,
@@ -64,6 +65,10 @@ test("the spawner starts a worker only for a user id that is one and a uid that 
     expect(() => checkStop({ userId: A, uid }, { requireUid: true })).toThrow("uid");
     expect(() => checkReport({ userId: A, uid }, { requireUid: true })).toThrow("uid");
   }
+  // An account deleted before it ever ran a worker has no uid; its folder may still go.
+  expect(checkRemove({ userId: A, uid: null })).toEqual({ userId: A, uid: null });
+  expect(() => checkRemove({ userId: A, uid: 0 })).toThrow("uid");
+  expect(() => checkRemove({ userId: "../x", uid: null })).toThrow("Not a user id");
   // As root it never runs a worker as itself; one process for everything (development) may.
   expect(() => checkStart(start({ uid: null }), { requireUid: true })).toThrow("uid is required");
   expect(checkStart(start({ uid: null })).uid).toBeNull();
@@ -93,6 +98,7 @@ function recording() {
   const api: SpawnerApi = {
     start: async (req) => void asked.push(["start", req]),
     stop: async (req) => void asked.push(["stop", req]),
+    remove: async (req) => void asked.push(["remove", req]),
     report: async (req) => {
       asked.push(["report", req]);
       return { running: true, residentMb: 12, settings: { file: "settings.yaml", text: "dataRepo: x\n" } };
@@ -223,6 +229,43 @@ test("a worker started through the spawner's socket serves its person, and stops
     await pool.stop(A);
     expect(pool.isRunning(A)).toBe(false);
     expect((await gateway.report({ userId: A, uid: null })).running).toBe(false);
+  } finally {
+    await pool.stopAll();
+    gateway.close();
+    await spawner.stopAll();
+    await server.close();
+  }
+}, 60_000);
+
+test("a deleted account's folder goes once its worker is stopped, and never while it runs", async () => {
+  const dataDir = join(dir, "removed");
+  const path = join(dir, "removed-sock", "spawner.sock");
+  const spawner = new Spawner({ dataDir, entry: ENTRY, stdio: "ignore" });
+  const server = await serveSpawner(spawner, { path, key: KEY });
+  const gateway = await connectSpawner(path, KEY);
+  const pool = new WorkerPool({
+    dataDir,
+    entry: ENTRY,
+    idleMs: 60_000,
+    secrets: async (): Promise<UserSecrets> => ({ github: null }),
+    spawner: gateway,
+    stdio: "ignore",
+  });
+  const folder = join(dataDir, "users", A);
+  try {
+    await pool.workerFor(A);
+    expect((await stat(folder)).isDirectory()).toBe(true);
+    // Asked straight, the spawner refuses while the worker runs.
+    await expect(gateway.remove({ userId: A, uid: null })).rejects.toThrow("worker is running");
+    await expect(gateway.remove({ userId: "../..", uid: null })).rejects.toThrow("Not a user id");
+    expect((await stat(join(folder, "root"))).isDirectory()).toBe(true);
+
+    await pool.remove(A, null);
+    expect(pool.isRunning(A)).toBe(false);
+    expect(await stat(folder).catch(() => null)).toBeNull();
+    expect((await gateway.report({ userId: A, uid: null })).running).toBe(false);
+    // Already gone is no error.
+    await pool.remove(A, null);
   } finally {
     await pool.stopAll();
     gateway.close();

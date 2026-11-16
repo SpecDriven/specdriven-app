@@ -384,6 +384,30 @@ test.skipIf(!isolated)("stopping a worker ends every process of its uid, and no 
   }
 }, 60_000);
 
+test.skipIf(!isolated)("deleting an account ends its uid's processes and deletes its folder, and touches no one else's", async () => {
+  const isoDir = await mkdtemp(join(tmpdir(), "sdr-"));
+  const iso = isolatedPool(isoDir);
+  try {
+    await iso.socketFor(A);
+    await iso.socketFor(B);
+    // Something the person's worker left running, and files only their uid owns.
+    const left = Bun.spawn([...asUser(UID_A), systemTool("sleep")!, "600"], { stdout: "ignore", stderr: "ignore" });
+    expect(as(UID_A, `mkdir -p ${isoDir}/users/${A}/home/deep/er && echo x > ${isoDir}/users/${A}/home/deep/er/f`).exitCode).toBe(0);
+    await Bun.sleep(200);
+
+    await iso.remove(A, UID_A);
+    await left.exited;
+    expect(left.signalCode).toBe("SIGKILL");
+    expect(iso.isRunning(A)).toBe(false);
+    expect(await stat(join(isoDir, "users", A)).catch(() => null)).toBeNull();
+    expect(iso.isRunning(B)).toBe(true);
+    expect((await stat(join(isoDir, "users", B, "home"))).uid).toBe(UID_B);
+  } finally {
+    await iso.stopAll();
+    await rm(isoDir, { recursive: true, force: true });
+  }
+}, 60_000);
+
 // specs/app/hosted-app.feature.md "The part that answers the internet is not
 // root": where the gateway is a uid of its own, it and the worker — and no
 // other worker — reach the worker's socket.
