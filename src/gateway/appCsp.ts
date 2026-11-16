@@ -45,14 +45,30 @@ export function readAppCspMode(env: Env = process.env): AppCspMode {
 /** Where Excalidraw's fonts come from; a path ending in "/" allows what is under it. */
 const EXCALIDRAW_ASSETS = "https://esm.sh/@excalidraw/";
 
-/** The `'sha256-…'` source of each inline script in a page: what lets exactly those run. */
+/**
+ * The `'sha256-…'` source of each inline script in a page: what lets exactly
+ * those run. The page is read by an HTML parser, as the browser reads it —
+ * a pattern for `<script>…</script>` misses the end tags a browser accepts
+ * (`</script >`, `</SCRIPT\n>`), and what it took for one script's text
+ * would then not be what the browser hashes.
+ */
 export function inlineScriptHashes(html: string): string[] {
-  const hashes: string[] = [];
-  for (const [, attributes = "", body = ""] of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)) {
-    if (/\bsrc\s*=/i.test(attributes) || !body) continue;
-    hashes.push(`'sha256-${new Bun.CryptoHasher("sha256").update(body).digest("base64")}'`);
-  }
-  return hashes;
+  const scripts: string[] = [];
+  let inline = false;
+  new HTMLRewriter()
+    .on("script", {
+      element(element) {
+        inline = !element.hasAttribute("src");
+        if (inline) scripts.push("");
+      },
+      text(chunk) {
+        if (inline) scripts[scripts.length - 1] += chunk.text;
+      },
+    })
+    .transform(html);
+  return scripts
+    .filter((body) => body.length > 0)
+    .map((body) => `'sha256-${new Bun.CryptoHasher("sha256").update(body).digest("base64")}'`);
 }
 
 /** The header to send with the app's pages, or null when the policy is off. */

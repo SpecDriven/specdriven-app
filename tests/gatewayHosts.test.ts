@@ -493,6 +493,27 @@ test("each of the gateway's three cookies belongs to one host, is hidden from sc
   expect(HANDOVER_STATE_MS).toBeLessThanOrEqual(15 * 60_000);
 });
 
+test("an inline script is hashed as the browser reads it, however its tags are written", () => {
+  const sha = (text: string) => `'sha256-${new Bun.CryptoHasher("sha256").update(text).digest("base64")}'`;
+  const theme = 'var t = 1; if (a < b) { say("</scr" + "ipt>"); }';
+  const second = 'let y = "&amp;";\n';
+  const page = [
+    "<!doctype html>",
+    // An end tag with a space, which a browser accepts.
+    `<script>${theme}</script >`,
+    // Scripts loaded from a file, and an empty one, have nothing to hash.
+    '<script src="/_app/main.js"></script>',
+    "<script></script>",
+    // Capitals, attributes and a line break in the end tag.
+    `<SCRIPT type="module">${second}</SCRIPT\n>`,
+    "<p>&lt;script&gt;not one&lt;/script&gt;</p>",
+  ].join("\n");
+  expect(inlineScriptHashes(page)).toEqual([sha(theme), sha(second)]);
+  expect(inlineScriptHashes("<p>no script</p>")).toEqual([]);
+  // The app's own page: its one inline script, the theme before first paint.
+  expect(inlineScriptHashes(SHELL)).toEqual([sha("var t = 1;")]);
+});
+
 test("with one host, the app's own session answers are the sign-in's", async () => {
   gateway = await makeGateway({ accountUrl: null });
   await post(APP, "/auth/signup", { email: "a@example.com" });
