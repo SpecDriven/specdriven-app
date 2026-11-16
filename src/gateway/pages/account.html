@@ -57,20 +57,6 @@
       </section>
 
       <section>
-        <h3>Agent API keys</h3>
-        <p class="hint">Keys for the remote agents you use. Stored encrypted; only you can use them, and they cannot be read back.</p>
-        <ul id="keys" class="keys"></ul>
-        <form id="key-form" novalidate>
-          <div class="row">
-            <label>Name <input name="name" autocomplete="off" spellcheck="false" required placeholder="e.g. anthropic" pattern="[a-z][a-z0-9-]{0,39}" /></label>
-            <label class="grow">Key <input name="value" type="password" autocomplete="off" spellcheck="false" required /></label>
-          </div>
-          <p class="error" role="alert" hidden></p>
-          <button type="submit">Save key</button>
-        </form>
-      </section>
-
-      <section>
         <h3>Change password</h3>
         <form id="password-form" novalidate>
           <label>Current password <input name="current" type="password" autocomplete="current-password" required /></label>

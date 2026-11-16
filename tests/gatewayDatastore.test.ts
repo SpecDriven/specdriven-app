@@ -89,7 +89,7 @@ test("a snapshot read into a fresh database gives back accounts, roles, allowed 
   addUser(db, A, "a@example.com");
   db.query("UPDATE users SET role = 'admin' WHERE id = ?").run(A);
   db.query("INSERT INTO allowed_emails (email, added_by, created_at) VALUES (?, ?, ?)").run("c@example.com", A, NOW);
-  await new SecretStore(db, keyring, () => NOW).put(A, "anthropic", "agent_key", "sk-a");
+  await new SecretStore(db, keyring, () => NOW).put(A, "github", "github", "ghp_a", { login: "a" });
   new RecentRepos(db, () => NOW).set(A, ["https://github.com/o/specs", "https://github.com/o/older"]);
   const sessions = new Sessions(db, () => NOW);
   const live = sessions.create(A, { ip: "203.0.113.9", userAgent: "Browser" });
@@ -97,7 +97,7 @@ test("a snapshot read into a fresh database gives back accounts, roles, allowed 
   const files = exportSnapshot(db);
   expect(files["sessions.json"]).not.toContain("203.0.113.9");
   expect(files["sessions.json"]).not.toContain("Browser");
-  expect(files["secrets.json"]).not.toContain("sk-a");
+  expect(files["secrets.json"]).not.toContain("ghp_a");
 
   const later = NOW + SESSION_IDLE_MS / 2;
   const copy = openDatabase(":memory:");
@@ -110,7 +110,7 @@ test("a snapshot read into a fresh database gives back accounts, roles, allowed 
     { email: "a@example.com", password_hash: "$argon2id$hash-of-a@example.com", os_uid: 200000, role: "admin" },
   ]);
   expect(copy.query("SELECT email, added_by FROM allowed_emails").all()).toEqual([{ email: "c@example.com", added_by: A }]);
-  expect((await new SecretStore(copy, keyring).values(A)).agentKeys).toEqual({ anthropic: "sk-a" });
+  expect((await new SecretStore(copy, keyring).values(A)).github?.token).toBe("ghp_a");
   expect(new RecentRepos(copy).get(A)).toEqual(["https://github.com/o/specs", "https://github.com/o/older"]);
   const restored = new Sessions(copy, () => later);
   const survivors = [live, old].filter((token) => restored.lookup(token));

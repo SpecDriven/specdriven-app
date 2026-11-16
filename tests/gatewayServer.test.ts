@@ -339,28 +339,14 @@ test("the GitHub token is checked with GitHub, stored sealed, shown by hint, and
   expect((await secrets.values(userId)).github).toBeNull();
 });
 
-test("agent keys are saved, listed by hint and removed", async () => {
+test("the account keeps no AI agent API keys, with nowhere to save one and none listed", async () => {
   const cookie = await signUp("a@example.com");
-  expect((await post("/auth/secrets/agent-keys/Bad_Name", { value: "x" }, cookie, "PUT")).status).toBe(400);
-  expect((await post("/auth/secrets/agent-keys/anthropic", { value: "sk-ant-abcd1234" }, cookie, "PUT")).status).toBe(200);
-  expect((await post("/auth/secrets/agent-keys/openai", { value: "sk-oai-wxyz" }, cookie, "PUT")).status).toBe(200);
-  const me = (await (await call("/auth/me", { cookie })).json()) as { agentKeys: { name: string; hint: string }[] };
-  expect(me.agentKeys.map((k) => [k.name, k.hint])).toEqual([
-    ["anthropic", "1234"],
-    ["openai", "wxyz"],
-  ]);
-  const del = await call("/auth/secrets/agent-keys/openai", { method: "DELETE", cookie, headers: { origin: ORIGIN } });
-  expect(del.status).toBe(200);
-  const after = (await (await call("/auth/me", { cookie })).json()) as { agentKeys: unknown[] };
-  expect(after.agentKeys.length).toBe(1);
-});
-
-test("one user's secrets are not another's", async () => {
-  const a = await signUp("a@example.com");
-  const b = await signUp("b@example.com");
-  await post("/auth/secrets/agent-keys/anthropic", { value: "sk-ant-of-a" }, a, "PUT");
-  const meB = (await (await call("/auth/me", { cookie: b })).json()) as { agentKeys: unknown[] };
-  expect(meB.agentKeys).toEqual([]);
+  restarts = [];
+  expect((await post("/auth/secrets/agent-keys/anthropic", { value: "sk-ant-abcd1234" }, cookie, "PUT")).status).toBe(404);
+  expect(restarts).toEqual([]);
+  const me = (await (await call("/auth/me", { cookie })).json()) as Record<string, unknown>;
+  expect(me).not.toHaveProperty("agentKeys");
+  expect(JSON.stringify(me)).not.toContain("sk-ant");
 });
 
 test("changing the password signs this browser in again and ends the others", async () => {

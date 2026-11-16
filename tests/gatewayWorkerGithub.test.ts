@@ -61,7 +61,7 @@ beforeAll(async () => {
     dataDir,
     entry,
     idleMs: 60_000,
-    secrets: async () => ({ github: PASTED, agentKeys: {} }),
+    secrets: async () => ({ github: PASTED }),
     emailOf: () => "a@example.com",
     osUid: isolated ? () => UID_A : undefined,
     spawner: isolated ? new Spawner({ dataDir, entry, stdio: "ignore" }) : undefined,
@@ -101,7 +101,7 @@ function api(worker: WorkerAddress, method: string, path: string, body?: unknown
 
 test("with the service's app, a worker is told who the person is on GitHub and where to ask, and holds no token", () => {
   const dirs = userDirs("/data", A);
-  const secrets = { github: PASTED, agentKeys: {} };
+  const secrets = { github: PASTED };
   const connected = workerEnv(dirs, secrets, { PATH: "/bin" }, null, [], { github: { identity: OCTO } });
   expect(connected[GITHUB_APP_ENV]).toBe("1");
   expect(JSON.parse(connected[IDENTITY_ENV]!)).toEqual(OCTO);

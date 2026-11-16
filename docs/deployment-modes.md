@@ -32,8 +32,10 @@ hosted-mode variables required (`src/gateway/demo.ts`).
 
 `bun run start:hosted` runs the hosted gateway (`src/gateway`): email and
 password sign-in with password recovery by email (Resend), each user's
-GitHub token and agent API keys encrypted at rest, and one app server per
-user in its own folder. Local agents and plugin installs are off there.
+GitHub token encrypted at rest, and one app server per user in its own
+folder. Local agents and plugin installs are off there, and no AI agent's API
+key is kept: Start AI Session copies the prompt, to paste into the person's
+own agent in another browser tab.
 `Dockerfile.hosted` and `railway.json` deploy it on Railway with a volume at
 `/data`. With `SPECDRIVEN_DATASTORE_TOKEN` set, the accounts are also
 mirrored into a private GitHub repo, so they survive a redeploy. See

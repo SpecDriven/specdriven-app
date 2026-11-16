@@ -315,7 +315,8 @@ before.
 | **The token is for the repository GitHub named.** GitHub says which repository a token is for; one for any other is not handed on, the final token is asked for by that repository's id, and a repository that answers with a redirect, because it was renamed or moved, is not followed. | 11 | `mint` in `src/gateway/githubApp.ts` |
 
 Nothing long-lived is stored for a person's GitHub any more, so the master
-key and the datastore repository protect much less: agent keys only. Whoever
+key and the datastore repository protect much less: a GitHub token pasted
+before the app, if any, and no AI agent's API key, which is never stored. Whoever
 takes over a worker gets the repositories that person can reach, one at a
 time, for at most an hour each, and only while the worker runs.
 

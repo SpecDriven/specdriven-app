@@ -176,16 +176,6 @@ const pages: Record<string, () => void> = {
       history.replaceState(null, "", location.pathname);
     }
 
-    const keyForm = el<HTMLFormElement>("#key-form");
-    onSubmit(keyForm, async ({ name, value }) => {
-      const { ok, data } = await call(`/auth/secrets/agent-keys/${encodeURIComponent(name?.trim() ?? "")}`, "PUT", {
-        value: value?.trim(),
-      });
-      if (!ok) return errorOf(data);
-      keyForm.reset();
-      await refresh();
-    });
-
     const passwordForm = el<HTMLFormElement>("#password-form");
     onSubmit(passwordForm, async ({ current, password }) => {
       const { ok, data } = await call("/auth/change-password", "POST", { current, password });
@@ -222,31 +212,6 @@ const pages: Record<string, () => void> = {
         el("#github-old-token-text").textContent = github
           ? `The personal access token saved before (…${github.hint}) is still in use. Connecting GitHub replaces and deletes it.`
           : "";
-      }
-      const list = el("#keys");
-      list.replaceChildren();
-      const keys = (data.agentKeys as { name: string; hint: string; updatedAt: number }[]) ?? [];
-      if (!keys.length) {
-        const li = document.createElement("li");
-        li.className = "hint";
-        li.textContent = "No keys yet.";
-        list.append(li);
-      }
-      for (const key of keys) {
-        const li = document.createElement("li");
-        const label = document.createElement("span");
-        label.textContent = `${key.name} — …${key.hint} · saved ${new Date(key.updatedAt).toLocaleDateString()}`;
-        const remove = document.createElement("button");
-        remove.type = "button";
-        remove.className = "link";
-        remove.textContent = "Remove";
-        remove.addEventListener("click", async () => {
-          if (!confirm(`Remove the key "${key.name}"?`)) return;
-          await call(`/auth/secrets/agent-keys/${encodeURIComponent(key.name)}`, "DELETE");
-          await refresh();
-        });
-        li.append(label, remove);
-        list.append(li);
       }
     }
   },

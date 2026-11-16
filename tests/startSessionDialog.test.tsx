@@ -5,7 +5,7 @@
 // Static markup only — bun test has no DOM.
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { AiSessionFields, StartSessionDialog, aiTabState } from "../src/frontend/StartSessionDialog";
+import { AiSessionFields, StartSessionDialog, aiTabState, hostedSessionPick } from "../src/frontend/StartSessionDialog";
 import type { PromptOptions } from "../src/frontend/ModalPrompts";
 
 const noop = () => undefined;
@@ -33,6 +33,20 @@ describe("aiTabState", () => {
     expect(aiTabState({ codeGen: false, specCount: 2, sessionRunning: false }).hint).toContain("Code generation");
     expect(aiTabState({ codeGen: true, specCount: 0, sessionRunning: false }).hint).toContain("Select a spec");
     expect(aiTabState({ codeGen: true, specCount: 1, sessionRunning: true }).hint).toContain("already starting");
+  });
+});
+
+describe("hostedSessionPick", () => {
+  test("the hosted app copies what is checked, else the open feature, else says what to do", () => {
+    const checked = [{ fileName: "quote.feature.md", scenarios: [{ name: "Price", version: 1 }] }];
+    expect(hostedSessionPick({ picked: checked, bundled: 0, openFeature: "other.feature.md" })).toEqual({ files: checked });
+    expect(hostedSessionPick({ picked: [], bundled: 0, openFeature: "other.feature.md" })).toEqual({
+      files: [{ fileName: "other.feature.md" }],
+    });
+    // What a plugin view bundles is a session of its own, open feature or not.
+    expect(hostedSessionPick({ picked: [], bundled: 1, openFeature: "other.feature.md" })).toEqual({ files: [] });
+    const none = hostedSessionPick({ picked: [], bundled: 0, openFeature: null });
+    expect("hint" in none && none.hint).toContain("Open a feature");
   });
 });
 

@@ -1,20 +1,19 @@
 // Each user's secrets (docs/deployment-railway.md "Credential storage"): the
-// GitHub token their specs repository is reached with and the API keys of
-// the remote agents they use. Sealed at rest (crypto.ts) and write-only from
-// the browser — the account page sees a name, the last four characters and,
-// for GitHub, the account the token belongs to. Plaintext exists only in the
-// gateway while it starts that user's worker (workers.ts).
+// GitHub token their specs repository is reached with, where they pasted one.
+// No AI agent's API key is kept: the hosted app copies a session's prompt for
+// the person's own agent instead. Sealed at rest (crypto.ts) and write-only
+// from the browser — the account page sees the last four characters and the
+// account the token belongs to. Plaintext exists only in the gateway while it
+// starts that user's worker (workers.ts).
 
 import type { Database } from "bun:sqlite";
 import type { TokenRecord } from "../server/tokenStore";
 import { open, seal, secretAad, type Keyring } from "./crypto";
 
 export const GITHUB_SECRET = "github";
-export const MAX_AGENT_KEYS = 20;
 export const MAX_SECRET_LENGTH = 4096;
-const AGENT_KEY_NAME = /^[a-z][a-z0-9-]{0,39}$/;
 
-export type SecretKind = "github" | "agent_key";
+export type SecretKind = "github";
 
 export interface SecretSummary {
   name: string;
@@ -27,8 +26,6 @@ export interface SecretSummary {
 
 export interface UserSecrets {
   github: TokenRecord | null;
-  /** By the name the user gave each key. */
-  agentKeys: Record<string, string>;
 }
 
 interface Row {
@@ -39,14 +36,6 @@ interface Row {
   keyId: string;
   meta: string;
   updatedAt: number;
-}
-
-/** Why an agent key name is refused, or null when it is fine. */
-export function agentKeyNameProblem(name: string): string | null {
-  if (name === GITHUB_SECRET) return `"${GITHUB_SECRET}" is reserved for the GitHub token`;
-  return AGENT_KEY_NAME.test(name)
-    ? null
-    : "Name it with lowercase letters, digits and dashes, starting with a letter (at most 40)";
 }
 
 export class SecretStore {
@@ -81,13 +70,6 @@ export class SecretStore {
     return out;
   }
 
-  agentKeyCount(userId: string): number {
-    const row = this.db
-      .query("SELECT COUNT(*) AS n FROM secrets WHERE user_id = ? AND kind = 'agent_key'")
-      .get(userId) as { n: number };
-    return row.n;
-  }
-
   async put(userId: string, name: string, kind: SecretKind, value: string, meta: Record<string, unknown> = {}): Promise<void> {
     const sealed = await seal(this.keyring, value, secretAad(userId, name));
     this.db
@@ -107,23 +89,18 @@ export class SecretStore {
 
   /** Every secret of a user, opened — for their worker's environment only. */
   async values(userId: string): Promise<UserSecrets> {
-    const out: UserSecrets = { github: null, agentKeys: {} };
-    for (const row of this.rows(userId)) {
-      const plain = await this.openRow(userId, row);
-      if (row.kind === "github") {
-        const meta = JSON.parse(row.meta) as Partial<TokenRecord>;
-        out.github = {
-          token: plain,
-          login: meta.login ?? "",
-          name: meta.name ?? null,
-          email: meta.email ?? null,
-          id: meta.id ?? 0,
-        };
-      } else {
-        out.agentKeys[row.name] = plain;
-      }
-    }
-    return out;
+    const row = this.rows(userId).find((r) => r.kind === "github");
+    if (!row) return { github: null };
+    const meta = JSON.parse(row.meta) as Partial<TokenRecord>;
+    return {
+      github: {
+        token: await this.openRow(userId, row),
+        login: meta.login ?? "",
+        name: meta.name ?? null,
+        email: meta.email ?? null,
+        id: meta.id ?? 0,
+      },
+    };
   }
 
   /** Re-seal every row still under an older master key; how many were. */

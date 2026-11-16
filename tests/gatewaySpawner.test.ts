@@ -210,7 +210,7 @@ test("a worker started through the spawner's socket serves its person, and stops
     dataDir,
     entry: ENTRY,
     idleMs: 60_000,
-    secrets: async (): Promise<UserSecrets> => ({ github: null, agentKeys: {} }),
+    secrets: async (): Promise<UserSecrets> => ({ github: null }),
     spawner: gateway,
     stdio: "ignore",
   });

@@ -148,7 +148,7 @@ test("after the volume is lost, the user's next worker opens the repo they had o
     dataDir,
     entry: join(import.meta.dir, "..", "src", "index.ts"),
     idleMs: 60_000,
-    secrets: async () => ({ github: null, agentKeys: {} }),
+    secrets: async () => ({ github: null }),
     repos,
     stdio: "ignore",
   });

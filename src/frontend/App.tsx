@@ -140,7 +140,7 @@ import { WhatsNewPage, hasUnseenNotes, markNotesSeen } from "./WhatsNewPage";
 import { UpdatesPage } from "./UpdatesPage";
 import type { MarketplaceRef } from "../plugins/marketplace";
 import type { PromptOptions } from "./ModalPrompts";
-import { StartSessionDialog, aiTabState } from "./StartSessionDialog";
+import { StartSessionDialog, aiTabState, hostedSessionPick } from "./StartSessionDialog";
 import { pomodoro, titlePrefix, usePomodoro } from "./pomodoro";
 import { PomodoroBar, PomodoroToggle } from "./PomodoroBar";
 import { applyPomodoroEnabled, applyPomodoroShown, usePomodoroEnabled } from "./pomodoroPref";
@@ -306,7 +306,7 @@ import { AhaImportDialog } from "./AhaImportDialog";
 import { importSummary, OpenSpecImportDialog } from "./OpenSpecImportDialog";
 import { HostedStartNav, hostedCloneHint, type HostedAccount } from "./HostedStartNav";
 import type { ScenarioRef } from "./route";
-import { copyText } from "./clipboard";
+import { copyText, copyWhenReady } from "./clipboard";
 
 interface Conflict {
   ours: string;
@@ -3633,31 +3633,33 @@ export function App() {
   // "Copy prompt to clipboard": the server builds the very prompt a session
   // would run and hands it back; nothing is launched, so the selection stays
   // put only when the copy fails.
+  // The fetch starts in the click's own turn and the clipboard is handed it
+  // straight away (copyWhenReady): Safari copies only during the click, which
+  // matters most where nothing comes first — the hosted app's button.
   const copySessionPrompt = async (
     name: string,
     files: { fileName: string; scenarios?: ScenarioPick[] }[],
     attachments: Record<string, string[]>,
+    done = `Prompt for "${name}" copied to the clipboard.`,
   ) => {
     setSessionRunning(true);
     setSessionNotice(`Building the prompt for "${name}"…`);
-    try {
-      const res = await fetch("/api/agent/session/prompt", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, files, attachments }),
-      });
+    const prompt = fetch("/api/agent/session/prompt", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, files, attachments }),
+    }).then(async (res) => {
       const data = await res.json();
-      if (!res.ok) {
-        setSessionNotice(null);
-        setSessionError(data.error ?? "Could not build the prompt");
-        return;
-      }
-      if (!(await copyText(data.prompt as string))) {
+      if (!res.ok) throw new Error(data.error ?? "Could not build the prompt");
+      return data.prompt as string;
+    });
+    try {
+      if (!(await copyWhenReady(prompt))) {
         setSessionNotice(null);
         setSessionError("Could not copy the prompt to the clipboard.");
         return;
       }
-      setSessionNotice(`Prompt for "${name}" copied to the clipboard.`);
+      setSessionNotice(done);
       setSpecSelection(new Map());
     } catch (e) {
       setSessionNotice(null);
@@ -3665,6 +3667,30 @@ export function App() {
     } finally {
       setSessionRunning(false);
     }
+  };
+
+  // The hosted app (specs/app/hosted-app.feature.md) runs no agent and keeps
+  // no agent's API key: its session button copies the prompt for the checked
+  // specs and scenarios — or the open feature — at once, with no dialog, to
+  // paste into the person's own agent in another browser tab.
+  const copyHostedSession = () => {
+    if (sessionRunning) return;
+    if (!codeGen) {
+      toast.info("Code generation is switched off in Settings.");
+      return;
+    }
+    const { attachments, count } = sessionBundle();
+    const pick = hostedSessionPick({ picked: sessionFiles(), bundled: count, openFeature: selected });
+    if ("hint" in pick) {
+      toast.info(pick.hint);
+      return;
+    }
+    void copySessionPrompt(
+      defaultSessionName(),
+      pick.files,
+      attachments,
+      "Prompt copied — paste it into your AI agent in its own browser tab.",
+    );
   };
 
   // The AI session's dialog, built from the selection at the time: the
@@ -3790,8 +3816,8 @@ export function App() {
     }
   };
 
-  /** Open the Start session dialog — every entry point lands here. */
-  const startSession = () => setStartDialog(true);
+  /** Open the Start session dialog — every entry point lands here; the hosted app copies instead. */
+  const startSession = () => (hosted ? copyHostedSession() : setStartDialog(true));
 
   /**
    * Start a pomodoro: one click, no dialog and no name. Called straight from
@@ -8559,8 +8585,8 @@ export function App() {
             : []),
         ]
       : []),
-    ...(codeGen && specSelection.size > 0 && !sessionRunning
-      ? [action("session", "Start AI Session", <StartSessionIcon size={14} />, () => startSession())]
+    ...(codeGen && (specSelection.size > 0 || (hosted && selected)) && !sessionRunning
+      ? [action("session", hosted ? "Copy Prompt for AI Agent" : "Start AI Session", <StartSessionIcon size={14} />, () => startSession())]
       : []),
     // Off in Settings: the Pomodoro is not part of this app, so the palette
     // does not offer it either (src/frontend/pomodoroPref.ts).
@@ -11156,9 +11182,13 @@ export function App() {
               label={
                 sessionRunning
                   ? "Session running…"
-                  : codeGen && sessionCount > 0
-                    ? `Start an AI session in ${codeGenTargetLabel(sessionTarget, agents)} with ${selectionLabel}`
-                    : "Start an AI session"
+                  : hosted
+                    ? sessionCount > 0 || selected
+                      ? `Copy a prompt with ${sessionCount > 0 ? selectionLabel : "the open feature"} for your AI agent`
+                      : "Copy a prompt for your AI agent"
+                    : codeGen && sessionCount > 0
+                      ? `Start an AI session in ${codeGenTargetLabel(sessionTarget, agents)} with ${selectionLabel}`
+                      : "Start an AI session"
               }
             >
               <button
@@ -11169,7 +11199,9 @@ export function App() {
                 aria-label={
                   sessionRunning
                     ? "Session running…"
-                    : `Start session…${codeGen && specSelection.size > 0 ? ` (${specSelection.size})` : ""}`
+                    : hosted
+                      ? "Copy prompt for your AI agent"
+                      : `Start session…${codeGen && specSelection.size > 0 ? ` (${specSelection.size})` : ""}`
                 }
                 onClick={() => startSession()}
                 disabled={sessionRunning}
@@ -12395,9 +12427,10 @@ export function App() {
                         ? [
                             {
                               id: "session",
-                              label: "Start AI Session",
+                              label: hosted ? "Copy Prompt for AI Agent" : "Start AI Session",
                               icon: <StartSessionIcon size={13} />,
-                              disabled: sessionRunning || specSelection.size === 0,
+                              // The hosted app copies the open feature when nothing is checked.
+                              disabled: sessionRunning || (specSelection.size === 0 && !hosted),
                               onSelect: () => void startSession(),
                             },
                           ]
