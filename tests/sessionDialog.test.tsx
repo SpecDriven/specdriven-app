@@ -6,6 +6,7 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { defaultSessionName } from "../src/frontend/App";
+import { CLAUDE_WEB_LABEL, CLAUDE_WEB_TARGET } from "../src/frontend/claudeWeb";
 import { codeGenTargetLabel, readCodeGenTarget, resolveCodeGenTarget } from "../src/frontend/codeGenTarget";
 import { PromptChoices, confirmLabelOf, initialChoiceOf } from "../src/frontend/ModalPrompts";
 import { CLAUDE_AGENT, agentsWith } from "./fixtures/agents";
@@ -54,6 +55,21 @@ describe("resolveCodeGenTarget", () => {
     expect(resolveCodeGenTarget("claude", true, none)).toBe("desktop");
     expect(resolveCodeGenTarget(null, false, claude)).toBe("claude");
     expect(resolveCodeGenTarget("desktop", false, claude)).toBe("claude");
+  });
+
+  // Claude Code on the web (src/frontend/claudeWeb.ts) needs nothing
+  // installed: the browser opens it. So it is always a target, with or
+  // without Claude.app or an agent's CLI.
+  test("Claude Code on the web is a target that needs nothing installed", () => {
+    // The name the settings file keeps, and the words the dialog shows.
+    expect(CLAUDE_WEB_TARGET).toBe("claude-web");
+    expect(CLAUDE_WEB_LABEL).toBe("Claude Code on the web");
+    expect(readCodeGenTarget(CLAUDE_WEB_TARGET, none)).toBe(CLAUDE_WEB_TARGET);
+    expect(codeGenTargetLabel(CLAUDE_WEB_TARGET, all)).toBe(CLAUDE_WEB_LABEL);
+    expect(resolveCodeGenTarget(CLAUDE_WEB_TARGET, false, none)).toBe(CLAUDE_WEB_TARGET);
+    expect(resolveCodeGenTarget(CLAUDE_WEB_TARGET, true, all)).toBe(CLAUDE_WEB_TARGET);
+    // Never the fallback: a dialog nobody chose it in does not open on it.
+    expect(resolveCodeGenTarget(null, false, none)).toBe("desktop");
   });
 
   // The headless `claude -p` target is gone: only the desktop app and the

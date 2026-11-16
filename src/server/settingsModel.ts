@@ -15,6 +15,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { GitEngine } from "./git";
 import { CONFLUENCE_PROGRAM, QTEST_PROGRAM } from "./parser";
+import { CLAUDE_WEB_TARGET } from "../frontend/claudeWeb";
 
 export interface SpecDrivenState {
   /**
@@ -377,13 +378,17 @@ export function normalizeCodeGen(value: unknown): boolean {
 }
 
 /** Where a code gen session runs (specs/agents/claude.feature.md): Claude
-    Code Desktop, or the coding agent pane driven by the provider the id
-    names (specs/agents/agent-plugins.feature.md). */
+    Code Desktop, Claude Code on the web (src/frontend/claudeWeb.ts — the
+    browser opens that one, the server never does), or the coding agent pane
+    driven by the provider the id names
+    (specs/agents/agent-plugins.feature.md). */
 export type CodeGenTarget = "desktop" | string;
 
-/** The targets as an error message lists them: "desktop, claude, codex or pi". */
-export function codeGenTargetList(agentIds: readonly string[]): string {
-  const all = ["desktop", ...agentIds];
+/** The targets as an error message lists them: "desktop, claude, codex or
+    pi" — with `web`, the stored setting's, which Claude Code on the web is
+    one of. */
+export function codeGenTargetList(agentIds: readonly string[], web = false): string {
+  const all = ["desktop", ...(web ? [CLAUDE_WEB_TARGET] : []), ...agentIds];
   return all.length === 1 ? all[0]! : `${all.slice(0, -1).join(", ")} or ${all.at(-1)}`;
 }
 
@@ -391,7 +396,7 @@ export function codeGenTargetList(agentIds: readonly string[]): string {
     then picks desktop when Claude.app is installed, else the first agent. */
 export function normalizeCodeGenTarget(value: unknown, agentIds: readonly string[]): CodeGenTarget | null {
   if (typeof value !== "string") return null;
-  return value === "desktop" || agentIds.includes(value) ? value : null;
+  return value === "desktop" || value === CLAUDE_WEB_TARGET || agentIds.includes(value) ? value : null;
 }
 
 /** Effective published-deletion setting: OFF unless explicitly turned on

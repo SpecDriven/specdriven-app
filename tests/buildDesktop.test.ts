@@ -10,6 +10,7 @@ import {
   CBOR_EXTRACT_DIR,
   PATCH_MANIFEST_FILE,
   bakedPaths,
+  bunOnlyMeta,
   buildMode,
   bundleOptions,
   rewriteBakedModule,
@@ -131,6 +132,33 @@ test("cbor-extract hands its loader the cbor-extract/ directory beside the bundl
   // Its platform packages, and everything else, bundle as they are.
   expect(rewriteBakedModule("/builder/node_modules/@cbor-extract/cbor-extract-darwin-arm64/index.js", "")).toBeNull();
   expect(rewriteBakedModule("/builder/node_modules/@automerge/automerge/dist/mjs/wasm_bindgen_output/web/automerge_wasm.js", "")).toBeNull();
+});
+
+// The desktop app runs the bundle on Electron's Node, which has no
+// import.meta.dir: a path joined from it at the top of a module threw
+// before the window opened (src/server/git/cli.ts, 2026-11-15).
+test("a bundle that reads a Bun-only import.meta field is caught", () => {
+  const bundle = [
+    '  HOSTED_CREDENTIAL_HELPER = join16(import.meta.dir, "hostedCredential.ts");',
+    "const here = import.meta.path;",
+    "const name = import.meta.file;",
+    "const url = import.meta.url;",
+    "const dir = import.meta.dirname, file = import.meta.filename;",
+  ].join("\n");
+  expect(bunOnlyMeta(bundle)).toEqual([
+    'HOSTED_CREDENTIAL_HELPER = join16(import.meta.dir, "hostedCredential.ts");',
+    "const here = import.meta.path;",
+    "const name = import.meta.file;",
+  ]);
+  expect(bunOnlyMeta("const url = import.meta.url;")).toEqual([]);
+});
+
+test("the hosted credential helper is found without Bun's import.meta.dir", async () => {
+  const source = await readFile(join(import.meta.dir, "..", "src", "server", "git", "cli.ts"), "utf8");
+  expect(bunOnlyMeta(source.replace(/\/\*[\s\S]*?\*\//g, ""))).toEqual([]);
+  const { HOSTED_CREDENTIAL_HELPER } = await import("../src/server/git/cli");
+  expect(HOSTED_CREDENTIAL_HELPER).toBe(join(import.meta.dir, "..", "src", "server", "git", "hostedCredential.ts"));
+  expect(existsSync(HOSTED_CREDENTIAL_HELPER)).toBe(true);
 });
 
 test("a bundle that still bakes a build-machine path in is caught", () => {

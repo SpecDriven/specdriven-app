@@ -19,6 +19,7 @@
 
 import { mkdir, readdir, rename, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { getAuth } from "../auth";
 import { readTextFile, writeTextFile } from "../fsx";
 import { GITHUB_HOST, webBase } from "../github";
@@ -137,8 +138,13 @@ export function tokenContext(token: string, name: string, email: string, host: s
   };
 }
 
-/** The credential helper a hosted worker's git asks the gateway through (hostedCredential.ts). */
-export const HOSTED_CREDENTIAL_HELPER = join(import.meta.dir, "hostedCredential.ts");
+/**
+ * The credential helper a hosted worker's git asks the gateway through
+ * (hostedCredential.ts). Found from import.meta.url, which every runtime
+ * has: this module also loads in the desktop app, on Electron's Node, where
+ * Bun's import.meta.dir is undefined and joining it threw at start.
+ */
+export const HOSTED_CREDENTIAL_HELPER = join(dirname(fileURLToPath(import.meta.url)), "hostedCredential.ts");
 
 /** `text` as one word of a shell command. */
 function shellWord(text: string): string {

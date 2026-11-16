@@ -1542,6 +1542,36 @@ export function extractScenarios(text: string, picks: ScenarioPick[]): string {
 }
 
 /**
+ * A feature file's text without its test links — what a coding session is
+ * handed (src/server/agent.ts buildSessionPrompt): the links say which tests
+ * automate a scenario, which is the app's bookkeeping, not part of what to
+ * build. Every scenario's `[test: … ]` lines and legacy `### Tests` table
+ * go, and so does a `[test: … ]` token inside a rule's own line; the words
+ * around it stay. Fenced code is content and is left alone. A text with no
+ * test link comes back as it is.
+ */
+export function withoutTestLinks(text: string): string {
+  const feature = parseFeature(text);
+  const linked = feature.scenarios.some((s) => s.tests.length > 0);
+  const base = linked
+    ? serializeFeature({ ...feature, scenarios: feature.scenarios.map((s) => ({ ...s, tests: [] })) })
+    : text;
+  // Not the shared global pattern: its `test` would remember where it stopped.
+  if (!new RegExp(TEST_TOKEN).test(base)) return base;
+  let inFence = false;
+  return base
+    .split("\n")
+    .map((line) => {
+      if (FENCE_RE.test(line)) {
+        inFence = !inFence;
+        return line;
+      }
+      return inFence ? line : line.replace(TEST_REF_RE, "").replace(/[ \t]+$/, "");
+    })
+    .join("\n");
+}
+
+/**
  * Rewrite the feature's `# <name>` heading — its display name — leaving the
  * rest of the text untouched (specs/ui/ui.feature.md "Main page": the Edit link
  * edits the feature name, not the file name). Only the first `#` heading

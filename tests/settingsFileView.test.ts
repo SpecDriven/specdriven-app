@@ -42,6 +42,8 @@ describe("settingsFileSections", () => {
     expect(row(sections, "gitAccess")!.value).toEqual({ kind: "text", text: "Personal access token" });
     expect(row(sections, "codeGenTarget")!.value).toEqual({ kind: "text", text: "Claude Code Desktop" });
     expect(row(sections, "syncServerUrl")!.value).toEqual({ kind: "text", text: "Off" });
+    const web = settingsFileSections({ codeGenTarget: "claude-web" }, HOME);
+    expect(row(web, "codeGenTarget")!.value).toEqual({ kind: "text", text: "Claude Code on the web" });
   });
 
   test("an autosync frequency of 0 reads Off", () => {

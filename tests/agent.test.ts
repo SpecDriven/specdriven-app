@@ -65,6 +65,46 @@ describe("buildSessionPrompt", () => {
     expect(together).toBe(buildSessionPrompt("s", SPECS));
   });
 
+  // Which tests automate a scenario is the app's bookkeeping, not part of
+  // what to build: the prompt carries the spec without its test links,
+  // wherever the session runs.
+  test("the prompt carries a spec without its test links", () => {
+    const content = [
+      "# Quotes",
+      "",
+      "## S1: Basic quote @v1 [proposed]",
+      "",
+      "- Then: the price is shown",
+      "",
+      "[test: prices one car : https://github.com/acme/app/blob/main/tests/quote.test.ts#L3 ]",
+      "",
+    ].join("\n");
+    const specs = [{ fileName: "specs/quotes.feature.md", content }];
+    for (const prompt of [
+      buildSessionPrompt("s", specs),
+      buildSessionPrompt("s", specs, { dataRepo: "/data", codeRepo: "/code" }),
+      buildSessionPrompt("s", specs, { dataRepo: "/data" }, [], { cloud: true }),
+    ]) {
+      expect(prompt).toContain("## S1: Basic quote @v1 [proposed]");
+      expect(prompt).toContain("- Then: the price is shown");
+      expect(prompt).not.toContain("[test:");
+      expect(prompt).not.toContain("quote.test.ts");
+    }
+  });
+
+  // Claude Code on the web runs on a clone in the cloud: no folder here
+  // means anything there, and the specs are only what the prompt holds.
+  test("a session in the cloud is told the specs are below, and no folder of this machine", () => {
+    const cloud = buildSessionPrompt("s", SPECS, { dataRepo: "/data", codeRepo: "/code" }, [], { cloud: true });
+    expect(cloud).toContain("The specifications are given in full below; they are not files in this repository.");
+    expect(cloud).not.toContain("/data");
+    expect(cloud).not.toContain("/code");
+    expect(cloud).not.toContain("The current directory is the code repository.");
+    for (const spec of SPECS) expect(cloud).toContain(spec.content.trimEnd());
+    // The same with no code repo: the specs are not in the clone either way.
+    expect(buildSessionPrompt("s", SPECS, { dataRepo: "/data" }, [], { cloud: true })).toBe(cloud);
+  });
+
   // A spec cut down to selected scenarios says so in its heading, so Claude
   // doesn't take the excerpt for the whole file.
   test("a partial spec's heading marks it as selected scenarios only", () => {

@@ -113,18 +113,27 @@ The **Name the session** tab asks for two things:
   PDT`, and you can replace it with something meaningful, `implement billing
   quotes`. The name titles the session in the Claude app or the pane, and
   names the session record.
-- **Run in.** Where the session goes. Only installed agents are listed:
+- **Run in.** Where the session goes. The first two are always there; of
+  the agents, only installed ones are listed:
 
   | Choice | What happens |
   | --- | --- |
   | **Copy prompt to clipboard** | Copies the prompt; paste it into any agent. The confirm button becomes **Copy prompt**. |
+  | **Claude Code on the web** | Opens `claude.ai/code` in your browser with the prompt in its box; the work runs in the cloud, on the GitHub repository you pick there. Nothing runs on your machine. The confirm button becomes **Open Claude Code**. |
   | **Claude Code Desktop** | Opens a new session in the Claude app, on the code repo. |
   | **Coding agent pane** | Chats with Claude in a pane inside SpecDriven, on the code repo. |
   | **Codex in the coding agent pane** | The same pane, driven by Codex, with permission cards for commands and file changes. |
   | **Pi in the coding agent pane** | The same pane, driven by Pi. Pi runs its own tools and asks no permission. |
 
   Your choice is remembered for next time. With no agent installed the
-  dialog skips the choice and only offers to build the prompt.
+  dialog opens on **Copy prompt to clipboard**.
+
+  **Claude Code on the web** needs you signed in to claude.ai in that
+  browser. The prompt carries the specs in full, since the cloud session has
+  only the repository you pick. It is copied to the clipboard as well: a
+  prompt too long for a link opens Claude Code without it, and the note
+  under the button says to paste it. If your browser blocks the new tab, the
+  note holds a link that opens it.
 
 Confirm with **Start AI Session**. The app reports progress under the
 button, `Building the prompt for "…"…`, then `Opening "…" in Claude Code
@@ -133,8 +142,10 @@ Desktop…` or `Opening "…" in the coding agent pane…`, and finally
 coding agent pane.` A failure shows in an error box in the same place.
 
 The prompt the agent receives starts with the session name and an
-instruction, then each selected feature verbatim under a heading naming its
-file:
+instruction, then each selected feature as written under a heading naming its
+file. The links to the tests that automate a scenario (`[test: … ]`) are left
+out of the prompt, whichever way the session goes; the feature file keeps
+them:
 
 ```markdown
 SpecDriven code gen session: implement billing quotes
@@ -306,11 +317,14 @@ watermark, and the Code generation switch is hidden.
 ### The hosted app
 
 The hosted app runs no coding agent and keeps no agent's API key. Its Start
-AI Session button opens no dialog: one click copies the prompt for the specs
-and scenarios you selected — or, with nothing selected, for the feature that
-is open — to the clipboard. Paste it into your AI agent running in another
-browser tab (Claude, ChatGPT, or any other). The note under the button says
-when the prompt is on the clipboard.
+AI Session button opens no dialog: one click opens Claude Code on the web
+(`claude.ai/code`) in a new browser tab, with the prompt for the specs and
+scenarios you selected — or, with nothing selected, for the feature that is
+open — in its box. Sign in to claude.ai in that browser first; then pick the
+repository there and send. The prompt is copied to the clipboard too, so you
+can paste it into another agent instead, and a prompt too long for a link is
+pasted: the note under the button says which happened. If your browser
+blocks the new tab, the note holds a link that opens it.
 
 ## 10. Troubleshooting
 

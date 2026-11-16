@@ -249,6 +249,21 @@ export function bakedPaths(bundle: string): string[] {
   return [...bundle.matchAll(/\b__(?:dirname|filename) = "([^"]+)"/g)].map((m) => m[1]!);
 }
 
+/**
+ * Where the bundle reads Bun's own `import.meta.dir`, `.path` or `.file`,
+ * as the lines that do. The desktop app runs the bundle on Electron's Node,
+ * where they are undefined — and one read while a module loads (a path
+ * joined at the top of a file) stops the app before its window opens. A
+ * bundle has none; `import.meta.url`, `.dirname` and `.filename` exist in
+ * both runtimes.
+ */
+export function bunOnlyMeta(bundle: string): string[] {
+  return bundle
+    .split("\n")
+    .filter((line) => /\bimport\.meta\.(?:dir|path|file)\b/.test(line))
+    .map((line) => line.trim());
+}
+
 /** Where the rewritten modules came from, for copying their files beside the bundle. */
 interface BakedModuleSources {
   automergeNodejsDir: string | null;
@@ -313,7 +328,8 @@ async function bundle(entry: string, outdir: string, production: boolean, plugin
  * The main process and the boot shim, into `outdir` — what the desktop build
  * and `bun run dev:electron` share. main.js is self-contained: the files it
  * reads at runtime are copied beside it (AUTOMERGE_WASM above), and a bundle
- * that still carries a baked absolute path fails the build.
+ * that still carries a baked absolute path, or reads a Bun-only
+ * `import.meta` field, fails the build.
  */
 export async function bundleElectron(outdir: string, opts: { production: boolean }): Promise<void> {
   const sources: BakedModuleSources = { automergeNodejsDir: null, cborExtractDir: null };
@@ -329,6 +345,10 @@ export async function bundleElectron(outdir: string, opts: { production: boolean
   const baked = bakedPaths(await Bun.file(join(outdir, "main.js")).text());
   if (baked.length > 0) {
     throw new Error(`dist/electron/main.js bakes in build-machine paths, which only this machine has:\n  ${baked.join("\n  ")}\nRewrite the dependency's loader in rewriteBakedModule (scripts/build-desktop.ts).`);
+  }
+  const bunOnly = bunOnlyMeta(await Bun.file(join(outdir, "main.js")).text());
+  if (bunOnly.length > 0) {
+    throw new Error(`dist/electron/main.js reads Bun's import.meta.dir, .path or .file, which Electron's Node does not have:\n  ${bunOnly.join("\n  ")}\nUse import.meta.url (fileURLToPath) in the module it comes from.`);
   }
 }
 

@@ -12,6 +12,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { writeTextFile } from "./fsx";
+import { withoutTestLinks } from "./parser";
 import { run } from "./run";
 import type { RunOptions, RunResult } from "./run";
 import { settingsDirectory } from "./state";
@@ -125,15 +126,17 @@ export type Runner = (cmd: string, args: string[], options?: RunOptions) => Prom
 
 /**
  * The generated prompt: the session name, the instruction, then every
- * selected spec verbatim under a heading that names its file — and after
- * the specs, whatever the plugins bundle with them (an Event Model, as its
- * slices' map and its JSON).
+ * selected spec under a heading that names its file — its text as written,
+ * less the test links (withoutTestLinks: which tests cover a scenario is
+ * not part of what to build) — and after the specs, whatever the plugins
+ * bundle with them (an Event Model, as its slices' map and its JSON).
  */
 export function buildSessionPrompt(
   name: string,
   specs: SpecInput[],
   place?: SessionPlace,
   sections: SessionSection[] = [],
+  where: { cloud?: boolean } = {},
 ): string {
   const noun = sections[0]?.noun ?? { one: "specification", many: "specifications" };
   const what =
@@ -143,14 +146,22 @@ export function buildSessionPrompt(
   const lines = [`SpecDriven code gen session: ${name}`, "", what, "Work in the current directory and exit when done."];
   // With a code repo, the session runs away from the specs; say where they
   // are, and that the code — not the specs — is what to change.
-  if (place?.codeRepo) {
+  // In the cloud (Claude Code on the web, src/frontend/claudeWeb.ts) the
+  // session has a clone of whichever repository the person picks there and
+  // nothing of this machine: no folder here is worth naming, and the specs
+  // are only what follows.
+  if (where.cloud) {
+    lines.push(
+      "The specifications are given in full below; they are not files in this repository. Edit the code to implement them.",
+    );
+  } else if (place?.codeRepo) {
     lines.push(
       `The current directory is the code repository. The specifications live in the SpecDriven data repository at ${place.dataRepo}; edit the code, not the specifications.`,
     );
   }
   for (const spec of specs) {
     const heading = `## Spec: ${spec.fileName}${spec.partial ? " (selected scenarios only)" : ""}`;
-    lines.push("", heading, "", spec.content.trimEnd());
+    lines.push("", heading, "", withoutTestLinks(spec.content).trimEnd());
   }
   for (const section of sections) {
     lines.push("", `## ${section.heading}`, "", ...section.lines);
