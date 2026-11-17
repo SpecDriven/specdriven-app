@@ -19,6 +19,7 @@ import {
   repoName,
   type RepoToken,
 } from "../src/gateway/githubApp";
+import { statelessToken } from "./helpers/githubTokens";
 import { ASK_WINDOW_MS, ASKS_PER_WINDOW, ASKS_PER_WINDOW_ALL, GithubLinks, REFUSAL_MS, RepoTokens, TOKEN_FRESH_MS } from "../src/gateway/githubLinks";
 
 const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
@@ -82,7 +83,7 @@ function standIn(
     if (installation) return installed.includes(installation[1]!) ? json({ id: 7 }) : json({ message: "Not Found" }, 404);
     if (route === "POST /app/installations/7/access_tokens") {
       const repositories = opts.mintedFor ? { repositories: [opts.mintedFor] } : {};
-      return json({ token: `ghs_${++minted}`, expires_at: new Date(NOW + 60 * 60_000).toISOString(), ...repositories }, 201);
+      return json({ token: statelessToken(++minted), expires_at: new Date(NOW + 60 * 60_000).toISOString(), ...repositories }, 201);
     }
     const permission = url.pathname.match(/^\/repos\/acme\/specs\/collaborators\/([^/]+)\/permission$/);
     if (permission) {
@@ -166,7 +167,7 @@ describe("what the app asks GitHub", () => {
   test("a token is for one repository, to write it when the person may write it there", async () => {
     const { app, calls, revoked } = standIn();
     const token = await app.repositoryToken(OCTO, "acme/specs");
-    expect(token).toEqual({ token: "ghs_2", expiresAt: NOW + 60 * 60_000, write: true });
+    expect(token).toEqual({ token: statelessToken(2), expiresAt: NOW + 60 * 60_000, write: true });
     const mints = calls.filter((c) => c.path === "/app/installations/7/access_tokens");
     // The first can only ask what the person may do; the second is the one handed out.
     expect(mints.map((c) => c.body)).toEqual([
@@ -175,14 +176,14 @@ describe("what the app asks GitHub", () => {
     ]);
     const asked = calls.find((c) => c.path.includes("/collaborators/"))!;
     expect(asked.path).toBe("/repos/acme/specs/collaborators/octo/permission");
-    expect(asked.auth).toBe("Bearer ghs_1");
+    expect(asked.auth).toBe(`Bearer ${statelessToken(1)}`);
     await Bun.sleep(0);
-    expect(revoked).toEqual(["ghs_1"]);
+    expect(revoked).toEqual([statelessToken(1)]);
   });
 
   test("the token handed out is for the repository GitHub named, by its id, and never for another", async () => {
     const named = standIn({ mintedFor: { id: 99, full_name: "Acme/Specs" } });
-    expect((await named.app.repositoryToken(OCTO, "acme/specs")).token).toBe("ghs_2");
+    expect((await named.app.repositoryToken(OCTO, "acme/specs")).token).toBe(statelessToken(2));
     expect(named.calls.filter((c) => c.method === "POST").map((c) => c.body)).toEqual([
       { repositories: ["specs"], permissions: { metadata: "read" } },
       { repository_ids: [99], permissions: { contents: "write", metadata: "read" } },
@@ -193,7 +194,7 @@ describe("what the app asks GitHub", () => {
     const refused = (await other.app.repositoryToken(OCTO, "acme/specs").catch((e) => e)) as GithubRefusal;
     expect(refused.reason).toBe("unavailable");
     await Bun.sleep(0);
-    expect(other.revoked).toEqual(["ghs_1"]);
+    expect(other.revoked).toEqual([statelessToken(1)]);
 
     // A repository that was renamed or moved answers with a redirect, which is not followed.
     const moved = standIn({ moved: ["acme/specs"] });

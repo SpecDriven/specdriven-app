@@ -14,6 +14,7 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { serveReposWithToken, type GuardedGitHttpServer } from "./helpers/gitHttpServer";
+import { statelessToken } from "./helpers/githubTokens";
 import { GithubRefusal } from "../src/gateway/githubApp";
 import { SYSTEM_PATH } from "../src/gateway/limits";
 import { proxyToWorker } from "../src/gateway/proxy";
@@ -27,6 +28,8 @@ const A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const UID_A = 200_121;
 const isolated = workerIsolation();
 const OCTO = { id: 42, login: "octo", name: "Octo Cat", email: "octo@example.com" };
+/** An hour's token, as long as GitHub makes them now. */
+const HOUR_TOKEN = statelessToken("hour");
 /** The token a person pasted before the app: still stored, and never to reach a worker again. */
 const PASTED = { token: "ghp_pasted_months_ago", login: "octo", name: null, email: null, id: 42 };
 
@@ -52,7 +55,7 @@ beforeAll(async () => {
   await plain(seed, "add", ".");
   await plain(seed, "commit", "-m", "seed");
   await plain(seed, "push", origin, "main");
-  github = serveReposWithToken(remote, "ghs_hour");
+  github = serveReposWithToken(remote, HOUR_TOKEN);
 
   asked = [];
   forgotten = [];
@@ -72,7 +75,7 @@ beforeAll(async () => {
       tokenFor: async (userId, repo) => {
         asked.push(`${userId} ${repo}`);
         if (repo !== "acme/specs") throw new GithubRefusal("not-installed", `The SpecDriven GitHub App is not installed on ${repo}`);
-        return { token: "ghs_hour", expiresAt: Date.now() + 3_600_000, write: true };
+        return { token: HOUR_TOKEN, expiresAt: Date.now() + 3_600_000, write: true };
       },
       forget: (userId) => void forgotten.push(userId),
     },
