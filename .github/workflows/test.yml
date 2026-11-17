@@ -81,5 +81,13 @@ jobs:
       # matches only our own glob patterns, and glob@7 / dir-compare still
       # need the minimatch 3 API, so a blanket override would break packaging.
       # Drop this ignore once those tools move to minimatch 11.
+      #
+      # GHSA-fc5q-39xc-vjpf (picomatch <=4.0.7, ReDoS from repeated extglobs
+      # such as +(*)) has no patched release: 4.0.7 is the latest. The attack
+      # needs an attacker-supplied glob, and every copy we install comes
+      # through build or dev tooling (knip, ts-morph and typescript-eslint via
+      # tinyglobby, electron-builder's node-gyp, sass's @parcel/watcher for
+      # its --watch CLI), which matches only our own patterns; no app code
+      # imports picomatch. Drop this ignore once a picomatch fix ships.
       - name: Audit dependencies
-        run: bun audit --ignore GHSA-ch52-4w7c-c8xp --ignore GHSA-g3hv-75wg-m249
+        run: bun audit --ignore GHSA-ch52-4w7c-c8xp --ignore GHSA-g3hv-75wg-m249 --ignore GHSA-fc5q-39xc-vjpf
