@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { git as plainGit, seededOrigin } from "./helpers/fixtures";
 import { serveReposWithToken } from "./helpers/gitHttpServer";
+import { statelessToken } from "./helpers/githubTokens";
 import { GithubRefusal } from "../src/gateway/githubApp";
 import { asUser, GATEWAY_UID, SYSTEM_PATH } from "../src/gateway/limits";
 import { Spawner, userDirs, workerIsolation } from "../src/gateway/spawner";
@@ -23,6 +24,9 @@ import { getAuth } from "../src/server/auth";
 import { clone, commitAndPush, setGitEngine } from "../src/server/git";
 import { askGateway, IDENTITY_ENV, repoOfPath, TOKEN_SOCKET_ENV } from "../src/server/hostedToken";
 import { createEnvBackend, createFileBackend, setTokenBackend } from "../src/server/tokenStore";
+
+/** An hour's token, as long as GitHub makes them now. */
+const HOUR_TOKEN = statelessToken("hour");
 
 let dir: string;
 let path: string;
@@ -53,7 +57,7 @@ async function listen(opts: { uid?: number | null; peer?: (fd: number) => number
     answer: async (repo) => {
       asked.push(repo);
       if (repo !== "acme/specs") throw new GithubRefusal("not-installed", `The SpecDriven GitHub App is not installed on ${repo}`);
-      return { token: "ghs_hour", expiresAt: 1_800_000_000_000, write: true };
+      return { token: HOUR_TOKEN, expiresAt: 1_800_000_000_000, write: true };
     },
   });
 }
@@ -73,7 +77,7 @@ function raw(text: string): Promise<string> {
 
 test("a worker asks for one repository and gets its token, or the reason there is none", async () => {
   await listen();
-  expect(await askGateway(path, "acme/specs")).toEqual({ token: "ghs_hour", expiresAt: 1_800_000_000_000 });
+  expect(await askGateway(path, "acme/specs")).toEqual({ token: HOUR_TOKEN, expiresAt: 1_800_000_000_000 });
   await expect(askGateway(path, "acme/other")).rejects.toThrow("not installed on acme/other");
   expect(asked).toEqual(["acme/specs", "acme/other"]);
   // The socket is the worker's and the gateway's alone.
@@ -98,7 +102,7 @@ test("only the worker's uid is answered, and anyone else on the other end is hun
   await expect(askGateway(path, "acme/specs", 0)).rejects.toThrow("gave no token");
   expect(asked).toEqual([]);
   from = 200_101;
-  expect((await askGateway(path, "acme/specs")).token).toBe("ghs_hour");
+  expect((await askGateway(path, "acme/specs")).token).toBe(HOUR_TOKEN);
   // Where the uid cannot be told at all, nobody is answered.
   server!.close();
   await listen({ uid: 200_101, peer: () => null });
@@ -117,7 +121,7 @@ test("the socket goes with the worker, and one that is not there yet is waited f
   const early = askGateway(path, "acme/specs");
   await Bun.sleep(150);
   await listen();
-  expect((await early).token).toBe("ghs_hour");
+  expect((await early).token).toBe(HOUR_TOKEN);
 });
 
 test("the repository is the first two parts of a url's path", () => {
@@ -132,7 +136,7 @@ test("git's helper answers git with the repository's token, and with nothing whe
   await listen();
   const env = { [TOKEN_SOCKET_ENV]: path };
   expect(await credentialFor("protocol=https\nhost=github.com\npath=acme/specs.git\n", env)).toBe(
-    "username=x-access-token\npassword=ghs_hour\npassword_expiry_utc=1800000000\n",
+    `username=x-access-token\npassword=${HOUR_TOKEN}\npassword_expiry_utc=1800000000\n`,
   );
   // No path (git was not told to send it) or no socket: nothing to say.
   expect(await credentialFor("protocol=https\nhost=github.com\n", env)).toBe("");
@@ -154,14 +158,14 @@ test("a real git clones and pushes with the token its helper fetched, which is n
   await plain(seed, "commit", "-m", "seed");
   await plain(seed, "push", origin, "main");
 
-  const github = serveReposWithToken(join(dir, "remote"), "ghs_hour");
+  const github = serveReposWithToken(join(dir, "remote"), HOUR_TOKEN);
   await listen();
   process.env.SPECDRIVEN_GITHUB_URL = github.url;
   process.env[TOKEN_SOCKET_ENV] = path;
   try {
     const context = brokeredContext("Octo Cat", "octo@example.com");
     expect(context.env).toEqual({});
-    expect(JSON.stringify(context)).not.toContain("ghs_hour");
+    expect(JSON.stringify(context)).not.toContain(HOUR_TOKEN);
     expect(context.config.join(" ")).toContain(HOSTED_CREDENTIAL_HELPER);
     const git = subprocessRun(async () => context);
 
@@ -196,7 +200,7 @@ test("a real git clones and pushes with the token its helper fetched, which is n
 
 test("the bundled engine asks the gateway the same way, with no git installed", async () => {
   await seededOrigin(join(dir, "remote"), "acme/specs.git");
-  const github = serveReposWithToken(join(dir, "remote"), "ghs_hour");
+  const github = serveReposWithToken(join(dir, "remote"), HOUR_TOKEN);
   await listen();
   const realPath = process.env.PATH;
   process.env.SPECDRIVEN_GITHUB_URL = github.url;
