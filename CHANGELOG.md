@@ -4,6 +4,14 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.288 — 2026-11-17
+
+- Agent pane: a worktree session's branch takes the room the bar has free ([#483](https://github.com/SpecDriven/specdriven-app/pull/483))
+- Agent pane: a coding session is told the repository's default branch ([#482](https://github.com/SpecDriven/specdriven-app/pull/482))
+- Hosted GitHub App: tests use GitHub's new ~520-char installation tokens ([#481](https://github.com/SpecDriven/specdriven-app/pull/481))
+- CI: ignore picomatch GHSA-fc5q-39xc-vjpf in the audit step ([#480](https://github.com/SpecDriven/specdriven-app/pull/480))
+- Agent pane: the session popover lists the MCP servers, with a switch, Sign in and Reconnect ([#479](https://github.com/SpecDriven/specdriven-app/pull/479))
+
 ## v0.1.287 — 2026-11-16
 
 - Transcript: Bash calls show only in Verbose ([#478](https://github.com/SpecDriven/specdriven-app/pull/478))
