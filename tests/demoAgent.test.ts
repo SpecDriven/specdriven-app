@@ -16,7 +16,7 @@ import {
   getChatSession,
   interruptChat,
 } from "../src/server/agentChat";
-import type { ChatEvent } from "../src/server/agentTypes";
+import type { ChatEvent, ChatMcpServer } from "../src/server/agentTypes";
 import type { AgentHost, AgentStartOptions, PermissionOutcome } from "../src/plugins/host/agents";
 import type { ChatEventBody } from "../src/server/agentTypes";
 import { applyStartupState, handleApi, reloader, syncedOnStart } from "../src/server/api";
@@ -26,6 +26,7 @@ import {
   SIMULATED_WINDOW,
   readBrief,
   setSimulationPace,
+  simulatedMcpServers,
   simulatedProvider,
 } from "../src/server/demoAgent";
 import { setFolderChooser } from "../src/server/folderChooser";
@@ -329,6 +330,52 @@ test("a demo session counts its context window, and counts it again on request",
   const { context } = (await refreshed.json()) as { context: { detail: string } };
   expect(context.detail).toBe("measured");
   expect(getChatSession(id)!.context!.detail).toBe("measured");
+});
+
+// The popover's MCP servers (specs/agents/agent-pane.feature.md "MCP
+// servers") have something to show in the demo: two servers that work, one
+// that wants a sign-in and one that failed, and each action changes its row.
+test("a demo session lists its MCP servers, and turning one off, signing in and reconnecting change the list", async () => {
+  const res = await api("/api/agent/chat", "POST", { name: "ad hoc" });
+  const { id } = (await res.json()) as { id: string };
+  await until(id, () => getChatSession(id)!.status === "idle");
+  const mcp = `/api/agent/chat/${id}/mcp`;
+  const list = async () => ((await (await api(mcp)).json()) as { servers: ChatMcpServer[] }).servers;
+  const status = async () => Object.fromEntries((await list()).map((s) => [s.name, s.status]));
+  expect(await list()).toEqual(simulatedMcpServers());
+  expect(await status()).toEqual({ confluence: "connected", specdriven: "connected", linear: "needs-auth", figma: "failed" });
+
+  await api(mcp, "POST", { server: "confluence", action: "disable" });
+  await api(mcp, "POST", { server: "figma", action: "reconnect" });
+  // There is nowhere to sign in to: no page to open, and the server connects
+  // a moment later (a moment the test keeps short, not none).
+  setSimulationPace(0.02);
+  const signIn = (await (await api(mcp, "POST", { server: "linear", action: "authenticate" })).json()) as {
+    url?: string;
+    servers: ChatMcpServer[];
+  };
+  setSimulationPace(0);
+  expect(signIn.url).toBeUndefined();
+  expect(signIn.servers.find((s) => s.name === "linear")!.status).toBe("connecting");
+  for (const end = Date.now() + 3000; (await status()).linear !== "connected" && Date.now() < end; await Bun.sleep(5)) {
+    // until the simulated sign-in is through
+  }
+  expect(await status()).toEqual({ confluence: "disabled", specdriven: "connected", linear: "connected", figma: "connected" });
+  expect((await list()).find((s) => s.name === "figma")).toEqual({
+    name: "figma",
+    status: "connected",
+    source: "user",
+    tools: 5,
+    canToggle: true,
+    canAuthenticate: false,
+  });
+
+  // Another session starts from the same list: the changes were this session's.
+  const other = (await (await api("/api/agent/chat", "POST", { name: "second" })).json()) as { id: string };
+  await until(other.id, () => getChatSession(other.id)!.status === "idle");
+  expect(((await (await api(`/api/agent/chat/${other.id}/mcp`)).json()) as { servers: ChatMcpServer[] }).servers).toEqual(
+    simulatedMcpServers(),
+  );
 });
 
 // A chat opened from the pane's own empty state carries no prompt and no

@@ -1,14 +1,18 @@
 // The session popover of the coding agent pane (specs/agents/agent-pane
-// .feature.md S10), as in Claude Desktop: a ring in the pane's header that
+// .feature.md S11), as in Claude Desktop: a ring in the pane's header that
 // says how full the context window is, opening on the folder the session
 // works in, its branch or worktree, and the context window by category.
 //
 // The count is the agent's (AgentHost.context, src/server/agentChat.ts):
 // Claude says what fills the window, Codex only how much, Pi nothing. Every
 // helper below is pure, so the pane's tests pin the numbers and the words.
+//
+// Under the context window: the session's MCP servers ("MCP servers" in the
+// same spec), for an agent that lists them — how each stands, a switch to
+// turn it on or off, and a sign-in for one that needs it.
 
 import { ChevronRight, Copy, Folder, GitBranch, RefreshCw, ScrollText } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Popover } from "./Popover";
 import { Tooltip } from "./Tooltip";
 import { toast } from "./Toasts";
@@ -24,10 +28,14 @@ import {
   useTranscriptView,
   type AgentDescriptor,
   type ChatContextUsage,
+  type ChatMcpServer,
   type ChatSessionMeta,
   type ContextSlice,
+  type McpServerAction,
 } from "./agentChat";
+import { isFinalStatus } from "../server/agentTypes";
 import { copyText } from "./clipboard";
+import { openWebLink } from "./weblinks";
 
 // --- Paths -------------------------------------------------------------------
 
@@ -295,6 +303,7 @@ export function SessionRail({
       <BranchRow meta={meta} homeDir={homeDir} />
       <TranscriptViewRow agent={agent} />
       <ContextSection meta={meta} agent={agent} />
+      <McpSection meta={meta} agent={agent} />
     </div>
   );
 }
@@ -491,5 +500,237 @@ export function ContextMeter({ usage }: { usage: ChatContextUsage }) {
         {when}
       </p>
     </div>
+  );
+}
+
+// --- MCP servers ---------------------------------------------------------------
+
+/** How a server stands, in the row's words. */
+export function mcpStatusWords(server: ChatMcpServer): string {
+  switch (server.status) {
+    case "connected":
+      return server.tools === undefined ? "Connected" : `Connected · ${server.tools} ${server.tools === 1 ? "tool" : "tools"}`;
+    case "connecting":
+      return "Connecting…";
+    case "needs-auth":
+      return "Needs sign-in";
+    case "failed":
+      return "Failed";
+    case "disabled":
+      return "Disabled";
+  }
+}
+
+/** The status the list's own row warns of: a failure before a sign-in; null when every server is fine. */
+export function mcpAttention(servers: readonly ChatMcpServer[]): "failed" | "needs-auth" | null {
+  if (servers.some((s) => s.status === "failed")) return "failed";
+  if (servers.some((s) => s.status === "needs-auth")) return "needs-auth";
+  return null;
+}
+
+/** How long the list keeps asking after a sign-in was started. */
+const MCP_WATCH_MS = 5 * 60_000;
+const MCP_POLL_MS = 2000;
+
+/**
+ * The session's MCP servers, asked of the agent when the popover opens and
+ * again after every action. While a server is connecting or a sign-in is
+ * under way in the browser, the list asks again every two seconds, so the
+ * row turns to "Connected" without a click.
+ */
+function McpSection({ meta, agent }: { meta: ChatSessionMeta; agent: AgentDescriptor }) {
+  const live = !isFinalStatus(meta.status) && meta.status !== "starting";
+  const can = agent.capabilities.mcpServers === true;
+  const [servers, setServers] = useState<ChatMcpServer[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  /** Sign-in pages by server: shown as a link, for a browser that kept the window shut. */
+  const [links, setLinks] = useState<Record<string, string>>({});
+  /** Until when the list keeps asking for a sign-in's outcome. */
+  const [watchUntil, setWatchUntil] = useState(0);
+  const id = meta.id;
+
+  const load = useCallback(
+    () =>
+      agentChat.mcpServers(id).then(
+        (list) => {
+          setServers(list);
+          setError(null);
+        },
+        (e: Error) => setError(e.message),
+      ),
+    [id],
+  );
+
+  useEffect(() => {
+    if (can && live) void load();
+  }, [can, live, load]);
+
+  const connecting = servers?.some((s) => s.status === "connecting") ?? false;
+  const awaited = watchUntil > 0 && (servers?.some((s) => s.status === "needs-auth") ?? false);
+  const polling = can && live && (connecting || awaited);
+  useEffect(() => {
+    if (!polling) return;
+    const timer = setInterval(() => {
+      if (watchUntil > 0 && Date.now() > watchUntil) setWatchUntil(0);
+      void load();
+    }, MCP_POLL_MS);
+    return () => clearInterval(timer);
+  }, [polling, watchUntil, load]);
+
+  if (!can || !live) return null;
+
+  const act = (server: string, action: McpServerAction) => {
+    setBusy(server);
+    void agentChat
+      .mcpAction(id, server, action)
+      .then((answer) => {
+        setServers(answer.servers);
+        setError(null);
+        if (action !== "authenticate") return;
+        setWatchUntil(Date.now() + MCP_WATCH_MS);
+        if (answer.url) {
+          setLinks((l) => ({ ...l, [server]: answer.url! }));
+          openWebLink(answer.url);
+        }
+      })
+      .catch((e: Error) => toast.error(e.message))
+      .finally(() => setBusy(null));
+  };
+
+  return <McpServerList servers={servers} error={error} busy={busy} links={links} onAction={act} />;
+}
+
+/** The "MCP servers" row and, opened, one line per server. */
+export function McpServerList({
+  servers,
+  error = null,
+  busy = null,
+  links = {},
+  onAction,
+}: {
+  /** Null until the agent answered. */
+  servers: readonly ChatMcpServer[] | null;
+  error?: string | null;
+  /** The server an action is running for. */
+  busy?: string | null;
+  links?: Readonly<Record<string, string>>;
+  onAction: (server: string, action: McpServerAction) => void;
+}) {
+  const attention = servers ? mcpAttention(servers) : null;
+  // Opened by itself when a server wants something; the reader's own choice
+  // stands once they opened or closed it.
+  const [chosen, setChosen] = useState<boolean | null>(null);
+  const open = chosen ?? attention !== null;
+  return (
+    <section className="agent-rail-mcp" aria-label="MCP servers">
+      <details
+        className="agent-rail-items"
+        data-list="mcp"
+        open={open}
+        onToggle={(e) => {
+          const now = e.currentTarget.open;
+          if (now !== open) setChosen(now);
+        }}
+      >
+        <summary>
+          <span className="agent-rail-items-label">MCP servers</span>
+          {attention && (
+            <span
+              className="agent-dot agent-mcp-dot"
+              data-mcp={attention}
+              role="img"
+              aria-label={attention === "failed" ? "A server failed" : "A server needs sign-in"}
+            />
+          )}
+          <span className="agent-rail-items-count">{servers ? servers.length : "…"}</span>
+          <ChevronRight size={13} aria-hidden="true" className="agent-rail-items-chevron" />
+        </summary>
+        {error && !servers ? (
+          <p className="agent-rail-note agent-mcp-note">{error}</p>
+        ) : servers && servers.length === 0 ? (
+          <p className="agent-rail-note agent-mcp-note">This session has no MCP servers.</p>
+        ) : (
+          <ul className="agent-mcp-list">
+            {(servers ?? []).map((s) => (
+              <McpServerRow key={s.name} server={s} busy={busy === s.name} link={links[s.name]} onAction={onAction} />
+            ))}
+          </ul>
+        )}
+      </details>
+    </section>
+  );
+}
+
+function McpServerRow({
+  server,
+  busy,
+  link,
+  onAction,
+}: {
+  server: ChatMcpServer;
+  busy: boolean;
+  link?: string;
+  onAction: (server: string, action: McpServerAction) => void;
+}) {
+  const words = mcpStatusWords(server);
+  const sub = [server.source, words].filter(Boolean).join(" · ");
+  const on = server.status !== "disabled";
+  return (
+    <li data-server={server.name} data-status={server.status}>
+      <span className="agent-dot agent-mcp-dot" data-mcp={server.status} aria-hidden="true" />
+      <span className="agent-mcp-main">
+        <span className="agent-rail-item-name" title={server.name}>
+          {server.name}
+        </span>
+        {server.status === "failed" && server.error ? (
+          <Tooltip label={server.error}>
+            <span className="agent-mcp-sub" tabIndex={0}>
+              {sub}
+            </span>
+          </Tooltip>
+        ) : (
+          <span className="agent-mcp-sub">{sub}</span>
+        )}
+        {link && server.status === "needs-auth" && (
+          <a className="agent-mcp-link" href={link} target="_blank" rel="noopener noreferrer">
+            Open the sign-in page
+          </a>
+        )}
+      </span>
+      {server.status === "needs-auth" && server.canAuthenticate && (
+        <button
+          type="button"
+          className="btn btn-secondary agent-mcp-btn"
+          disabled={busy}
+          onClick={() => onAction(server.name, "authenticate")}
+        >
+          Sign in
+        </button>
+      )}
+      {server.status === "failed" && (
+        <button
+          type="button"
+          className="btn btn-secondary agent-mcp-btn"
+          disabled={busy}
+          onClick={() => onAction(server.name, "reconnect")}
+        >
+          Reconnect
+        </button>
+      )}
+      <Tooltip label={!server.canToggle ? "This server cannot be turned off here" : on ? "Turn off" : "Turn on"}>
+        <span className="switch agent-mcp-switch">
+          <input
+            type="checkbox"
+            role="switch"
+            aria-label={`Enable ${server.name}`}
+            checked={on}
+            disabled={busy || !server.canToggle}
+            onChange={(e) => onAction(server.name, e.target.checked ? "enable" : "disable")}
+          />
+          <span className="switch-track" aria-hidden="true" />
+        </span>
+      </Tooltip>
+    </li>
   );
 }

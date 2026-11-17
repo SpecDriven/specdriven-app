@@ -6,6 +6,7 @@ import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   ContextMeter,
+  McpServerList,
   SessionRail,
   SessionRailButton,
   TranscriptViewRow,
@@ -13,6 +14,8 @@ import {
   contextHeadline,
   contextLevel,
   contextPercent,
+  mcpAttention,
+  mcpStatusWords,
   meterSegments,
   parentPath,
   sliceColor,
@@ -27,7 +30,7 @@ import {
   formatTokens,
   transcriptViewHint,
 } from "../src/frontend/agentChat";
-import type { ChatContextUsage, ChatEvent, ChatSessionMeta } from "../src/frontend/agentChat";
+import type { ChatContextUsage, ChatEvent, ChatMcpServer, ChatSessionMeta } from "../src/frontend/agentChat";
 import { CLAUDE_AGENT, CODEX_AGENT, PI_AGENT, agent } from "./fixtures/agents";
 
 const CLAUDE = agent({ ...CLAUDE_AGENT, capabilities: { ...CLAUDE_AGENT.capabilities, contextUsage: "breakdown" } });
@@ -299,5 +302,101 @@ describe("SessionRail", () => {
     const open = renderToStaticMarkup(<SessionRailButton meta={WORKTREE_META} agent={CLAUDE} homeDir={null} defaultOpen />);
     expect(open).toContain('role="dialog"');
     expect(open).toContain("agent-rail-popover");
+  });
+});
+
+// specs/agents/agent-pane.feature.md "MCP servers": under the context window,
+// one row per MCP server of the session — how it stands, its sign-in, its
+// switch. The behaviour in a page is tests/agentRail.test.tsx.
+describe("the MCP servers list", () => {
+  const SERVERS: ChatMcpServer[] = [
+    { name: "specdriven-confluence", status: "connected", source: "SpecDriven", tools: 3, canToggle: true, canAuthenticate: false },
+    { name: "linear", status: "needs-auth", source: "user", canToggle: true, canAuthenticate: true },
+    { name: "figma", status: "failed", source: "project", error: "Connection refused", canToggle: true, canAuthenticate: false },
+    { name: "claude.ai Slack", status: "disabled", source: "claude.ai", canToggle: false, canAuthenticate: false },
+    { name: "sentry", status: "connecting", canToggle: true, canAuthenticate: false },
+  ];
+  const row = (html: string, name: string) => html.split("<li ").find((li) => li.startsWith(`data-server="${name}"`))!;
+
+  test("each status has its words, and a failure outranks a sign-in for the row's warning", () => {
+    expect(SERVERS.map(mcpStatusWords)).toEqual(["Connected · 3 tools", "Needs sign-in", "Failed", "Disabled", "Connecting…"]);
+    expect(mcpStatusWords({ ...SERVERS[0]!, tools: 1 })).toBe("Connected · 1 tool");
+    const { tools: _t, ...uncounted } = SERVERS[0]!;
+    expect(mcpStatusWords(uncounted)).toBe("Connected");
+    expect(mcpAttention(SERVERS)).toBe("failed");
+    expect(mcpAttention(SERVERS.filter((s) => s.status !== "failed"))).toBe("needs-auth");
+    expect(mcpAttention([SERVERS[0]!, SERVERS[3]!, SERVERS[4]!])).toBeNull();
+  });
+
+  test("the row counts the servers and opens by itself when one wants something", () => {
+    const html = renderToStaticMarkup(<McpServerList servers={SERVERS} onAction={() => {}} />);
+    expect(html).toMatch(/<details class="agent-rail-items" data-list="mcp" open="">/);
+    expect(html).toContain('MCP servers</span><span class="agent-dot agent-mcp-dot" data-mcp="failed" role="img" aria-label="A server failed">');
+    expect(html).toContain('<span class="agent-rail-items-count">5</span>');
+    const calm = renderToStaticMarkup(<McpServerList servers={[SERVERS[0]!]} onAction={() => {}} />);
+    expect(calm).toContain('<details class="agent-rail-items" data-list="mcp">');
+    expect(calm).not.toContain('role="img"');
+  });
+
+  test("a server's row says where it comes from and how it stands, with a switch that is on unless disabled", () => {
+    const html = renderToStaticMarkup(<McpServerList servers={SERVERS} onAction={() => {}} />);
+    expect(row(html, "specdriven-confluence")).toContain("SpecDriven · Connected · 3 tools");
+    expect(row(html, "specdriven-confluence")).toMatch(/role="switch" aria-label="Enable specdriven-confluence" checked=""\/>/);
+    expect(row(html, "specdriven-confluence")).not.toContain("<button");
+    // No source: the status alone.
+    expect(row(html, "sentry")).toContain('<span class="agent-mcp-sub">Connecting…</span>');
+    // Off, and not this pane's to turn on: the switch is there, unchecked and disabled.
+    expect(row(html, "claude.ai Slack")).toMatch(/aria-label="Enable claude.ai Slack" disabled=""\/>/);
+    expect(row(html, "claude.ai Slack")).not.toContain("checked");
+  });
+
+  test("Sign in is offered where a sign-in can start, Reconnect where a server failed, each with a button class", () => {
+    const html = renderToStaticMarkup(<McpServerList servers={SERVERS} onAction={() => {}} />);
+    expect(row(html, "linear")).toContain('<button type="button" class="btn btn-secondary agent-mcp-btn">Sign in</button>');
+    expect(row(html, "figma")).toContain('<button type="button" class="btn btn-secondary agent-mcp-btn">Reconnect</button>');
+    expect(row(html, "figma")).toContain("project · Failed");
+    // A server that needs a sign-in the agent cannot start: no button.
+    const stuck = renderToStaticMarkup(
+      <McpServerList servers={[{ ...SERVERS[1]!, canAuthenticate: false }]} onAction={() => {}} />,
+    );
+    expect(stuck).toContain("Needs sign-in");
+    expect(stuck).not.toContain("<button");
+    // While its request runs, a row's controls wait.
+    const busy = renderToStaticMarkup(<McpServerList servers={SERVERS} busy="linear" onAction={() => {}} />);
+    expect(row(busy, "linear")).toContain('agent-mcp-btn" disabled="">Sign in');
+    expect(row(busy, "linear")).toMatch(/aria-label="Enable linear" disabled="" checked=""\/>/);
+    expect(row(busy, "figma")).not.toContain("disabled");
+  });
+
+  test("a started sign-in leaves its page as a link while the server still needs it", () => {
+    const links = { linear: "https://auth.example/authorize?state=1", figma: "https://x.example/" };
+    const html = renderToStaticMarkup(<McpServerList servers={SERVERS} links={links} onAction={() => {}} />);
+    expect(row(html, "linear")).toContain(
+      '<a class="agent-mcp-link" href="https://auth.example/authorize?state=1" target="_blank" rel="noopener noreferrer">Open the sign-in page</a>',
+    );
+    expect(row(html, "figma")).not.toContain("agent-mcp-link");
+  });
+
+  test("before the agent answered the count waits; no servers and a failed list say so", () => {
+    const waiting = renderToStaticMarkup(<McpServerList servers={null} onAction={() => {}} />);
+    expect(waiting).toContain('<span class="agent-rail-items-count">…</span>');
+    expect(waiting).not.toContain("<li");
+    const none = renderToStaticMarkup(<McpServerList servers={[]} onAction={() => {}} />);
+    expect(none).toContain('<span class="agent-rail-items-count">0</span>');
+    expect(none).toContain("This session has no MCP servers.");
+    const failed = renderToStaticMarkup(<McpServerList servers={null} error="Claude could not list its MCP servers: timed out" onAction={() => {}} />);
+    expect(failed).toContain("Claude could not list its MCP servers: timed out");
+  });
+
+  test("the popover has the row only for an agent that lists its servers, and only while the session runs", () => {
+    const LISTING = agent({ ...CLAUDE, capabilities: { ...CLAUDE.capabilities, mcpServers: true } });
+    expect(renderToStaticMarkup(<SessionRail meta={WORKTREE_META} agent={LISTING} homeDir={null} />)).toContain(
+      'aria-label="MCP servers"',
+    );
+    expect(renderToStaticMarkup(<SessionRail meta={WORKTREE_META} agent={CLAUDE} homeDir={null} />)).not.toContain("MCP servers");
+    for (const status of ["starting", "ended", "error"] as const) {
+      const html = renderToStaticMarkup(<SessionRail meta={{ ...WORKTREE_META, status }} agent={LISTING} homeDir={null} />);
+      expect(html).not.toContain("MCP servers");
+    }
   });
 });

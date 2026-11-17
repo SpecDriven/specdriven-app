@@ -43,10 +43,13 @@ import type {
   ChatContextUsage,
   ChatEvent,
   ChatEventBody,
+  ChatMcpServer,
   ChatSessionMeta,
   ChatStatus,
   ChatWorktree,
   ContextDetail,
+  McpServerAction,
+  McpServersAnswer,
   PermissionAnswer,
   PermissionMode,
   EffortLevel,
@@ -1009,6 +1012,67 @@ export async function refreshChatContext(id: string, detail: ContextDetail): Pro
   }
   if (!usage || isFinalStatus(session.meta.status)) return usage ?? null;
   return showContext(session, usage);
+}
+
+// --- MCP servers (specs/agents/agent-pane.feature.md "MCP servers") -------------
+//
+// The session popover lists the agent's MCP servers and acts on them. It is
+// asked for, never streamed: the list is the agent's own answer at that
+// moment, and nothing of it is kept in the session's record.
+
+type McpSession = ChatSession & { session: AgentSession & Required<Pick<AgentSession, "mcpServers">> };
+
+function mcpSession(id: string): McpSession {
+  const session = switchable(id);
+  if (!session.provider.capabilities.mcpServers || !session.session.mcpServers) {
+    throw new ChatError(409, `${session.provider.label} does not list its MCP servers`);
+  }
+  return session as McpSession;
+}
+
+/** A provider's refusal keeps its status and words; anything else is the
+    agent failing (502), named by what was asked of it. */
+async function askAgent<T>(provider: AgentProvider, what: string, ask: () => Promise<T>): Promise<T> {
+  try {
+    return await ask();
+  } catch (e) {
+    if (e instanceof AgentError) throw new ChatError(e.status, e.message);
+    throw new ChatError(502, `${provider.label} could not ${what}: ${(e as Error).message}`);
+  }
+}
+
+/** A session's MCP servers as they stand now. */
+export async function chatMcpServers(id: string): Promise<ChatMcpServer[]> {
+  const session = mcpSession(id);
+  return askAgent(session.provider, "list its MCP servers", () => session.session.mcpServers());
+}
+
+/**
+ * One of the popover's actions on an MCP server — turn it on or off,
+ * connect it again, start its sign-in — answered with the servers as they
+ * stand afterwards (and, for a sign-in, the page to open). Only a server
+ * the agent lists is acted on, and only in a way the agent offers.
+ */
+export async function changeChatMcpServer(id: string, name: string, action: McpServerAction): Promise<McpServersAnswer> {
+  const session = mcpSession(id);
+  const { provider, session: agent } = session;
+  const list = () => askAgent(provider, "list its MCP servers", () => agent.mcpServers());
+  const server = (await list()).find((s) => s.name === name);
+  if (!server) throw new ChatError(404, `This session has no MCP server named "${name}"`);
+  const cannot = (what: string) => new ChatError(409, `${provider.label} cannot ${what} "${name}"`);
+  let url: string | undefined;
+  if (action === "enable" || action === "disable") {
+    if (!server.canToggle || !agent.setMcpServerEnabled) throw cannot(action);
+    const on = action === "enable";
+    await askAgent(provider, `${action} "${name}"`, () => agent.setMcpServerEnabled!(name, on));
+  } else if (action === "reconnect") {
+    if (!agent.reconnectMcpServer) throw cannot("reconnect");
+    await askAgent(provider, `reconnect "${name}"`, () => agent.reconnectMcpServer!(name));
+  } else {
+    if (!server.canAuthenticate || !agent.authenticateMcpServer) throw cannot("start a sign-in for");
+    url = (await askAgent(provider, `start the sign-in for "${name}"`, () => agent.authenticateMcpServer!(name))).url;
+  }
+  return { servers: await list(), ...(url ? { url } : {}) };
 }
 
 /** The models an agent offers and what a new session starts on; null for

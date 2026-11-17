@@ -22,6 +22,7 @@ import { fromPlugin } from "../plugins/host/agents";
 import type {
   AgentImage,
   ChatContextUsage,
+  ChatMcpServer,
   ContextDetail,
   ContextItem,
   ContextSlice,
@@ -88,6 +89,33 @@ const SKILL_ITEMS: readonly ContextItem[] = [
 ];
 
 const sum = (items: readonly ContextItem[]) => items.reduce((n, i) => n + i.tokens, 0);
+
+/**
+ * The MCP servers a simulated session starts with (the popover's "MCP
+ * servers"): two that work, one that wants a sign-in and one that failed,
+ * so every row of the list has something to show.
+ */
+export function simulatedMcpServers(): ChatMcpServer[] {
+  return [
+    { name: "confluence", status: "connected", source: "SpecDriven", tools: 3, canToggle: true, canAuthenticate: false },
+    { name: "specdriven", status: "connected", source: "project", tools: 3, canToggle: true, canAuthenticate: false },
+    { name: "linear", status: "needs-auth", source: "user", canToggle: true, canAuthenticate: true },
+    {
+      name: "figma",
+      status: "failed",
+      source: "user",
+      error: "Connection refused: http://127.0.0.1:3845/mcp",
+      canToggle: true,
+      canAuthenticate: false,
+    },
+  ];
+}
+
+/** How many tools a simulated server gives once it connects. */
+const SIMULATED_MCP_TOOLS: Readonly<Record<string, number>> = { confluence: 3, specdriven: 3, linear: 12, figma: 5 };
+
+/** How long a simulated sign-in takes before the server connects. */
+const SIMULATED_SIGN_IN_MS = 2500;
 
 /**
  * What the simulated agent reports after `turns` turns: the fixed parts of
@@ -233,6 +261,7 @@ class SimulatedSession implements AgentSession {
   private stop = new AbortController();
   private mode: PermissionMode;
   private turn = 0;
+  private readonly mcp = simulatedMcpServers();
 
   constructor(private readonly opts: AgentStartOptions) {
     this.mode = opts.permissionMode;
@@ -273,6 +302,41 @@ class SimulatedSession implements AgentSession {
 
   contextUsage(detail: ContextDetail): Promise<ChatContextUsage> {
     return Promise.resolve({ ...simulatedContext(this.turn, detail), at: new Date().toISOString() });
+  }
+
+  mcpServers(): Promise<ChatMcpServer[]> {
+    return Promise.resolve(this.mcp.map((s) => ({ ...s })));
+  }
+
+  /** Off, or back on: a server turned on again connects at once, signed in or not. */
+  setMcpServerEnabled(name: string, enabled: boolean): Promise<void> {
+    if (enabled) this.connected(name);
+    else this.setMcp(name, { status: "disabled", canAuthenticate: false });
+    return Promise.resolve();
+  }
+
+  reconnectMcpServer(name: string): Promise<void> {
+    this.connected(name);
+    return Promise.resolve();
+  }
+
+  /** There is nowhere to sign in to in the demo: the server connects a moment later, as after a sign-in. */
+  authenticateMcpServer(name: string): Promise<{ url?: string }> {
+    this.setMcp(name, { status: "connecting", canAuthenticate: false });
+    void sleep(SIMULATED_SIGN_IN_MS, [this.opts.signal]).then(() => this.connected(name));
+    return Promise.resolve({});
+  }
+
+  private connected(name: string): void {
+    this.setMcp(name, { status: "connected", tools: SIMULATED_MCP_TOOLS[name] ?? 1, canAuthenticate: false });
+  }
+
+  private setMcp(name: string, patch: Partial<ChatMcpServer>): void {
+    const server = this.mcp.find((s) => s.name === name);
+    if (!server) return;
+    delete server.error;
+    delete server.tools;
+    Object.assign(server, patch);
   }
 
   close(): void {
@@ -480,6 +544,7 @@ export const simulatedProvider: AgentProvider = fromPlugin(
       images: true,
       contextUsage: "breakdown",
       thinking: true,
+      mcpServers: true,
     },
     defaultPermissionMode: "auto",
     start(opts) {

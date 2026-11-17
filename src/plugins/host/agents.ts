@@ -22,8 +22,10 @@ import type {
   AgentOutput,
   ChatAccount,
   ChatContextUsage,
+  ChatMcpServer,
   ChatStatus,
   ContextDetail,
+  McpSignIn,
   NoteCode,
   PermissionMode,
   PermissionSuggestion,
@@ -182,6 +184,19 @@ export interface AgentSession {
       the agent cannot say; capabilities.contextUsage "breakdown" says it is
       there. The core shows the answer as a host.context would. */
   contextUsage?(detail: ContextDetail): Promise<ChatContextUsage | null>;
+  /** The session's MCP servers as they stand now, for the popover's list;
+      capabilities.mcpServers says it and the three below are there. Any of
+      the three may be left out: the core then refuses that action. Throw an
+      AgentError(409, …) to refuse one. */
+  mcpServers?(): Promise<ChatMcpServer[]>;
+  /** Turn one MCP server on or off for the session. */
+  setMcpServerEnabled?(name: string, enabled: boolean): Promise<void>;
+  /** Connect a failed MCP server again. */
+  reconnectMcpServer?(name: string): Promise<void>;
+  /** Start a sign-in for an MCP server that needs one: the page the app
+      opens in the browser, or no url when nothing is left for the user to
+      do. The server connects once the sign-in is through; the list says so. */
+  authenticateMcpServer?(name: string): Promise<McpSignIn>;
   /** Kill the child; must be safe to call from an exit hook (no await). */
   close(): void;
   /** The agent's sign-in changed (AgentRegistry.changed): drop what the

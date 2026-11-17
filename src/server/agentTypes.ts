@@ -393,6 +393,10 @@ export interface AgentCapabilities {
       `thinking_delta` events); absent is no, and the pane's Thinking view
       says so. */
   thinking?: boolean;
+  /** Whether a running session lists its MCP servers and takes the
+      popover's actions on them (AgentSession.mcpServers and the three
+      beside it); absent is no, and the popover shows no MCP servers. */
+  mcpServers?: boolean;
 }
 
 // --- Model and effort --------------------------------------------------------
@@ -549,4 +553,48 @@ export interface AgentMcpServer {
   command: string;
   args: string[];
   env: Record<string, string>;
+}
+
+/** How an MCP server of a session stands, in the pane's words. */
+export type McpServerStatus = "connected" | "connecting" | "needs-auth" | "failed" | "disabled";
+
+/**
+ * One MCP server of a running session, as the session popover lists it
+ * (specs/agents/agent-pane.feature.md "MCP servers"): every server the
+ * agent knows of — the ones the app handed it and the ones its own settings
+ * name — with what the pane may do about it.
+ */
+export interface ChatMcpServer {
+  /** The server's name as the agent lists it; what the actions take. */
+  name: string;
+  status: McpServerStatus;
+  /** Where it is configured, in the agent's words: "project", "user",
+      "local", "claude.ai"; "SpecDriven" for one the app handed over. */
+  source?: string;
+  /** Why it failed. */
+  error?: string;
+  /** How many tools it gives, once connected. */
+  tools?: number;
+  /** Whether the pane may turn it on and off. */
+  canToggle: boolean;
+  /** Whether a sign-in can be started for it now. */
+  canAuthenticate: boolean;
+}
+
+/** What the popover asks of one MCP server. */
+export type McpServerAction = "enable" | "disable" | "reconnect" | "authenticate";
+
+export const MCP_SERVER_ACTIONS: readonly McpServerAction[] = ["enable", "disable", "reconnect", "authenticate"];
+
+/** A sign-in the agent started: the page to open in the browser, when the
+    user has something to do there. */
+export interface McpSignIn {
+  url?: string;
+}
+
+/** What an MCP action answers: the servers as they stand now. */
+export interface McpServersAnswer {
+  servers: ChatMcpServer[];
+  /** After "authenticate": the sign-in page to open. */
+  url?: string;
 }

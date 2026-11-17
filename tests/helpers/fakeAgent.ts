@@ -48,6 +48,8 @@ export interface FakeProviderOptions extends Partial<Omit<AgentProvider, "start"
   refreshError?: Error;
   /** The sessions' contextUsage(): absent, they have none. */
   contextUsage?: (detail: ContextDetail) => Promise<ChatContextUsage | null>;
+  /** The sessions' MCP methods (mcpServers and the actions): absent, they have none. */
+  mcp?: Pick<AgentSession, "mcpServers" | "setMcpServerEnabled" | "reconnectMcpServer" | "authenticateMcpServer">;
 }
 
 export function fakeProvider(options: FakeProviderOptions = {}): { provider: AgentProvider; sessions: FakeSession[] } {
@@ -111,6 +113,7 @@ export function fakeProvider(options: FakeProviderOptions = {}): { provider: Age
           session.closed = true;
         },
         ...(options.contextUsage ? { contextUsage: options.contextUsage } : {}),
+        ...(options.mcp ?? {}),
         ...(options.noRefresh
           ? {}
           : {

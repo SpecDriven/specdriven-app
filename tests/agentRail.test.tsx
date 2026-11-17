@@ -62,8 +62,9 @@ afterEach(async () => {
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { AgentPane } from "../src/frontend/AgentPane";
+import { Toaster } from "../src/frontend/Toasts";
 import { agentChat, forgetFolderInfos } from "../src/frontend/agentChat";
-import type { ChatContextUsage, ChatSessionMeta } from "../src/frontend/agentChat";
+import type { ChatContextUsage, ChatMcpServer, ChatSessionMeta } from "../src/frontend/agentChat";
 import { CLAUDE_AGENT, agent } from "./fixtures/agents";
 
 const CLAUDE = agent({ ...CLAUDE_AGENT, capabilities: { ...CLAUDE_AGENT.capabilities, contextUsage: "breakdown" } });
@@ -94,9 +95,24 @@ const META: ChatSessionMeta = {
 };
 
 /** A server where /w/code is a repo on main; the stream is the test's to feed. */
-function server(posts: { url: string; body: unknown }[], feed: { push?: (line: string) => void }) {
+function server(
+  posts: { url: string; body: unknown }[],
+  feed: { push?: (line: string) => void },
+  /** The agent's MCP side: the list, and what an action answers. */
+  mcp?: { list: () => ChatMcpServer[]; act: (server: string, action: string) => { url?: string } | Response },
+) {
   globalThis.fetch = (async (input: string | URL, init: RequestInit = {}) => {
     const url = String(input);
+    if (url === "/api/agent/chat/s1/mcp" && mcp) {
+      if (init.method !== "POST") {
+        posts.push({ url, body: null });
+        return Response.json({ servers: mcp.list() });
+      }
+      const body = JSON.parse(String(init.body)) as { server: string; action: string };
+      posts.push({ url, body });
+      const answer = mcp.act(body.server, body.action);
+      return answer instanceof Response ? answer : Response.json({ servers: mcp.list(), ...answer });
+    }
     if (url.startsWith("/api/agent/folder?")) return Response.json({ canWorktree: true, repo: "/w/code", branch: "main" });
     if (url === "/api/agent/chat/s1/context" && init.method === "POST") {
       posts.push({ url, body: JSON.parse(String(init.body)) });
@@ -258,3 +274,101 @@ test("Refresh asks the agent to count every category, and a count on the stream 
   expect(button(host).querySelector(".agent-rail-ring")!.getAttribute("data-level")).toBe("warn");
   unmount();
 });
+
+// specs/agents/agent-pane.feature.md "MCP servers": the popover asks the
+// agent for its MCP servers when it opens; a switch turns one off, Sign in
+// starts its sign-in and opens the page, and the list keeps asking until the
+// server is through.
+test("the popover lists the MCP servers, a switch turns one off, and Sign in opens the page and waits for the server", async () => {
+  const LISTING = agent({ ...CLAUDE, capabilities: { ...CLAUDE.capabilities, mcpServers: true } });
+  const servers: ChatMcpServer[] = [
+    { name: "specdriven-confluence", status: "connected", source: "SpecDriven", tools: 3, canToggle: true, canAuthenticate: false },
+    { name: "linear", status: "needs-auth", source: "user", canToggle: true, canAuthenticate: true },
+  ];
+  const named = (name: string) => servers.find((s) => s.name === name)!;
+  const posts: { url: string; body: unknown }[] = [];
+  server(posts, {}, {
+    list: () => servers.map((s) => ({ ...s })),
+    act: (name, action) => {
+      if (action === "disable") named(name).status = "disabled";
+      if (action === "enable") return Response.json({ error: "Claude could not enable it: timed out" }, { status: 502 });
+      return action === "authenticate" ? { url: "https://auth.example/authorize?state=1" } : {};
+    },
+  });
+  const opened: string[] = [];
+  const realOpen = window.open;
+  window.open = ((url: string) => {
+    opened.push(url);
+    return null;
+  }) as unknown as typeof window.open;
+  agentChat.setAgents([LISTING]);
+  await agentChat.openSession("s1");
+  const { host, unmount } = mount(
+    <>
+      <AgentPane compact={false} demo={false} codeRepo="/w/code" dataRepo="/w/data" onClose={() => {}} />
+      <Toaster />
+    </>,
+  );
+  // Nothing is asked until the popover opens.
+  await settle();
+  expect(posts).toEqual([]);
+
+  act(() => button(host).click());
+  await settle();
+  const list = () => popover(host)!.querySelector<HTMLDetailsElement>('details[data-list="mcp"]')!;
+  const row = (name: string) => list().querySelector<HTMLElement>(`li[data-server="${name}"]`)!;
+  const toggle = (name: string) => row(name).querySelector<HTMLInputElement>('input[role="switch"]')!;
+  expect(posts).toEqual([{ url: "/api/agent/chat/s1/mcp", body: null }]);
+  expect(list().querySelector(".agent-rail-items-count")!.textContent).toBe("2");
+  // A server wants a sign-in: the row is open without a click.
+  expect(list().open).toBe(true);
+  expect(row("specdriven-confluence").textContent).toContain("SpecDriven · Connected · 3 tools");
+  expect(toggle("specdriven-confluence").checked).toBe(true);
+  expect(row("linear").textContent).toContain("user · Needs sign-in");
+
+  // The switch turns the server off, and the row follows the agent's answer.
+  await act(async () => toggle("specdriven-confluence").click());
+  await settle();
+  expect(posts.at(-1)).toEqual({ url: "/api/agent/chat/s1/mcp", body: { server: "specdriven-confluence", action: "disable" } });
+  expect(row("specdriven-confluence").textContent).toContain("SpecDriven · Disabled");
+  expect(toggle("specdriven-confluence").checked).toBe(false);
+
+  // A refused action says why, and the row stays as the agent has it.
+  await act(async () => toggle("specdriven-confluence").click());
+  await settle();
+  expect(posts.at(-1)).toEqual({ url: "/api/agent/chat/s1/mcp", body: { server: "specdriven-confluence", action: "enable" } });
+  const refusals = () => [...document.querySelectorAll(".toast")].filter((t) => t.textContent?.includes("could not enable"));
+  const said = refusals().map((t) => t.querySelector(".toast-message")?.textContent);
+  // An error toast stays until dismissed, and the toasts are one list for
+  // the whole test run: dismiss this one, or a later file's page shows it.
+  for (const t of refusals()) await act(async () => t.querySelector<HTMLButtonElement>("button.toast-close")!.click());
+  expect(said).toEqual(["Claude could not enable it: timed out"]);
+  expect(refusals()).toEqual([]);
+  expect(toggle("specdriven-confluence").checked).toBe(false);
+
+  // Sign in: the agent starts it, the page opens in the browser and stays as a link.
+  const signIn = row("linear").querySelector<HTMLButtonElement>("button.agent-mcp-btn")!;
+  expect(signIn.textContent).toBe("Sign in");
+  await act(async () => signIn.click());
+  await settle();
+  expect(posts.at(-1)).toEqual({ url: "/api/agent/chat/s1/mcp", body: { server: "linear", action: "authenticate" } });
+  expect(opened).toEqual(["https://auth.example/authorize?state=1"]);
+  expect(row("linear").querySelector("a.agent-mcp-link")!.getAttribute("href")).toBe("https://auth.example/authorize?state=1");
+
+  // The sign-in goes through in the browser: the list asks again by itself and the row turns.
+  Object.assign(named("linear"), { status: "connected", tools: 12, canAuthenticate: false });
+  const asked = posts.length;
+  await act(() => Bun.sleep(2200));
+  expect(posts.length).toBeGreaterThan(asked);
+  expect(posts.at(-1)).toEqual({ url: "/api/agent/chat/s1/mcp", body: null });
+  expect(row("linear").textContent).toContain("user · Connected · 12 tools");
+  expect(row("linear").querySelector("button.agent-mcp-btn")).toBeNull();
+  expect(row("linear").querySelector("a.agent-mcp-link")).toBeNull();
+  // Nothing left to wait for: the list stops asking.
+  const settled = posts.length;
+  await act(() => Bun.sleep(2200));
+  expect(posts.length).toBe(settled);
+
+  window.open = realOpen;
+  unmount();
+}, 15_000);
