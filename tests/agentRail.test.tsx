@@ -188,15 +188,15 @@ test("the popover's Transcript row switches the view, the transcript follows, an
     { kind: "assistant", messageId: "m1", turn: 1, blocks: [{ type: "thinking", text: "Read the spec first." }], parentToolUseId: null },
     { kind: "assistant", messageId: "m1", turn: 1, blocks: [{ type: "tool_use", id: "r1", name: "Read", input: { file_path: "a.md" } }], parentToolUseId: null },
     { kind: "tool_result", toolUseId: "r1", content: "# A", isError: false, parentToolUseId: null },
-    { kind: "assistant", messageId: "m2", turn: 1, blocks: [{ type: "tool_use", id: "b1", name: "Bash", input: { command: "bun test" } }], parentToolUseId: null },
-    { kind: "tool_result", toolUseId: "b1", content: "3 pass", isError: false, parentToolUseId: null },
+    { kind: "assistant", messageId: "m2", turn: 1, blocks: [{ type: "tool_use", id: "g1", name: "Grep", input: { pattern: "TODO" } }], parentToolUseId: null },
+    { kind: "tool_result", toolUseId: "g1", content: "3 matches", isError: false, parentToolUseId: null },
   ];
   act(() => lines.forEach((line, i) => feed.push!(JSON.stringify({ ...line, seq: i + 2, at }))));
   await settle();
   const log = () => host.querySelector<HTMLElement>('[role="log"]')!;
   // Normal, the default: the two calls are one line, the thought is not shown.
   expect(log().querySelectorAll(".agent-tool-run")).toHaveLength(1);
-  expect(log().textContent).toContain("Read 1 file, ran 1 command");
+  expect(log().textContent).toContain("Read 1 file, searched 1 time");
   expect(log().textContent).not.toContain("Read the spec first.");
 
   act(() => button(host).click());
