@@ -880,7 +880,7 @@ function WorktreeBranch({
   if (!onOpenShell) {
     return (
       <Tooltip label={`Worktree at ${worktree.path} · ${facts}`}>
-        <span className="agent-bar-fact agent-bar-branch" aria-label={`Worktree branch: ${worktree.branch}`}>
+        <span className="agent-bar-fact agent-bar-branch agent-bar-worktree" aria-label={`Worktree branch: ${worktree.branch}`}>
           {content}
         </span>
       </Tooltip>
@@ -890,7 +890,7 @@ function WorktreeBranch({
     <Tooltip label={`Open a Ghostty shell in the worktree · ${worktree.cwd} · ${facts}`}>
       <button
         type="button"
-        className="agent-bar-chip agent-bar-branch"
+        className="agent-bar-chip agent-bar-branch agent-bar-worktree"
         aria-label={`Worktree branch: ${worktree.branch} — open in Ghostty`}
         onClick={onOpenShell}
       >
