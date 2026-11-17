@@ -27,6 +27,8 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 import { run, which } from "./run";
 import type { RunResult } from "./run";
 import type { ChatWorktree } from "./agentTypes";
+import { defaultBranch } from "./defaultBranch";
+import type { BranchGit } from "./defaultBranch";
 
 /** The branch prefix a session's worktree branch starts with. */
 export const WORKTREE_BRANCH_PREFIX = "specdriven/";
@@ -34,8 +36,6 @@ export const WORKTREE_BRANCH_PREFIX = "specdriven/";
 export const WORKTREES_SUBDIR = "worktrees";
 /** The remote a repo's main branch is kept level with. */
 const REMOTE = "origin";
-/** The main branch where the remote names no default of its own. */
-const MAIN_BRANCH = "main";
 /** Longest name part of a worktree's branch and folder. */
 const SLUG_MAX = 40;
 
@@ -50,10 +50,13 @@ export class WorktreeError extends Error {
 }
 
 /** Runs one git command; injectable so tests can count or fail them. */
-export type WorktreeGit = (cwd: string, args: string[]) => Promise<RunResult>;
+export type WorktreeGit = BranchGit;
 
-const systemGit: WorktreeGit = (cwd, args) =>
-  run("git", ["-C", cwd, ...args], { env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+const systemGit: WorktreeGit = (cwd, args, opts) =>
+  run("git", ["-C", cwd, ...args], {
+    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    ...(opts?.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}),
+  });
 
 let git: WorktreeGit = systemGit;
 let gitOnPath: () => boolean = () => which("git") !== null;
@@ -102,18 +105,14 @@ async function hasRemote(repo: string): Promise<boolean> {
 }
 
 /**
- * The branch worktree sessions start from: the remote's default branch, else
- * `main` where the remote has one. Null with no remote, or none of these on
- * it — such a repo has nothing to be level with, and its sessions branch off
- * whatever is checked out.
+ * The branch worktree sessions start from: origin's default branch
+ * (src/server/defaultBranch.ts — origin's HEAD, asked of origin when no
+ * clone recorded it, else its `main` or `master`). Null with no origin, or
+ * none of these on it — such a repo has nothing to be level with, and its
+ * sessions branch off whatever is checked out.
  */
 async function baseBranch(repo: string): Promise<string | null> {
-  if (!(await hasRemote(repo))) return null;
-  const head = await git(repo, ["symbolic-ref", "--quiet", "--short", `refs/remotes/${REMOTE}/HEAD`]);
-  const name = head.stdout.trim();
-  if (head.exitCode === 0 && name.startsWith(`${REMOTE}/`)) return name.slice(REMOTE.length + 1);
-  const main = await git(repo, ["rev-parse", "--verify", "--quiet", `refs/remotes/${REMOTE}/${MAIN_BRANCH}`]);
-  return main.exitCode === 0 ? MAIN_BRANCH : null;
+  return (await defaultBranch(git, repo, { remote: REMOTE }))?.branch ?? null;
 }
 
 const commits = (n: number) => `${n} commit${n === 1 ? "" : "s"}`;
@@ -275,4 +274,36 @@ export async function cleanUpWorktree(wt: ChatWorktree): Promise<WorktreeCleanup
 export async function discardWorktree(wt: ChatWorktree): Promise<void> {
   await git(wt.repo, ["worktree", "remove", "--force", wt.path]);
   await git(wt.repo, ["branch", "-D", wt.branch]);
+}
+
+/**
+ * The line a coding session's agent is told with its first turn about the
+ * repo it works in (specs/agents/agent-pane.feature.md "A coding session is
+ * told the repository's default branch"): which branch is the default — so
+ * it never takes `main` for granted — and which branch it is on. Null where
+ * `cwd` is in no repo, or nothing names a default branch.
+ */
+export async function sessionGitContext(cwd: string, worktree?: ChatWorktree): Promise<string | null> {
+  if (!gitOnPath()) return null;
+  const top = await git(cwd, ["rev-parse", "--show-toplevel"]);
+  if (top.exitCode !== 0) return null;
+  const repo = resolve(top.stdout.trim());
+  const found = await defaultBranch(git, repo);
+  if (!found) return null;
+  const at = found.remote ? ` (${found.remote}/${found.branch})` : " (local; the repository has no remote)";
+  const parts = [
+    `[Context — git: this repository's default branch is \`${found.branch}\`${at}${found.branch === "main" ? "" : ", not `main`"}.`,
+    `Branch from it and compare with it, and open pull requests against it.`,
+  ];
+  const head = await git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]);
+  const branch = head.exitCode === 0 ? head.stdout.trim() : "";
+  if (worktree) {
+    const from = worktree.base ? `, made from \`${worktree.base}\`` : "";
+    parts.push(`You are on \`${worktree.branch}\`, a branch of your own in a git worktree${from}.`);
+  } else if (branch && branch !== "HEAD") {
+    parts.push(`The checked-out branch is \`${branch}\`.`);
+  } else if (branch === "HEAD") {
+    parts.push("HEAD is detached.");
+  }
+  return `${parts.join(" ")}]`;
 }
