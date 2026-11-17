@@ -18,7 +18,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { resolveRefs, sessionWorkDir, withRefs } from "./agent";
 import { agentMcpServers } from "./agentMcp";
-import { cleanUpWorktree, createWorktree, discardWorktree, WorktreeError } from "./agentWorktree";
+import { cleanUpWorktree, createWorktree, discardWorktree, sessionGitContext, WorktreeError } from "./agentWorktree";
 import type { WorktreeCleanup } from "./agentWorktree";
 import type { SessionPlace } from "./agent";
 import type {
@@ -126,6 +126,9 @@ interface ChatSession {
   images: Map<string, { path: string; mediaType: ImageMediaType }>;
   /** Record writes queue up here — two in flight would tear the file. */
   saving: Promise<void>;
+  /** The repo's git line (agentWorktree.ts sessionGitContext), told with
+      the first turn that is no `/command`, then dropped. */
+  gitContext?: string;
 }
 
 // The registry hangs off globalThis: `bun --hot` swaps modules but keeps
@@ -492,6 +495,20 @@ export interface MessageRefs {
   paths: string[];
 }
 
+/**
+ * A turn's words as the agent is told them: the files that go with it in a
+ * line after the user's words (withRefs), and on the session's first turn
+ * that is no `/command`, the repo's git line — its default branch — after
+ * that. The transcript shows the user's words alone.
+ */
+function toldText(session: Pick<ChatSession, "gitContext">, text: string, refs: readonly string[]): string {
+  const told = withRefs(text, refs);
+  const line = session.gitContext;
+  if (!line || text.trimStart().startsWith("/")) return told;
+  delete session.gitContext;
+  return told.trim() ? `${told}\n\n${line}` : line;
+}
+
 /** Those files as this session's agent is told them; none for a `/command`. */
 function refsFor(meta: Pick<ChatSessionMeta, "cwd" | "worktree">, text: string, refs?: MessageRefs): string[] {
   if (!refs || refs.paths.length === 0 || text.trimStart().startsWith("/")) return [];
@@ -650,8 +667,13 @@ export async function createChatSession(opts: CreateChatOptions): Promise<ChatSe
       now,
     );
   }
-  // The MCP servers the session should have (src/server/agentMcp.ts).
-  const mcpServers = await agentMcpServers();
+  // The MCP servers the session should have (src/server/agentMcp.ts), and
+  // what the agent is told of the repo it works in — its default branch.
+  const [mcpServers, gitContext] = await Promise.all([
+    agentMcpServers(),
+    sessionGitContext(cwd, worktree).catch(() => null),
+  ]);
+  if (gitContext) session.gitContext = gitContext;
   try {
     session.session = await provider.start({
       sessionId: id,
@@ -662,7 +684,7 @@ export async function createChatSession(opts: CreateChatOptions): Promise<ChatSe
       permissionMode,
       ...(opts.model ? { model: opts.model } : {}),
       ...(effort ? { effort } : {}),
-      ...(firstTurn ? { prompt: withRefs(opts.prompt ?? "", firstRefs) } : {}),
+      ...(firstTurn ? { prompt: toldText(session, opts.prompt ?? "", firstRefs) } : {}),
       ...(pasted.given.length ? { images: pasted.given } : {}),
       ...(mcpServers.length ? { mcpServers } : {}),
       signal: session.abort.signal,
@@ -751,8 +773,8 @@ function beginTurn(session: ChatSession, message: TurnMessage, later = false): C
   const event = emit(session, { kind: "user", ...shownOf(message) });
   if (session.meta.status === "idle") setStatus(session, "running");
   // The files that go with it are told to the agent in a line after the
-  // user's words.
-  const told = withRefs(message.text, message.refs);
+  // user's words; the first turn also carries the repo's git line.
+  const told = toldText(session, message.text, message.refs);
   const hand = () => {
     if (isFinalStatus(session.meta.status)) return;
     let sent: Promise<void>;

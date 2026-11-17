@@ -504,10 +504,11 @@ class SimulatedSession implements AgentSession {
   private async followUp(prompt: string, images = 0): Promise<void> {
     await this.think("Nothing here runs for real, so the honest answer is to say what a live session would do.");
     if (this.cancelled) return;
-    // The user's words only: the line naming the open files (agent.ts
-    // withRefs) is for an agent, not for quoting back.
+    // The user's words only: the lines naming the open files (agent.ts
+    // withRefs) and the repo's default branch (agentWorktree.ts
+    // sessionGitContext) are for an agent, not for quoting back.
     const asked = prompt
-      .replace(/\n*\[Context — files? open in SpecDriven: [^\]]*\]\s*$/, "")
+      .replace(/(\n*\[Context — [^\]]*\])+\s*$/, "")
       .trim()
       .replace(/\s+/g, " ")
       .slice(0, 80);

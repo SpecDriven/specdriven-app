@@ -10,10 +10,11 @@ import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleApi, reloader } from "../src/server/api";
-import { endAllChatSessions, getChatSession } from "../src/server/agentChat";
+import { endAllChatSessions, getChatEvents, getChatSession } from "../src/server/agentChat";
 import type { ChatSessionMeta } from "../src/server/agentTypes";
-import { folderGitInfo, setWorktreeGit, worktreeSlug } from "../src/server/agentWorktree";
+import { folderGitInfo, sessionGitContext, setWorktreeGit, worktreeSlug } from "../src/server/agentWorktree";
 import { run } from "../src/server/run";
+import { forgetUnansweredRemotes } from "../src/server/defaultBranch";
 import { agents } from "../src/plugins/host/agents";
 import type { Disposer } from "../src/plugins/kernel";
 import { writeState } from "../src/server/state";
@@ -71,6 +72,7 @@ afterEach(async () => {
   await endAllChatSessions();
   reloader.stop();
   setWorktreeGit();
+  forgetUnansweredRemotes();
   for (const dispose of disposers.splice(0)) await dispose();
   await rm(root, { recursive: true, force: true });
   for (const [name, value] of [
@@ -396,4 +398,116 @@ test("the pane learns which branch a worktree session has to start from", async 
     branch: "feature",
     base: "main",
   });
+});
+
+// --- Telling the agent the default branch ----------------------------------
+// specs/agents/agent-pane.feature.md "A coding session is told the
+// repository's default branch": not every repo's is `main`.
+
+/** A bare origin whose HEAD is `develop` (it has a `main` too), added to
+    `dir` by hand — so no `origin/HEAD`, as a clone would have recorded. */
+async function developOrigin(dir: string): Promise<string> {
+  const origin = join(root, "develop-origin.git");
+  await git(root, "clone", "-q", "--bare", dir, origin);
+  await git(origin, "branch", "develop", "main");
+  await git(origin, "symbolic-ref", "HEAD", "refs/heads/develop");
+  await git(dir, "remote", "add", "origin", origin);
+  await git(dir, "fetch", "-q", "origin");
+  // git ≥ 2.48 records the remote's HEAD on fetch; take it away to stand for an older git.
+  await run("git", ["-C", dir, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD"]);
+  return origin;
+}
+
+async function until<T>(read: () => T, ok: (v: T) => boolean, ms = 3000): Promise<T> {
+  const end = Date.now() + ms;
+  for (;;) {
+    const v = read();
+    if (ok(v)) return v;
+    if (Date.now() > end) throw new Error(`timed out waiting; last: ${JSON.stringify(v).slice(0, 300)}`);
+    await Bun.sleep(5);
+  }
+}
+
+test("a coding session's agent is told the repository's default branch with its first turn", async () => {
+  const fake = register();
+  await developOrigin(code);
+  const meta = await start({ cwd: code, prompt: "Fix it" });
+  const told = fake.sessions[0]!.opts.prompt!;
+  expect(told).toBe(
+    "Fix it\n\n[Context — git: this repository's default branch is `develop` (origin/develop), not `main`. " +
+      "Branch from it and compare with it, and open pull requests against it. The checked-out branch is `main`.]",
+  );
+  // The transcript shows the user's words alone.
+  const user = getChatEvents(meta.id).find((e) => e.kind === "user") as { text: string } | undefined;
+  expect(user?.text).toBe("Fix it");
+  // Origin was asked, and its answer recorded where git's own tools look.
+  expect(await git(code, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")).toBe("origin/develop");
+});
+
+test("a worktree session starts from the default branch origin names, and its agent is told the branch it is on", async () => {
+  const fake = register();
+  const origin = await developOrigin(code);
+  // On main, which is not origin's default: refused, naming develop.
+  const res = await refused({ cwd: code, worktree: true });
+  expect(res.status).toBe(409);
+  expect(res.error).toBe(`Worktree sessions start from develop, but ${code} is on main — switch it to develop first`);
+  // A clone on develop starts.
+  const clone = join(root, "develop-clone");
+  await git(root, "clone", "-q", origin, clone);
+  const meta = await start({ cwd: clone, worktree: true, prompt: "Fix it" });
+  expect(meta.worktree).toMatchObject({ base: "develop" });
+  expect(fake.sessions[0]!.opts.prompt).toContain("default branch is `develop` (origin/develop)");
+  expect(fake.sessions[0]!.opts.prompt).toContain(
+    `You are on \`${meta.worktree!.branch}\`, a branch of your own in a git worktree, made from \`develop\`.]`,
+  );
+});
+
+test("a first turn that is a /command leaves the git line for the next turn, which is told it once", async () => {
+  const fake = register();
+  const res = await api("/api/agent/chat", "POST", { name: "chat", agent: "fake", cwd: code });
+  const { id } = (await res.json()) as ChatSessionMeta;
+  await until(() => getChatSession(id), (m) => m?.status === "idle");
+  const session = fake.sessions[0]!;
+  const endTurn = () => {
+    session.host.emit({
+      kind: "result",
+      turn: session.host.turn(),
+      subtype: "success",
+      isError: false,
+      costUsd: null,
+      durationMs: 5,
+      numTurns: 1,
+      denials: 0,
+    });
+    session.host.turnEnded();
+  };
+  const say = async (text: string) => {
+    expect((await api(`/api/agent/chat/${id}/message`, "POST", { text })).status).toBe(200);
+    endTurn();
+    await until(() => getChatSession(id), (m) => m?.status === "idle");
+  };
+  await say("/compact");
+  await say("hello");
+  await say("again");
+  expect(session.sent[0]).toBe("/compact");
+  // No remote: the local main is the default.
+  expect(session.sent[1]).toStartWith(
+    "hello\n\n[Context — git: this repository's default branch is `main` (local; the repository has no remote)",
+  );
+  expect(session.sent[2]).toBe("again");
+});
+
+test("a session in a folder that is no git repository is told nothing of git", async () => {
+  const fake = register();
+  await start({ prompt: "Fix it" });
+  expect(fake.sessions[0]!.opts.prompt).toBe("Fix it");
+});
+
+test("a session on a detached HEAD is told so, beside the default branch", async () => {
+  await git(code, "checkout", "-q", "--detach");
+  expect(await sessionGitContext(join(code, "src"))).toBe(
+    "[Context — git: this repository's default branch is `main` (local; the repository has no remote). " +
+      "Branch from it and compare with it, and open pull requests against it. HEAD is detached.]",
+  );
+  expect(await sessionGitContext(data)).toBeNull();
 });
