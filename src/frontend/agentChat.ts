@@ -496,11 +496,13 @@ export function toolSummary(name: string, input: unknown): string {
 // reduction above know nothing of it — so switching re-renders what the pane
 // already holds:
 //
-//   normal    the conversation: a run of tool calls is one line, thinking and
-//             a subagent's own traffic stay out of the way
-//   thinking  one row per tool call, and what the agent thought
-//   verbose   everything, opened: every call with its input and output, a
-//             subagent's traffic inline, the notes an agent starts with
+//   normal    the conversation: a run of tool calls is one line, thinking,
+//             shell commands and a subagent's own traffic stay out of the way
+//   thinking  one row per tool call but the shell commands, and what the
+//             agent thought
+//   verbose   everything, opened: every call with its input and output, the
+//             shell commands, a subagent's traffic inline, the notes an agent
+//             starts with
 
 export type TranscriptView = "normal" | "thinking" | "verbose";
 
@@ -515,8 +517,8 @@ export const TRANSCRIPT_VIEW_LABEL: Record<TranscriptView, string> = {
 /** What each view is for — the control's tooltips. */
 export const TRANSCRIPT_VIEW_HINT: Record<TranscriptView, string> = {
   normal: "The conversation, with each run of tool calls folded into one line",
-  thinking: "Every tool call on its own row, and what the agent thought",
-  verbose: "Everything: every tool call opened, subagent traffic, session notes",
+  thinking: "Every tool call but shell commands on its own row, and what the agent thought",
+  verbose: "Everything: every tool call opened, shell commands, subagent traffic, session notes",
 };
 
 /** A view's tooltip for an agent: Thinking says so when the agent keeps its
@@ -546,8 +548,12 @@ export type ViewRow =
 /** The notes only Verbose shows: how the agent started, what it wrote to stderr. */
 const QUIET_NOTES = new Set(["init", "stderr"]);
 
+/** The calls only Verbose shows: the shell commands the agent ran. */
+const QUIET_TOOLS = new Set(["Bash"]);
+
 function shownIn(item: TranscriptItem, view: TranscriptView): boolean {
   if (view === "verbose") return true;
+  if (item.kind === "tool") return !QUIET_TOOLS.has(item.name);
   if (item.kind === "note") return item.level === "error" || !QUIET_NOTES.has(item.code);
   // Normal keeps thinking to one live "Thinking…" line while it streams.
   if (item.kind === "thinking") return view === "thinking" || item.streaming;
@@ -642,7 +648,7 @@ const RUN_FAMILIES: readonly { names: readonly string[]; phrase: (n: number) => 
   { names: ["Task", "Agent"], phrase: (n) => `ran ${n} ${n === 1 ? "agent" : "agents"}` },
 ];
 
-/** A run of tool calls in a few words: "Read 3 files, ran 2 commands". */
+/** A run of tool calls in a few words: "Read 3 files, edited 2 files". */
 export function runSummary(tools: readonly { name: string }[]): string {
   // Counted per family, said in the order each family first appears.
   const counts = new Map<number, number>();

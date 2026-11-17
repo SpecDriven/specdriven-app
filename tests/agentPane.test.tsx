@@ -284,7 +284,8 @@ describe("viewRows", () => {
     expect(shape(viewRows(TURN, "normal"))).toEqual([
       "a:1",
       // The thought between the calls is not shown, so it does not break the run.
-      "run:t:r1 «Read 2 files, ran 1 command»",
+      // Neither is the shell command: only Verbose shows those.
+      "run:t:r1 «Read 2 files»",
       "a:2",
       // One call is not a run: it stays its own row.
       "t:e1",
@@ -293,7 +294,7 @@ describe("viewRows", () => {
   });
 
   test("Thinking shows every call on its own row and what the agent thought", () => {
-    expect(shape(viewRows(TURN, "thinking"))).toEqual(["k:1", "a:1", "t:r1", "t:r2", "k:2", "t:b1", "a:2", "t:e1", "n:2"]);
+    expect(shape(viewRows(TURN, "thinking"))).toEqual(["k:1", "a:1", "t:r1", "t:r2", "k:2", "a:2", "t:e1", "n:2"]);
   });
 
   test("Verbose shows everything, in the order it happened", () => {
@@ -304,10 +305,10 @@ describe("viewRows", () => {
     const items = [
       tool("r1", "Read"),
       tool("r2", "Read"),
-      tool("b1", "Bash", { result: { content: "exit 1", isError: true } }),
+      tool("b1", "Edit", { result: { content: "no match", isError: true } }),
       tool("g1", "Grep"),
       tool("g2", "Glob"),
-      tool("b2", "Bash", { result: undefined }),
+      tool("b2", "WebFetch", { result: undefined }),
     ];
     expect(shape(viewRows(items, "normal"))).toEqual([
       "run:t:r1 «Read 2 files»",
@@ -316,8 +317,25 @@ describe("viewRows", () => {
       "t:b2",
     ]);
     // Once the last call is in, it joins the run it follows; the run keeps its id.
-    const done = [...items.slice(0, 5), tool("b2", "Bash")];
-    expect(shape(viewRows(done, "normal")).at(-1)).toBe("run:t:g1 «Searched 2 times, ran 1 command»");
+    const done = [...items.slice(0, 5), tool("b2", "WebFetch")];
+    expect(shape(viewRows(done, "normal")).at(-1)).toBe("run:t:g1 «Searched 2 times, used the web 1 time»");
+  });
+
+  test("Normal and Thinking leave every shell command out, Verbose shows each one", () => {
+    const items = [
+      say("1", "Testing."),
+      tool("b1", "Bash"),
+      tool("b2", "Bash", { result: { content: "exit 1", isError: true } }),
+      tool("b3", "Bash", { result: undefined }),
+      tool("task", "Task"),
+      tool("b4", "Bash", { parent: "t:task" }),
+      tool("r1", "Read", { parent: "t:task" }),
+      say("2", "Done."),
+    ];
+    // Finished, failed, still running or a subagent's: none is shown.
+    expect(shape(viewRows(items, "normal"))).toEqual(["a:1", "t:task [t:r1]", "a:2"]);
+    expect(shape(viewRows(items, "thinking"))).toEqual(["a:1", "t:task [t:r1]", "a:2"]);
+    expect(shape(viewRows(items, "verbose"))).toEqual(["a:1", "t:b1", "t:b2", "t:b3", "t:task", "t:b4 +1", "t:r1 +1", "a:2"]);
   });
 
   test("Normal says a thought is happening only while it streams; an error note shows in every view", () => {
@@ -517,8 +535,8 @@ describe("TranscriptRow", () => {
       ev({ kind: "assistant", messageId: "m1", turn: 1, blocks: [{ type: "thinking", text: "Read the spec first." }], parentToolUseId: null }),
       ev({ kind: "assistant", messageId: "m1", turn: 1, blocks: [{ type: "tool_use", id: "r1", name: "Read", input: { file_path: "a.feature.md" } }], parentToolUseId: null }),
       ev({ kind: "tool_result", toolUseId: "r1", content: "# A", isError: false, parentToolUseId: null }),
-      ev({ kind: "assistant", messageId: "m2", turn: 1, blocks: [{ type: "tool_use", id: "b1", name: "Bash", input: { command: "bun test" } }], parentToolUseId: null }),
-      ev({ kind: "tool_result", toolUseId: "b1", content: "3 pass", isError: false, parentToolUseId: null }),
+      ev({ kind: "assistant", messageId: "m2", turn: 1, blocks: [{ type: "tool_use", id: "g1", name: "Grep", input: { pattern: "TODO" } }], parentToolUseId: null }),
+      ev({ kind: "tool_result", toolUseId: "g1", content: "3 matches", isError: false, parentToolUseId: null }),
       ev({ kind: "assistant", messageId: "m3", turn: 1, blocks: [{ type: "text", text: "All green." }], parentToolUseId: null }),
       ev({ kind: "result", turn: 1, subtype: "success", isError: false, costUsd: 0.12, durationMs: 41_000, numTurns: 3, denials: 0 }),
     ].reduce(applyEvent, EMPTY_TRANSCRIPT);
@@ -526,7 +544,7 @@ describe("TranscriptRow", () => {
       renderToStaticMarkup(<TranscriptRows rows={viewRows(transcript.items, view)} view={view} agent={CLAUDE_AGENT} />);
 
     const normal = render("normal");
-    expect(normal).toContain("Read 1 file, ran 1 command");
+    expect(normal).toContain("Read 1 file, searched 1 time");
     expect(normal).toContain("agent-tool-run");
     // The calls are inside the run, closed; nothing is opened for the reader.
     expect(normal).toContain("a.feature.md");
@@ -547,7 +565,7 @@ describe("TranscriptRow", () => {
     expect(verbose).toContain("Claude Code 2 · opus · /w");
     // Every call opened on its input and output, and the turn footer counts the turns.
     expect(verbose.match(/<details class="agent-tool" open=""/g)).toHaveLength(2);
-    expect(verbose).toContain("3 pass");
+    expect(verbose).toContain("3 matches");
     expect(verbose).toContain("3 turns");
   });
 
