@@ -337,8 +337,13 @@ test("the popover lists the MCP servers, a switch turns one off, and Sign in ope
   await act(async () => toggle("specdriven-confluence").click());
   await settle();
   expect(posts.at(-1)).toEqual({ url: "/api/agent/chat/s1/mcp", body: { server: "specdriven-confluence", action: "enable" } });
-  const toasts = [...document.querySelectorAll(".toast-message")].map((t) => t.textContent ?? "");
-  expect(toasts.filter((t) => t.includes("could not enable"))).toEqual(["Claude could not enable it: timed out"]);
+  const refusals = () => [...document.querySelectorAll(".toast")].filter((t) => t.textContent?.includes("could not enable"));
+  const said = refusals().map((t) => t.querySelector(".toast-message")?.textContent);
+  // An error toast stays until dismissed, and the toasts are one list for
+  // the whole test run: dismiss this one, or a later file's page shows it.
+  for (const t of refusals()) await act(async () => t.querySelector<HTMLButtonElement>("button.toast-close")!.click());
+  expect(said).toEqual(["Claude could not enable it: timed out"]);
+  expect(refusals()).toEqual([]);
   expect(toggle("specdriven-confluence").checked).toBe(false);
 
   // Sign in: the agent starts it, the page opens in the browser and stays as a link.
