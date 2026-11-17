@@ -329,6 +329,12 @@ test("the folder's and the branch's names are capped below the width any chip ma
   expect(declarations(".agent-bar-chip-text")).toMatchObject({ overflow: "hidden", "text-overflow": "ellipsis" });
 });
 
+test("a worktree session's own branch is not capped, so it takes what room the row has", () => {
+  expect(declarations(".agent-bar-worktree .agent-bar-chip-text")["max-width"]).toBe("none");
+  // The Ghostty button is a chip, and a chip is capped too.
+  expect(declarations(".agent-bar-chip.agent-bar-worktree")["max-width"]).toBe("none");
+});
+
 test("the bar is one row laid out chip by chip, so a chip gives way and never sits on its neighbour", () => {
   expect(declarations(".agent-bar")).toMatchObject({ display: "flex", "flex-wrap": "nowrap" });
   // The two sides are no boxes of their own: a side narrower than its chips

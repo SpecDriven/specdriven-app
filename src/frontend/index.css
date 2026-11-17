@@ -8789,6 +8789,15 @@ button.agent-ref-offer:hover {
   max-width: 8.5rem;
 }
 
+/* A worktree session's own branch is the name that tells its session apart,
+   and a running session has no Worktree box beside it: it takes what room
+   the row has, and is cut short only once the row runs out, like the folder
+   and as readily. Neither its name nor its chip is capped. */
+.agent-bar-worktree .agent-bar-chip-text,
+.agent-bar-chip.agent-bar-worktree {
+  max-width: none;
+}
+
 /* The effort after the model's name, in the model's chip: quieter, and the
    first of the two to give way — the model is the one a reader looks for. */
 .agent-bar-chip-more {
