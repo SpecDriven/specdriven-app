@@ -9,9 +9,23 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleApi, reloader } from "../src/server/api";
-import { endAllChatSessions, getChatEvents, getChatSession } from "../src/server/agentChat";
-import { MAX_OPEN_SESSIONS, type ChatEvent, type ChatSessionMeta } from "../src/server/agentTypes";
-import { agents } from "../src/plugins/host/agents";
+import {
+  ChatError,
+  changeChatMcpServer,
+  chatMcpServers,
+  endAllChatSessions,
+  getChatEvents,
+  getChatSession,
+} from "../src/server/agentChat";
+import {
+  MAX_OPEN_SESSIONS,
+  MCP_SERVER_ACTIONS,
+  type ChatEvent,
+  type ChatMcpServer,
+  type ChatSessionMeta,
+  type McpServersAnswer,
+} from "../src/server/agentTypes";
+import { AgentError, agents } from "../src/plugins/host/agents";
 import type { Disposer } from "../src/plugins/kernel";
 import { writeState } from "../src/server/state";
 import { createConfluenceFileBackend, saveConfluenceToken, setConfluenceTokenBackend } from "../src/server/confluenceTokens";
@@ -503,6 +517,136 @@ test("the pane's Refresh asks the provider to count again, and is refused where 
   expect((await api(`/api/agent/chat/${started.id}/context`, "POST", {})).status).toBe(409);
   expect(slow.sessions).toHaveLength(1);
   expect((await api("/api/agent/chat/nope/context", "POST", {})).status).toBe(404);
+});
+
+// The session popover's MCP servers (specs/agents/agent-pane.feature.md "MCP
+// servers"): the list is the provider's answer at that moment, each action
+// goes to the provider and is answered with the list as it stands afterwards.
+test("the popover's MCP servers are the provider's, and each action is relayed and answered with the list", async () => {
+  const servers: ChatMcpServer[] = [
+    { name: "specdriven-confluence", status: "connected", source: "SpecDriven", tools: 3, canToggle: true, canAuthenticate: false },
+    { name: "plugin:design:figma", status: "needs-auth", source: "user", canToggle: true, canAuthenticate: true },
+    { name: "claude.ai Slack", status: "failed", source: "claude.ai", error: "connection refused", canToggle: false, canAuthenticate: false },
+  ];
+  const named = (name: string) => servers.find((s) => s.name === name)!;
+  const calls: string[] = [];
+  let failWith: Error | null = null;
+  const fake = register({
+    id: "gemini",
+    capabilities: { mcpServers: true },
+    mcp: {
+      mcpServers: async () => servers.map((s) => ({ ...s })),
+      setMcpServerEnabled: async (name, enabled) => {
+        if (failWith) throw failWith;
+        calls.push(`${enabled ? "enable" : "disable"} ${name}`);
+        named(name).status = enabled ? "connected" : "disabled";
+      },
+      reconnectMcpServer: async (name) => {
+        calls.push(`reconnect ${name}`);
+        Object.assign(named(name), { status: "connected", tools: 9 });
+        delete named(name).error;
+      },
+      authenticateMcpServer: async (name) => {
+        calls.push(`authenticate ${name}`);
+        return { url: "https://auth.example/authorize?state=abc" };
+      },
+    },
+  });
+  const { id } = await ready(fake);
+  const mcp = `/api/agent/chat/${id}/mcp`;
+
+  const listed = await api(mcp);
+  expect(listed.status).toBe(200);
+  expect(await listed.json()).toEqual({ servers });
+  // The route says what the engine says.
+  expect(await chatMcpServers(id)).toEqual(servers);
+
+  // Off and on again: the answer is the list afterwards.
+  const off = await api(mcp, "POST", { server: "specdriven-confluence", action: "disable" });
+  expect(off.status).toBe(200);
+  expect(((await off.json()) as McpServersAnswer).servers[0]).toMatchObject({ name: "specdriven-confluence", status: "disabled" });
+  const on = (await (await api(mcp, "POST", { server: "specdriven-confluence", action: "enable" })).json()) as McpServersAnswer;
+  expect(on.servers[0]!.status).toBe("connected");
+  expect(on).not.toHaveProperty("url");
+
+  // A sign-in answers with the page to open; the name travels in the body, colons and all.
+  const signIn = (await (await api(mcp, "POST", { server: "plugin:design:figma", action: "authenticate" })).json()) as McpServersAnswer;
+  expect(signIn.url).toBe("https://auth.example/authorize?state=abc");
+  expect(signIn.servers.map((s) => s.name)).toEqual(servers.map((s) => s.name));
+
+  const again = (await (await api(mcp, "POST", { server: "claude.ai Slack", action: "reconnect" })).json()) as McpServersAnswer;
+  expect(again.servers[2]).toMatchObject({ status: "connected", tools: 9 });
+  expect(calls).toEqual([
+    "disable specdriven-confluence",
+    "enable specdriven-confluence",
+    "authenticate plugin:design:figma",
+    "reconnect claude.ai Slack",
+  ]);
+
+  // Only a listed server, only what it offers, only a known action.
+  expect((await api(mcp, "POST", { server: "nope", action: "disable" })).status).toBe(404);
+  expect((await api(mcp, "POST", { server: "claude.ai Slack", action: "disable" })).status).toBe(409);
+  expect((await api(mcp, "POST", { server: "specdriven-confluence", action: "authenticate" })).status).toBe(409);
+  expect((await api(mcp, "POST", { server: "specdriven-confluence", action: "restart" })).status).toBe(400);
+  expect((await api(mcp, "POST", { action: "disable" })).status).toBe(400);
+  expect(calls).toHaveLength(4);
+  // The engine's own refusals carry the status the route answers with.
+  const unknown = await changeChatMcpServer(id, "nope", "reconnect").catch((e: unknown) => e);
+  expect(unknown).toBeInstanceOf(ChatError);
+  expect(unknown).toMatchObject({ status: 404, message: 'This session has no MCP server named "nope"' });
+  expect(calls).toHaveLength(4);
+
+  // A provider's refusal keeps its words; any other failure is the agent's.
+  failWith = new AgentError(409, "figma is managed by your organization");
+  const refused = await api(mcp, "POST", { server: "plugin:design:figma", action: "disable" });
+  expect(refused.status).toBe(409);
+  expect(((await refused.json()) as { error: string }).error).toBe("figma is managed by your organization");
+  failWith = new Error("control request timed out");
+  const failed = await api(mcp, "POST", { server: "plugin:design:figma", action: "disable" });
+  expect(failed.status).toBe(502);
+  expect(((await failed.json()) as { error: string }).error).toBe(
+    'Fake could not disable "plugin:design:figma": control request timed out',
+  );
+
+  // Nothing of the list is in the event log or the session's meta.
+  expect(getChatEvents(id).some((e) => JSON.stringify(e).includes("figma"))).toBe(false);
+  expect(JSON.stringify(getChatSession(id))).not.toContain("figma");
+});
+
+test("MCP servers are refused for an agent that does not list them, a session still starting, and an ended one", async () => {
+  // No capability, or the capability without the method: nothing to list.
+  const plain = register({ id: "plain" });
+  const one = await ready(plain);
+  const refused = await api(`/api/agent/chat/${one.id}/mcp`);
+  expect(refused.status).toBe(409);
+  expect(((await refused.json()) as { error: string }).error).toBe("Fake does not list its MCP servers");
+  const flagOnly = register({ id: "flag", capabilities: { mcpServers: true } });
+  const two = await ready(flagOnly);
+  expect((await api(`/api/agent/chat/${two.id}/mcp`, "POST", { server: "a", action: "enable" })).status).toBe(409);
+
+  // A provider that lists but offers no actions: the list is there, the actions are not.
+  const listOnly = register({
+    id: "lister",
+    capabilities: { mcpServers: true },
+    mcp: { mcpServers: async () => [{ name: "a", status: "failed", canToggle: true, canAuthenticate: true }] },
+  });
+  const three = await ready(listOnly);
+  expect((await api(`/api/agent/chat/${three.id}/mcp`)).status).toBe(200);
+  expect(MCP_SERVER_ACTIONS).toEqual(["enable", "disable", "reconnect", "authenticate"]);
+  for (const action of MCP_SERVER_ACTIONS) {
+    expect((await api(`/api/agent/chat/${three.id}/mcp`, "POST", { server: "a", action })).status).toBe(409);
+  }
+
+  const slow = register({ id: "slow", readyAtStart: false, capabilities: { mcpServers: true }, mcp: { mcpServers: async () => [] } });
+  const started = (await (await api("/api/agent/chat", "POST", { name: "chat", agent: "slow" })).json()) as ChatSessionMeta;
+  expect((await api(`/api/agent/chat/${started.id}/mcp`)).status).toBe(409);
+  expect(slow.sessions).toHaveLength(1);
+
+  three.session.host.ended("The agent exited");
+  const ended = await api(`/api/agent/chat/${three.id}/mcp`);
+  expect(ended.status).toBe(409);
+  expect(((await ended.json()) as { error: string }).error).toBe("The session has ended");
+  expect((await api("/api/agent/chat/nope/mcp")).status).toBe(404);
 });
 
 test("no plugin, the wrong plugin, or a missing CLI is a clear refusal, and the default is the first by rank", async () => {

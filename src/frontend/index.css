@@ -7621,6 +7621,125 @@ button.page-archive-head:hover {
   font-size: 0.6875rem;
 }
 
+/* The popover's MCP servers (specs/agents/agent-pane.feature.md "MCP
+   servers"): the same row as "Memory files" and "Skills", opening on one
+   line per server — how it stands, its sign-in, its switch. */
+.agent-rail-mcp {
+  margin-top: 0.55rem;
+  border-top: 1px solid var(--border);
+}
+
+.agent-mcp-note {
+  margin: 0 0 0.4rem 0.6rem;
+}
+
+.agent-rail-items ul.agent-mcp-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding-left: 0.6rem;
+}
+
+.agent-rail-items .agent-mcp-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 1.9rem;
+}
+
+.agent-mcp-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.agent-mcp-sub {
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: 0.6875rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-mcp-sub:focus-visible {
+  outline: none;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+.agent-mcp-link {
+  color: var(--accent-strong);
+  font-size: 0.6875rem;
+}
+
+.agent-mcp-btn {
+  flex: none;
+  height: 1.5rem;
+  padding: 0 0.5rem;
+  font-size: 0.75rem;
+}
+
+/* A smaller switch than a settings page's: the row is one line of a popover. */
+.agent-mcp-switch {
+  width: 1.9rem;
+  height: 1.1rem;
+}
+
+.agent-mcp-switch .switch-track::after {
+  width: 0.8rem;
+  height: 0.8rem;
+}
+
+.agent-mcp-switch input:checked ~ .switch-track::after {
+  transform: translateX(0.8rem);
+}
+
+.agent-mcp-switch input:disabled {
+  cursor: not-allowed;
+}
+
+.agent-mcp-switch input:disabled ~ .switch-track {
+  opacity: 0.5;
+}
+
+/* Status colours: green connected, amber wants the user, red failed, grey
+   off; a connecting server pulses in the accent. */
+.agent-mcp-dot {
+  width: 7px;
+  height: 7px;
+}
+
+.agent-mcp-dot[data-mcp="connected"] {
+  background: var(--status-published);
+}
+
+.agent-mcp-dot[data-mcp="needs-auth"] {
+  background: var(--status-proposed);
+}
+
+.agent-mcp-dot[data-mcp="failed"] {
+  background: var(--danger-fg);
+}
+
+.agent-mcp-dot[data-mcp="connecting"] {
+  background: var(--accent);
+  animation: agent-mcp-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes agent-mcp-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-mcp-dot[data-mcp="connecting"] {
+    animation: none;
+  }
+}
+
 /* --- Session tabs (specs/agents/agent-pane.feature.md "Each session has
    its own tab, at most five") ------------------------------------------- */
 

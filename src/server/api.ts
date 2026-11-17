@@ -144,6 +144,8 @@ import {
   agentChoices,
   agentReportedModels,
   answerPermission,
+  changeChatMcpServer,
+  chatMcpServers,
   checkImages,
   createChatSession,
   endChatSession,
@@ -171,6 +173,7 @@ import type { AgentDefaultsPatch, ChatAgent, ChatEvent, PermissionAnswer } from 
 import {
   EFFORT_LEVELS,
   isFinalStatus,
+  MCP_SERVER_ACTIONS,
   normalizeContextDetail,
   normalizeEffort,
   normalizeModel,
@@ -3985,6 +3988,29 @@ const postAgentChatContext: Handler = async (req, params) => {
   }
 };
 
+// The session popover's MCP servers (specs/agents/agent-pane.feature.md
+// "MCP servers"): the list as the agent gives it now, and one action on one
+// server. The name travels in the body — names carry colons, dots and spaces.
+const getAgentChatMcp: Handler = async (_req, params) => {
+  try {
+    return json({ servers: await chatMcpServers(params.id!) });
+  } catch (e) {
+    return chatError(e);
+  }
+};
+
+const postAgentChatMcp: Handler = async (req, params) => {
+  const body = (await req.json().catch(() => ({}))) as { server?: unknown; action?: unknown };
+  const action = MCP_SERVER_ACTIONS.find((a) => a === body.action);
+  if (typeof body.server !== "string" || !body.server) return json({ error: "server is required" }, 400);
+  if (!action) return json({ error: `action must be one of ${MCP_SERVER_ACTIONS.join(", ")}` }, 400);
+  try {
+    return json(await changeChatMcpServer(params.id!, body.server, action));
+  } catch (e) {
+    return chatError(e);
+  }
+};
+
 // The models an agent offers and what a new session starts on, for the
 // pane's model and effort pickers; null for an agent with none.
 const getAgentChoices: Handler = async (_req, params) => {
@@ -4568,6 +4594,8 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["PUT", "/api/agent/chat/:id/model", unlessHosted(putAgentChatModel)],
   ["PUT", "/api/agent/chat/:id/effort", unlessHosted(putAgentChatEffort)],
   ["POST", "/api/agent/chat/:id/context", unlessHosted(postAgentChatContext)],
+  ["GET", "/api/agent/chat/:id/mcp", unlessHosted(getAgentChatMcp)],
+  ["POST", "/api/agent/chat/:id/mcp", unlessHosted(postAgentChatMcp)],
   ["GET", "/api/agent/agents/:agent/choices", unlessHosted(getAgentChoices)],
   ["POST", "/api/agent/agents/:agent/reconnect", unlessHosted(postAgentReconnect)],
   ["PUT", "/api/agent/agents/:agent/defaults", unlessHosted(putAgentDefaults)],

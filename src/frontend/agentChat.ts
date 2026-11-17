@@ -24,6 +24,7 @@ import type {
   ChatContextUsage,
   ChatEvent,
   ChatImage,
+  ChatMcpServer,
   ChatSessionMeta,
   ChatStatus,
   ChatWorktree,
@@ -31,6 +32,8 @@ import type {
   ContextSlice,
   EffortLevel,
   ImageUpload,
+  McpServerAction,
+  McpServersAnswer,
   PermissionMode,
   SlashCommandInfo,
 } from "../server/agentTypes";
@@ -45,12 +48,15 @@ export type {
   ChatAgent,
   ChatContextUsage,
   ChatEvent,
+  ChatMcpServer,
   ChatSessionMeta,
   ChatStatus,
   ChatWorktree,
   ContextDetail,
   ContextSlice,
   EffortLevel,
+  McpServerAction,
+  McpServersAnswer,
   PermissionMode,
   SlashCommandInfo,
 };
@@ -1722,6 +1728,18 @@ export const agentChat = {
     const s = state.sessions[id];
     if (data.context && s) setSession(id, { meta: { ...s.meta, context: data.context } });
     return data.context;
+  },
+  /** The session popover's MCP servers: the agent's list as it stands now. */
+  async mcpServers(id: string): Promise<ChatMcpServer[]> {
+    return (await call<McpServersAnswer>(`/api/agent/chat/${id}/mcp`)).servers;
+  },
+  /** One action on one MCP server; the answer is the list afterwards and,
+      for a sign-in, the page to open. */
+  mcpAction(id: string, server: string, action: McpServerAction): Promise<McpServersAnswer> {
+    return call<McpServersAnswer>(`/api/agent/chat/${id}/mcp`, {
+      method: "POST",
+      body: JSON.stringify({ server, action }),
+    });
   },
   /** Switch a running session's effort; the server makes it the default too. */
   async setEffort(id: string, effort: EffortLevel | null): Promise<void> {
