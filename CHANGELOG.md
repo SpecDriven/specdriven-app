@@ -4,6 +4,10 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.287 — 2026-11-16
+
+- Transcript: Bash calls show only in Verbose ([#478](https://github.com/SpecDriven/specdriven-app/pull/478))
+
 ## v0.1.286 — 2026-11-16
 
 - Excalidraw diagrams are on by default for every device ([#477](https://github.com/SpecDriven/specdriven-app/pull/477))
