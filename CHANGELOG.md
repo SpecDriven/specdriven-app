@@ -4,6 +4,10 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.289 — 2026-11-18
+
+- Images: a markdown file names a stored image by its path in the repo ([#484](https://github.com/SpecDriven/specdriven-app/pull/484))
+
 ## v0.1.288 — 2026-11-17
 
 - Agent pane: a worktree session's branch takes the room the bar has free ([#483](https://github.com/SpecDriven/specdriven-app/pull/483))
