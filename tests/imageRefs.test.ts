@@ -16,8 +16,8 @@ import { importDrift } from "../src/server/automerge/driftSync";
 import { loadFeatureDoc, loadPageDoc } from "../src/server/automerge/store";
 import { readTextFile } from "../src/server/fsx";
 import { imageReferences } from "../src/server/imageCleanup";
-import { toAppImageRefs, toFileImageRefs } from "../src/server/imageRefs";
-import { referencedImageNames, storedImageName, storeImage } from "../src/server/images";
+import { IMAGE_EXTENSIONS, IMAGE_MIME, IMAGES_REPO_PATH, IMAGES_ROUTE, STORED_IMAGE_NAME, toAppImageRefs, toFileImageRefs } from "../src/server/imageRefs";
+import { IMAGES_DIR, referencedImageNames, storedImageName, storeImage } from "../src/server/images";
 import { ROADMAP } from "../src/server/pageFolders";
 import { importPageDrift } from "../src/server/pages";
 import { parseFeature, parsePage, serializeFeature, serializePage } from "../src/server/parser";
@@ -171,4 +171,27 @@ test("an image named by its path in the repo loads from the app's route", () => 
   expect(html(`<img src="${FILE}" width="320">`)).toBe(`<p><img src="${APP}" alt="" width="320"/></p>`);
   // Anything that is not a stored image keeps its own address.
   expect(html("![x](/.images/notes.txt)")).toBe('<p><img src="/.images/notes.txt" alt="x"/></p>');
+});
+
+// What ties the two forms to the store: the path a file writes is the folder
+// storeImage puts the image in, and every type it accepts has both forms.
+test("the path a file names is where the image is stored, for every image type", async () => {
+  expect(IMAGES_REPO_PATH).toBe(`/${IMAGES_DIR}/`);
+  expect(IMAGES_ROUTE).toBe("/api/images/");
+  const name = await storeImage(dir, "Team Photo.png", new Uint8Array([0x89, 0x50, 0x4e, 0x47, 2]));
+  expect(name).toMatch(STORED_IMAGE_NAME);
+  expect(await Bun.file(join(dir, `${IMAGES_REPO_PATH}${name}`)).exists()).toBe(true);
+  expect(toFileImageRefs(`![photo](${IMAGES_ROUTE}${name})`)).toBe(`![photo](${IMAGES_REPO_PATH}${name})`);
+
+  const extensions = IMAGE_EXTENSIONS.split("|");
+  expect(extensions.sort()).toEqual(["avif", "gif", "jpeg", "jpg", "png", "svg", "webp"]);
+  for (const ext of extensions) {
+    expect(IMAGE_MIME[ext]).toStartWith("image/");
+    const stored = `shot-1a2b3c4d.${ext}`;
+    expect(stored).toMatch(STORED_IMAGE_NAME);
+    expect(toFileImageRefs(`![x](${IMAGES_ROUTE}${stored})`)).toBe(`![x](${IMAGES_REPO_PATH}${stored})`);
+    expect(toAppImageRefs(`![x](${IMAGES_REPO_PATH}${stored})`)).toBe(`![x](${IMAGES_ROUTE}${stored})`);
+  }
+  // A type the app does not store has no file form.
+  expect("notes-1a2b3c4d.txt").not.toMatch(STORED_IMAGE_NAME);
 });
