@@ -53,7 +53,7 @@ test("the data format is pinned to the schema versions", () => {
     PAGE_SCHEMA_VERSION,
     TESTING_SCHEMA_VERSION,
   }).toEqual({
-    DATA_FORMAT: 2,
+    DATA_FORMAT: 3,
     SCHEMA_VERSION: 3,
     PAGE_SCHEMA_VERSION: 1,
     TESTING_SCHEMA_VERSION: 1,
@@ -71,11 +71,11 @@ test("a folder with no marker is in the first format", async () => {
 });
 
 test("a folder in the first format is raised to this app's", async () => {
-  // Format 2 numbers the scenario headings (parser.ts), which a format-1 app
-  // would read as part of the name: the marker is written on the first tick.
-  expect(DATA_FORMAT).toBe(2);
+  // Format 3 names a stored image by its path in the repo (imageRefs.ts), which
+  // an earlier app reads as an edit: the marker is written on the first tick.
+  expect(DATA_FORMAT).toBe(3);
   expect(await stampDataFormat(dir)).toBe(true);
-  expect(await readDataFormat(dir)).toEqual({ format: 2, minAppVersion: appVersion });
+  expect(await readDataFormat(dir)).toEqual({ format: 3, minAppVersion: appVersion });
   // Once there, it is left alone.
   expect(await stampDataFormat(dir)).toBe(false);
 });

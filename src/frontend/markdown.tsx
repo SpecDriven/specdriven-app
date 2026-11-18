@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
+import { toAppImageRefs } from "../server/imageRefs";
 import { MarkdownImage } from "./MarkdownImage";
 import { MarkdownTable } from "./MarkdownTable";
 import {
@@ -79,7 +80,9 @@ interface Span {
 }
 
 function image(ctx: Ctx, key: string, snippet: string, at: number, a: ImageAttrs): ReactNode {
-  const src = a.src === undefined ? null : safeUrl(a.src);
+  // A page's source is its file's text, where a stored image goes by its
+  // path in the repo; the app serves it on its own route (imageRefs.ts).
+  const src = a.src === undefined ? null : safeUrl(toAppImageRefs(a.src.trim()));
   if (!src) return snippet;
   const ref: ImageRef = {
     start: at,

@@ -23,7 +23,7 @@ export interface StoredImage {
   referencedBy: string[];
 }
 
-/** Files whose text can carry a `/api/images/<name>` url: features, pages, notes, event models. */
+/** Files whose text can name a stored image — `/api/images/<name>`, or `/.images/<name>` as markdown on disk does (imageRefs.ts): features, pages, notes, event models. */
 const TEXT_FILE = /\.(md|txt|json|ya?ml|csv|html?)$/i;
 
 /** Every text file in the repo, repo-relative — hidden entries (`.git`, `.images`, the store) and node_modules left out, as walk.ts does. */
