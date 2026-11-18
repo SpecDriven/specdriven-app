@@ -85,6 +85,7 @@
 // (``` or ~~~), are ordinary content, not scenario boundaries.
 
 import { formatEstimateLine, parseEstimateLine } from "./calendar";
+import { toAppImageRefs, toFileImageRefs } from "./imageRefs";
 
 /**
  * Scenario lifecycle: draft → proposed → published, advancing one way.
@@ -1335,6 +1336,9 @@ function clip(line: string): string {
 }
 
 export function parseFeature(text: string): Feature {
+  // A file names a stored image by its place in the repo; the app, by the
+  // route that serves it (imageRefs.ts).
+  text = toAppImageRefs(text);
   let name = "";
   const preamble: string[] = [];
   const scenarios: Scenario[] = [];
@@ -1493,7 +1497,9 @@ export function serializeFeature(
     if (s.tests.length > 0) chunks.push(testsLines(s.tests));
     parts.push(chunks.join("\n\n"));
   }
-  return parts.join("\n\n") + "\n";
+  // Stored images go out by their path in the repo, which GitHub shows when
+  // it renders the file (imageRefs.ts); parseFeature reads them back.
+  return toFileImageRefs(parts.join("\n\n") + "\n");
 }
 
 /** Identity of one scenario inside a feature file: heading name + version. */
@@ -1703,6 +1709,8 @@ const PAGE_HEADING_RE = /^#\s+(.+?)\s*$/;
  * round trip unchanged apart from its surrounding blank lines.
  */
 export function parsePage(text: string): MarkdownPage {
+  // As in a feature: the file's `/.images/…` is the app's `/api/images/…` (imageRefs.ts).
+  text = toAppImageRefs(text);
   const lines = text.split("\n");
   const at = lines.findIndex((line) => line.trim() !== "");
   const heading = at === -1 ? null : lines[at]!.match(PAGE_HEADING_RE);
@@ -1739,5 +1747,5 @@ export function serializePage(doc: MarkdownPage): string {
   if (doc.supersedes) parts.push(formatSupersedes(doc.supersedes));
   if (doc.done) parts.push(formatDone());
   if (doc.body) parts.push(doc.body);
-  return parts.length === 0 ? "" : parts.join("\n\n") + "\n";
+  return parts.length === 0 ? "" : toFileImageRefs(parts.join("\n\n") + "\n");
 }

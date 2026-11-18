@@ -10,24 +10,17 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { commitAndPush } from "./git";
 import { fileExists } from "./fsx";
 import { slugify } from "./parser";
+import {
+  IMAGE_EXTENSIONS as EXTENSIONS,
+  IMAGE_MIME,
+  IMAGES_REPO_PATH,
+  IMAGES_ROUTE,
+  STORED_IMAGE_NAME as SAFE_NAME,
+} from "./imageRefs";
+
+export { IMAGES_REPO_PATH, IMAGES_ROUTE } from "./imageRefs";
 
 export const IMAGES_DIR = ".images";
-
-/** Formats the preview can render; anything else is refused on upload. */
-const IMAGE_MIME: Record<string, string> = {
-  png: "image/png",
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  gif: "image/gif",
-  webp: "image/webp",
-  svg: "image/svg+xml",
-  avif: "image/avif",
-};
-
-const EXTENSIONS = Object.keys(IMAGE_MIME).join("|");
-
-/** Only names storeImage itself generates: `<slug>-<hash>.<ext>`. */
-const SAFE_NAME = new RegExp(`^[a-z0-9][a-z0-9-]*\\.(${EXTENSIONS})$`);
 
 /** Pasted screenshots are small; this guards against accidental huge files. */
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -45,32 +38,35 @@ export function isStoredImageName(name: string): boolean {
   return SAFE_NAME.test(name);
 }
 
-/** The route the app serves stored images on; a body references one as `![alt](/api/images/<name>)`. */
-export const IMAGES_ROUTE = "/api/images/";
-
 /**
- * The stored image a url in a body names — `/api/images/<name>`, the name
+ * The stored image a url in a body names — `/api/images/<name>`, or
+ * `/.images/<name>` as a markdown file writes it (imageRefs.ts), the name
  * one storeImage generates — or null for any other url.
  */
 export function storedImageName(url: string): string | null {
   const trimmed = url.trim();
-  if (!trimmed.startsWith(IMAGES_ROUTE)) return null;
+  const prefix = [IMAGES_ROUTE, IMAGES_REPO_PATH].find((p) => trimmed.startsWith(p));
+  if (!prefix) return null;
   let name: string;
   try {
-    name = decodeURIComponent(trimmed.slice(IMAGES_ROUTE.length));
+    name = decodeURIComponent(trimmed.slice(prefix.length));
   } catch {
     return null;
   }
   return safeImageName(name);
 }
 
-/** A stored-image url wherever it sits in text: its name runs to the first character a url cannot carry. */
-const IMAGE_URL = /\/api\/images\/([^\s)"'<>`\]]+)/g;
+/**
+ * A stored-image url wherever it sits in text, in the app's form or a
+ * file's (imageRefs.ts): its name runs to the first character a url cannot carry.
+ */
+const IMAGE_URL = /\/(?:api\/images|\.images)\/([^\s)"'<>`\]]+)/g;
 
 /**
  * The stored images a text references (specs/app/unused-images.feature.md):
- * every `/api/images/<name>` in it — in a markdown image, an `<img>` tag or
- * plain prose alike — whose name is one storeImage generates. A textual
+ * every `/api/images/<name>` in it, and every `/.images/<name>` — what a
+ * markdown file on disk says — in a markdown image, an `<img>` tag or
+ * plain prose alike, whose name is one storeImage generates. A textual
  * scan on purpose: a reference the renderer would not show still counts,
  * which is the safe side for a tool that deletes what is unreferenced.
  */
