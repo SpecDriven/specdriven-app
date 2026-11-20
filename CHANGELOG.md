@@ -4,6 +4,11 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.290 — 2026-11-20
+
+- Signed commits: the app signs its commits to the GitHub urls listed in Settings ([#486](https://github.com/SpecDriven/specdriven-app/pull/486))
+- Live sync: a sync server per data repository on Cloudflare, and a peer's edit shows as it arrives ([#485](https://github.com/SpecDriven/specdriven-app/pull/485))
+
 ## v0.1.289 — 2026-11-18
 
 - Images: a markdown file names a stored image by its path in the repo ([#484](https://github.com/SpecDriven/specdriven-app/pull/484))
