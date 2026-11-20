@@ -155,7 +155,11 @@ test("while a push fails the Sync button, a toast and the autosave hint say so, 
   await openLink("/");
   await until(() => syncButton()?.classList.contains("failing") === true, "the Sync button to show the failing push");
   expect(syncButton()!.getAttribute("aria-label")).toBe("Sync — saved changes are not being pushed");
-  expect(toasts("error").some((m) => m.startsWith("Saved changes are not being pushed: "))).toBe(true);
+  const aboutThePush = (m: string) => m.startsWith("Saved changes are not being pushed: ");
+  expect(toasts("error").some(aboutThePush)).toBe(true);
+  // Error toasts never expire and the list is the whole test run's, so one
+  // a test file that ran earlier left behind may be showing too: set aside.
+  const leftByOthers = toasts("error").filter((m) => !aboutThePush(m));
   await until(() => hint()?.textContent?.includes("Autosaves") === true, "the home page's autosave hint");
   expect(hint()!.textContent).toContain("saved on this computer only — the push is failing.");
   expect(hint()!.textContent).not.toContain("the next sync pushes it");
@@ -166,7 +170,8 @@ test("while a push fails the Sync button, a toast and the autosave hint say so, 
   await until(() => syncButton()?.classList.contains("failing") === false && !syncButton()!.disabled, "the Sync button to recover");
 
   expect(syncButton()!.getAttribute("aria-label")).toBe("Sync");
-  expect(toasts("error")).toEqual([]);
+  // The push's own toast is gone, and nothing new took its place.
+  expect(toasts("error")).toEqual(leftByOthers);
   expect(toasts("success")).toContain("Saved changes pushed");
   expect(hint()!.textContent).toContain("the next sync pushes it.");
 });

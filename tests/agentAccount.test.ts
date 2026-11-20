@@ -96,6 +96,9 @@ test("a sign-in change asks again for every list already loaded, so the chip fol
     return Response.json({ choices: choicesWith({ billing: "plan", label: "Claude account", detail: "Claude account" }) });
   }) as unknown as typeof fetch;
   try {
+    // The lists are the whole test run's: one a test file that ran earlier
+    // left loaded would be asked for again too, as it should be.
+    for (const id of Object.keys(agentChatState().choices)) agentChat.setChoices(id, undefined);
     agentChat.setChoices("claude", choicesWith({ billing: "api", label: "API", detail: "" }));
     await agentChat.reloadChoices();
     expect(asked).toEqual(["/api/agent/agents/claude/choices"]);
