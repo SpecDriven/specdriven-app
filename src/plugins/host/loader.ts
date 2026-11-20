@@ -22,7 +22,7 @@ import { PROFILE_KEY, autoEnablePlugins, readProfile, writeProfile } from "../pr
 import { builtinHostPlugins } from "../builtin/host";
 import { builtinManifests, profileManifests, retiredManifest } from "../builtin/manifests";
 import * as hostSdk from "../sdk/host";
-import { SDK_GLOBAL } from "../shared";
+import { DOCUMENTS_EVENT, SDK_GLOBAL } from "../shared";
 import { addSearchScope } from "../../server/search";
 import { getAppRoot } from "../../server/paths";
 import { readState, writeState } from "../../server/state";
@@ -762,9 +762,9 @@ routes.add("GET", "/plugins/:id/client.js", (req, params) => {
 const streams = new Set<ReadableStreamDefaultController<Uint8Array>>();
 const encoder = new TextEncoder();
 
-/** Tell every open change stream that a plugin was rebuilt or the set changed. */
-export function notifyPluginChange(): void {
-  const chunk = encoder.encode(`data: ${JSON.stringify({ type: "changed" })}\n\n`);
+/** Send one server-sent event to every open change stream. */
+function broadcast(event: string): void {
+  const chunk = encoder.encode(event);
   for (const controller of [...streams]) {
     try {
       controller.enqueue(chunk);
@@ -772,6 +772,24 @@ export function notifyPluginChange(): void {
       streams.delete(controller);
     }
   }
+}
+
+/** Tell every open change stream that a plugin was rebuilt or the set changed. */
+export function notifyPluginChange(): void {
+  broadcast(`data: ${JSON.stringify({ type: "changed" })}\n\n`);
+}
+
+/**
+ * Tell every open page that a peer's edit to a feature landed in the data
+ * folder (specs/datastore/automerge-store.feature.md "a peer's edit shows on
+ * screen as it arrives"), so it re-reads what it shows now rather than on
+ * its next timed refresh. It rides the stream the pages already hold open —
+ * a second one would cost each window another of the browser's few
+ * connections per host — as a named event, which a page listening for the
+ * unnamed plugin messages never sees.
+ */
+export function notifyDocumentsChange(file: string): void {
+  broadcast(`event: ${DOCUMENTS_EVENT}\ndata: ${JSON.stringify({ file })}\n\n`);
 }
 
 /** How many browsers are listening for plugin changes. */

@@ -18,7 +18,15 @@ outside the app (an older app version, a GitHub PR) is reconciled back into
 the documents on the next sync tick. Optionally, Settings can name a
 websocket sync server (e.g. wss://sync.automerge.org) that delivers the
 same operations in near-real time — off by default, git stays the source of
-record. See specs/datastore/automerge-store.feature.md.
+record. A peer's edit that lands that way is announced to the open pages on
+the change stream they already hold (`GET /api/plugins/events`, a named
+`documents` event), so the screen shows it as it arrives rather than at the
+next timed refresh. An address with `{repo}` in it names a server that
+keeps a sync server per data repository and admits only people who can push
+to it on GitHub (cloudflare/sync-server, a Cloudflare Worker with a Durable
+Object per repository; the app's side is
+src/server/automerge/repoSyncServer.ts). See
+specs/datastore/automerge-store.feature.md.
 
 ## Authorized users:
 Users that have read/write access to the repo that stores data. 

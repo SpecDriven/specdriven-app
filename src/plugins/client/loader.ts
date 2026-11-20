@@ -9,6 +9,7 @@
 // view belonged to is gone.
 
 import { Context, type Plugin, type Scope } from "../kernel";
+import { DOCUMENTS_EVENT } from "../shared";
 import { builtinClientPlugins } from "../builtin/client";
 import { Registry, type PluginView, type TabPlugin } from "./tabs";
 import { settingsSections } from "./settings";
@@ -223,12 +224,35 @@ export const clientLoadErrors = {
  * Hear of a plugin rebuilt or a folder come or gone (`GET /api/plugins/
  * events`, src/plugins/host/loader.ts): the app re-reads its state then,
  * and the new build mounts in place of the old. Returns the disposer.
+ *
+ * The same stream says when a peer's edit to a feature landed in the data
+ * folder (`notifyDocumentsChange` there); `onDocuments` hears of those, with
+ * the feature that changed.
  */
-export function watchPluginChanges(onChange: () => void): () => void {
+export function watchPluginChanges(
+  onChange: () => void,
+  onDocuments?: (file: string) => void,
+): () => void {
   if (typeof EventSource === "undefined") return () => {};
   const source = new EventSource("/api/plugins/events");
   source.onmessage = () => onChange();
+  if (onDocuments) {
+    source.addEventListener(DOCUMENTS_EVENT, (event) => {
+      onDocuments(documentsEventFile((event as MessageEvent).data));
+    });
+  }
   return () => source.close();
+}
+
+/** The feature a documents event names; "" when its data says none. */
+export function documentsEventFile(data: unknown): string {
+  if (typeof data !== "string") return "";
+  try {
+    const file = (JSON.parse(data) as { file?: unknown } | null)?.file;
+    return typeof file === "string" ? file : "";
+  } catch {
+    return "";
+  }
 }
 
 /** The mounted tab whose urls a path belongs to, with the view it names. */

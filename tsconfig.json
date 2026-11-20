@@ -30,5 +30,14 @@
   },
   // The build's output, and the desktop crash test's profile under dist/,
   // where the agent plugins it installs bring their own .ts tests.
-  "exclude": ["node_modules", "dist", "release"]
+  // The sync server's Cloudflare half is checked by its own tsconfig, against
+  // the Workers types (cloudflare/sync-server); the rest of it is checked here.
+  "exclude": [
+    "node_modules",
+    "dist",
+    "release",
+    "cloudflare/sync-server/node_modules",
+    "cloudflare/sync-server/.wrangler",
+    "cloudflare/sync-server/src/worker.ts"
+  ]
 }
