@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Set up the SpecDriven sync server on Cloudflare</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #fbfbfa;
+    --surface: #ffffff;
+    --text: #1c1d1f;
+    --muted: #63666d;
+    --line: #e3e4e8;
+    --accent: #c2410c;
+    --accent-soft: #fff3ec;
+    --code-bg: #f3f4f6;
+    --code-text: #1c1d1f;
+    --ok: #15803d;
+    --warn-bg: #fff8e1;
+    --warn-line: #e6b800;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --bg: #141516;
+      --surface: #1c1d1f;
+      --text: #ececee;
+      --muted: #9a9da5;
+      --line: #2e3035;
+      --accent: #fb923c;
+      --accent-soft: #2a1d14;
+      --code-bg: #232529;
+      --code-text: #ececee;
+      --ok: #4ade80;
+      --warn-bg: #2a2410;
+      --warn-line: #a88700;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 760px; margin: 0 auto; padding: 48px 20px 80px; }
+  h1 { font-size: 30px; line-height: 1.2; margin: 0 0 12px; letter-spacing: -0.01em; text-wrap: balance; }
+  h2 { font-size: 20px; margin: 44px 0 12px; }
+  h3 { font-size: 17px; margin: 0 0 6px; }
+  p { margin: 0 0 12px; }
+  .lede { color: var(--muted); font-size: 17px; margin-bottom: 20px; }
+  a { color: var(--accent); }
+  code, pre, kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 14px; }
+  code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+  .cmd {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 10px 0 14px;
+    padding: 7px 7px 7px 0;
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+  }
+  /* The command scrolls sideways inside its own box; the button stays beside it. */
+  .cmd pre { flex: 1; min-width: 0; margin: 0; padding: 5px 0 5px 14px; overflow-x: auto; color: var(--code-text); white-space: pre; }
+  .cmd pre code { background: none; padding: 0; overflow-wrap: normal; }
+  .cmd button {
+    flex: none;
+    font: 13px system-ui, sans-serif;
+    padding: 4px 10px;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .cmd button:hover { border-color: var(--accent); }
+  .note {
+    background: var(--warn-bg);
+    border-left: 3px solid var(--warn-line);
+    border-radius: 0 8px 8px 0;
+    padding: 12px 14px;
+    margin: 16px 0;
+  }
+  .note p:last-child { margin-bottom: 0; }
+  ol.steps { list-style: none; counter-reset: step; padding: 0; margin: 0; }
+  ol.steps > li {
+    counter-increment: step;
+    position: relative;
+    padding: 18px 18px 8px 62px;
+    margin: 0 0 12px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+  }
+  ol.steps > li::before {
+    content: counter(step);
+    position: absolute; left: 16px; top: 16px;
+    width: 30px; height: 30px;
+    display: grid; place-items: center;
+    font-weight: 600; font-variant-numeric: tabular-nums;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border-radius: 50%;
+  }
+  .expect { color: var(--muted); font-size: 15px; }
+  .expect b { color: var(--ok); font-weight: 600; }
+  ul { padding-left: 20px; margin: 0 0 12px; }
+  li { margin-bottom: 4px; }
+  .table-wrap { overflow-x: auto; margin: 10px 0 14px; }
+  table { border-collapse: collapse; width: 100%; font-size: 15px; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; white-space: nowrap; }
+  td:first-child { min-width: 230px; }
+  footer { margin-top: 48px; color: var(--muted); font-size: 14px; }
+  @media (max-width: 520px) {
+    main { padding-top: 28px; }
+    h1 { font-size: 25px; }
+    ol.steps > li { padding: 56px 14px 6px 14px; }
+    ol.steps > li::before { left: 14px; top: 14px; }
+    td:first-child { min-width: 170px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Set up the SpecDriven sync server on Cloudflare</h1>
+  <p class="lede">
+    One deployment gives every data repository its own live-sync server, open only to
+    people who can push to that repository on GitHub. Git stays the source of record;
+    this makes edits travel between running apps within moments.
+  </p>
+
+  <div class="note">
+    <p><strong>Before you rely on this page:</strong> the server has been run on a
+    developer machine with Cloudflare's local runtime (<code>wrangler dev</code>) and a
+    stand-in for GitHub. It has not yet been deployed to a real Cloudflare account, so
+    the deploy steps below follow Cloudflare's documented commands but have not been run
+    end to end. The app side ships with pull request
+    <a href="https://github.com/SpecDriven/specdriven-app/pull/485">SpecDriven/specdriven-app#485</a>;
+    an app released before it is merged does not understand the <code>{repo}</code> address.</p>
+  </div>
+
+  <h2>What you need</h2>
+  <ul>
+    <li>A Cloudflare account. The free plan is enough to start: it includes Durable Objects
+      with SQLite storage, with 5&nbsp;GB of storage for the account.</li>
+    <li><a href="https://bun.sh">Bun</a> installed, and a checkout of the
+      <code>specdriven-app</code> repository that contains <code>cloudflare/sync-server</code>.</li>
+    <li>Data repositories hosted on GitHub. One deployment checks against one GitHub
+      (github.com unless you change it, see <a href="#options">Options</a>).</li>
+  </ul>
+
+  <h2>Deploy the server</h2>
+  <ol class="steps">
+    <li>
+      <h3>Install the server's tools</h3>
+      <p>This installs Wrangler, Cloudflare's command-line tool, into the folder.</p>
+      <div class="cmd"><pre><code>cd cloudflare/sync-server
+bun install</code></pre></div>
+    </li>
+    <li>
+      <h3>Sign Wrangler in to Cloudflare</h3>
+      <p>A browser window opens and asks you to allow Wrangler to act on your account.</p>
+      <div class="cmd"><pre><code>bunx wrangler login</code></pre></div>
+    </li>
+    <li>
+      <h3>Deploy</h3>
+      <p>The first deploy may ask you to choose a <code>workers.dev</code> subdomain for
+        your account. It creates the Worker named <code>specdriven-sync</code> and its
+        Durable Object class.</p>
+      <div class="cmd"><pre><code>bunx wrangler deploy</code></pre></div>
+      <p class="expect"><b>Expect:</b> the Worker's address at the end of the output, such as
+        <code>https://specdriven-sync.&lt;your-subdomain&gt;.workers.dev</code>. Keep it for the next steps.</p>
+    </li>
+    <li>
+      <h3>Set the signing secret</h3>
+      <p>The server signs each access pass with this secret. Until it is set, the server
+        refuses every request for a pass. This command generates a random secret and stores
+        it on the Worker without showing it or writing it to a file.</p>
+      <div class="cmd"><pre><code>openssl rand -base64 32 | bunx wrangler secret put TICKET_SECRET</code></pre></div>
+    </li>
+    <li>
+      <h3>Check that it answers</h3>
+      <p>Replace the address with yours.</p>
+      <div class="cmd"><pre><code>curl https://specdriven-sync.&lt;your-subdomain&gt;.workers.dev/.well-known/specdriven-sync</code></pre></div>
+      <p class="expect"><b>Expect:</b> <code>{"githubHost":"github.com","ticketSeconds":3600}</code></p>
+    </li>
+  </ol>
+
+  <h2>Point the app at it</h2>
+  <p>Each person does this once, in their own app.</p>
+  <ol class="steps">
+    <li>
+      <h3>Sign in to GitHub in the app</h3>
+      <p>The app proves your write access with your GitHub sign-in: the one the app holds,
+        or the GitHub CLI's when the app is set to use it. The data repository's
+        <code>origin</code> must be the GitHub repository.</p>
+    </li>
+    <li>
+      <h3>Enter the address in Settings</h3>
+      <p>Open <strong>Settings</strong>, turn on <strong>Live sync server (optional)</strong>,
+        and enter your Worker's address starting with <code>wss://</code> and ending with
+        <code>/{repo}</code>. Type <code>{repo}</code> exactly as written; the app replaces
+        it with the owner and name of whichever data repository is open.</p>
+      <div class="cmd"><pre><code>wss://specdriven-sync.&lt;your-subdomain&gt;.workers.dev/{repo}</code></pre></div>
+    </li>
+    <li>
+      <h3>Confirm it connected</h3>
+      <p>The app's log gains a line naming the repository's own server:</p>
+      <div class="cmd"><pre><code>[netsync] syncing with wss://specdriven-sync.&lt;your-subdomain&gt;.workers.dev/&lt;owner&gt;/&lt;name&gt;</code></pre></div>
+      <p>The desktop app writes its log to <code>~/.specdriven/logs/specdriven.log</code>.
+        With two people connected, an edit one of them saves appears on the other's
+        screen within about a second.</p>
+    </li>
+  </ol>
+
+  <h2>How access works</h2>
+  <ul>
+    <li>The app first asks the server which GitHub it checks against. If that is not the
+      GitHub the data repository is on, the app stops and sends nothing.</li>
+    <li>The app then sends your GitHub token to the Worker once, over HTTPS. The Worker
+      asks GitHub whether that token can push to the repository and keeps nothing.</li>
+    <li>If it can, the Worker returns a pass for that one repository, valid for an hour.
+      Read access is not enough.</li>
+    <li>The app renews the pass in the background. A connection closes when its pass runs
+      out, so someone who loses write access on GitHub is out within the hour.</li>
+    <li>The token is only ever sent to an address that contains <code>{repo}</code> and
+      starts with <code>wss://</code>. A plain server such as
+      <code>wss://sync.automerge.org</code> never receives it.</li>
+  </ul>
+
+  <h2 id="options">Options</h2>
+  <p>These are in <code>cloudflare/sync-server/wrangler.jsonc</code>. Run
+    <code>bunx wrangler deploy</code> again after changing them.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Name</th><th>Default</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>GITHUB_HOST</code></td><td><code>github.com</code></td>
+          <td>The GitHub whose repositories this server serves.</td></tr>
+        <tr><td><code>GITHUB_API_URL</code></td><td><code>https://api.github.com</code></td>
+          <td>That GitHub's REST API. For GitHub Enterprise Server it is usually
+            <code>https://&lt;host&gt;/api/v3</code>, and Cloudflare must be able to reach it
+            from the internet.</td></tr>
+        <tr><td><code>TICKET_SECONDS</code></td><td><code>3600</code></td>
+          <td>How long a pass lasts. Shorter means lost access takes effect sooner and
+            GitHub is asked more often. A value under 60 is ignored and the default
+            used.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p><strong>Your own domain.</strong> To serve from a domain already on your Cloudflare
+    account instead of <code>workers.dev</code>, add this to <code>wrangler.jsonc</code>
+    and deploy again, then use <code>wss://sync.example.com/{repo}</code> in Settings:</p>
+  <div class="cmd"><pre><code>"routes": [{ "pattern": "sync.example.com", "custom_domain": true }]</code></pre></div>
+  <p><strong>Changing the secret.</strong> Run the secret command from step 4 again. Every
+    outstanding pass stops working at once and each app asks for a new one by itself.</p>
+  <p><strong>Watching it.</strong> <code>bunx wrangler tail</code> streams the server's
+    live log, including the reason whenever it drops a connection.</p>
+
+  <h2>If it does not connect</h2>
+  <p>The app logs why, on a line starting <code>[netsync] not syncing with</code>. It stays
+    on git sync meanwhile; nothing is lost.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>The log says</th><th>What to do</th></tr></thead>
+      <tbody>
+        <tr><td>Write access to the repository is required</td>
+          <td>Your GitHub account cannot push to this repository, or cannot see it. Ask
+            for write access on GitHub.</td></tr>
+        <tr><td>GitHub did not accept the token</td>
+          <td>Sign in to GitHub again in the app.</td></tr>
+        <tr><td>The sync server has no TICKET_SECRET set</td>
+          <td>Run step 4 of the deployment.</td></tr>
+        <tr><td>the sync server checks access on …, and the data repository is on …</td>
+          <td>The server is set up for a different GitHub. Set <code>GITHUB_HOST</code> and
+            <code>GITHUB_API_URL</code>, or use a server deployed for that GitHub.</td></tr>
+        <tr><td>the data folder has no GitHub repository as its origin</td>
+          <td>The open data folder is not a clone of a GitHub repository, so it has no
+            server to go to.</td></tr>
+        <tr><td>sign in to … to use the repository's sync server</td>
+          <td>The app has no GitHub sign-in. Sign in, then turn Live sync server off and on again.</td></tr>
+        <tr><td>the sync server address must start with wss://</td>
+          <td>The address uses <code>ws://</code>. The app sends GitHub access only over an
+            encrypted connection.</td></tr>
+        <tr><td>the address does not answer as a SpecDriven sync server</td>
+          <td>The address is wrong, or the Worker is not deployed. Repeat step 5.</td></tr>
+        <tr><td>the sync server at … could not be reached</td>
+          <td>A network problem. The app tries again every minute by itself.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>After a refusal that needs you to change something (access, sign-in), turn
+    <strong>Live sync server</strong> off and on again in Settings, or restart the app, to
+    make it try again.</p>
+
+  <h2>Good to know</h2>
+  <ul>
+    <li><strong>Storage.</strong> Each repository's documents live in its own Durable
+      Object's storage, up to 10&nbsp;GB per repository. They stay there while the server
+      sleeps. No R2 bucket is needed.</li>
+    <li><strong>Losing the storage loses nothing for good.</strong> Every app holds its
+      repository's documents and offers them again on connecting, and git has them all.</li>
+    <li><strong>Running time.</strong> "Connected" means the app is open, not that someone
+      is typing: the app connects when it starts and stays connected until it quits. The
+      server does not stay running for that. While nobody is editing it goes out of memory
+      with the connections still open, and Cloudflare bills no running time; the next edit
+      wakes it within a moment. An app left open overnight costs nothing while it sits
+      idle.</li>
+    <li><strong>What it does cost.</strong> Running time is billed only while a repository's
+      server is awake, at 128&nbsp;MB: one hour awake is about 460&nbsp;GB-seconds. The free
+      plan allows 13,000&nbsp;GB-seconds a day, about 28 awake hours, and the paid plan
+      includes 400,000 a month, about 868 awake hours, then charges $12.50 per million.
+      Requests are counted too: each connection is one, and every 20 messages a server
+      receives count as one. The free plan allows 100,000 requests a day and refuses further
+      use that day once they are spent; the paid plan includes a million a month, then
+      charges $0.15 per million. Figures from Cloudflare's pricing page on 19 November 2026;
+      check it for current ones.</li>
+    <li><strong>Idle connections.</strong> Nothing is sent while nobody edits. If a network
+      silently drops such an idle connection, that app can miss live edits until it connects
+      again, at the latest when its pass is renewed within the hour. Git sync delivers them
+      meanwhile.</li>
+    <li><strong>Not yet checked against GitHub itself.</strong> The write-access check
+      relies on the <code>permissions.push</code> field of GitHub's repository response and
+      has only been run against a stand-in.</li>
+  </ul>
+
+  <footer>
+    SpecDriven sync server, <code>cloudflare/sync-server</code>. Written on 19 November 2026
+    for the version in pull request #485.
+  </footer>
+</main>
+<script>
+  // A Copy button on every command block.
+  for (const block of document.querySelectorAll(".cmd")) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = "Copy";
+    button.addEventListener("click", async () => {
+      const text = block.querySelector("pre").innerText;
+      try {
+        await navigator.clipboard.writeText(text);
+        button.textContent = "Copied";
+      } catch {
+        // No clipboard access (some browsers on file://): select the text instead.
+        const range = document.createRange();
+        range.selectNodeContents(block.querySelector("pre"));
+        getSelection().removeAllRanges();
+        getSelection().addRange(range);
+        button.textContent = "Selected";
+      }
+      setTimeout(() => (button.textContent = "Copy"), 1500);
+    });
+    block.append(button);
+  }
+</script>
+</body>
+</html>

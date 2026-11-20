@@ -11,11 +11,15 @@
 import { NetworkAdapter, cbor } from "@automerge/automerge-repo/slim";
 import type { Message, PeerId, PeerMetadata } from "@automerge/automerge-repo/slim";
 
-/** The part of a WebSocket this adapter uses — a workerd one or a `ws` one. */
+/** A peer's connection as this adapter uses it — a workerd socket or a `ws` one. */
 export interface RoomSocket {
   readonly readyState: number;
   send(data: ArrayBuffer | Uint8Array): void;
   close(code?: number, reason?: string): void;
+}
+
+/** A socket that reports its own frames and its closing, for {@link RoomNetworkAdapter.accept}. */
+export interface ListeningSocket extends RoomSocket {
   addEventListener(type: "message", listener: (event: { data: unknown }) => void): void;
   addEventListener(type: "close" | "error", listener: () => void): void;
 }
@@ -32,6 +36,21 @@ function bytesOf(data: unknown): Uint8Array | null {
 
 export class RoomNetworkAdapter extends NetworkAdapter {
   readonly #sockets = new Map<PeerId, RoomSocket>();
+  #connected: () => void = () => {};
+
+  /**
+   * Resolves once the repo has given this adapter its own peer id, which a
+   * peer's `join` is answered with: frames are handed over after it.
+   */
+  readonly connected = new Promise<void>((resolve) => {
+    this.#connected = resolve;
+  });
+
+  /**
+   * Told of each peer as it joins, so the server can note on the connection
+   * who is at the other end — what {@link adopt} needs after a sleep.
+   */
+  onJoin: ((socket: RoomSocket, peerId: PeerId, peerMetadata: PeerMetadata) => void) | undefined;
 
   /** How many peers have joined and are still connected. */
   get peerCount(): number {
@@ -50,6 +69,7 @@ export class RoomNetworkAdapter extends NetworkAdapter {
   connect(peerId: PeerId, peerMetadata?: PeerMetadata): void {
     this.peerId = peerId;
     this.peerMetadata = peerMetadata;
+    this.#connected();
   }
 
   disconnect(): void {
@@ -60,12 +80,27 @@ export class RoomNetworkAdapter extends NetworkAdapter {
     }
   }
 
-  /** Take over a socket the server just accepted. */
-  accept(socket: RoomSocket): void {
-    socket.addEventListener("message", (event) => this.#receive(event.data, socket));
-    const gone = () => this.#forget(socket);
+  /** Take over a socket that reports its own frames and its closing. */
+  accept(socket: ListeningSocket): void {
+    socket.addEventListener("message", (event) => this.receive(socket, event.data));
+    const gone = () => this.closed(socket);
     socket.addEventListener("close", gone);
     socket.addEventListener("error", gone);
+  }
+
+  /**
+   * Take a peer back after the server slept: it joined on this socket
+   * before, the connection stayed open meanwhile, and it does not know the
+   * server was away — so no handshake, the repo is simply told it is there.
+   */
+  adopt(socket: RoomSocket, peerId: PeerId, peerMetadata: PeerMetadata): void {
+    this.#sockets.set(peerId, socket);
+    this.emit("peer-candidate", { peerId, peerMetadata });
+  }
+
+  /** A socket closed, or failed: its peer is gone. */
+  closed(socket: RoomSocket): void {
+    this.#forget(socket);
   }
 
   send(message: Message): void {
@@ -79,7 +114,8 @@ export class RoomNetworkAdapter extends NetworkAdapter {
     socket.send(cbor.encode(message));
   }
 
-  #receive(data: unknown, socket: RoomSocket): void {
+  /** One frame from a peer. */
+  receive(socket: RoomSocket, data: unknown): void {
     // What a peer sends is untrusted: anything this cannot read, or that
     // fails while being handled, costs that peer its connection and no more.
     try {
@@ -128,6 +164,7 @@ export class RoomNetworkAdapter extends NetworkAdapter {
       return;
     }
     this.#sockets.set(peerId, socket);
+    this.onJoin?.(socket, peerId, peerMetadata);
     this.emit("peer-candidate", { peerId, peerMetadata });
     socket.send(
       cbor.encode({

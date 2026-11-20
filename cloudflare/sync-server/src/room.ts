@@ -19,9 +19,11 @@ export function createRoom(options: { name: string; store: SqlStore }): Room {
     network: [network],
     storage: new SqlStorageAdapter(options.store),
     peerId: `sync-server:${options.name}` as PeerId,
-    // A relay and a store, like the reference sync server: it gives a peer
-    // the documents that peer asks about and never offers the rest.
-    sharePolicy: async () => false,
+    // Every peer in the room is offered every document the room has open —
+    // the library's default. They are all writers of the one repository the
+    // room serves, and it is what lets the room forget who asked for what:
+    // after it slept (src/worker.ts) the peers are still connected, and an
+    // edit from one must still reach the rest.
   });
   return { repo, network };
 }

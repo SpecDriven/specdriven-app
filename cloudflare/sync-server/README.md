@@ -19,12 +19,16 @@ available on the free plan.
 cd cloudflare/sync-server
 bun install
 bunx wrangler login
-openssl rand -base64 32 | bunx wrangler secret put TICKET_SECRET
 bunx wrangler deploy
+openssl rand -base64 32 | bunx wrangler secret put TICKET_SECRET
 ```
 
 `deploy` prints the Worker's address, for example
-`https://specdriven-sync.<your-account>.workers.dev`. In the app, under
+`https://specdriven-sync.<your-account>.workers.dev`; the secret goes on
+the Worker it created, and until it is set the server hands out no pass.
+`cloudflare-setup.html` beside this file has the same steps in full, with
+what to expect at each and what the app's log says when it cannot connect.
+In the app, under
 Settings → Live sync server, each person enters that address with `wss://`
 and `{repo}` where the repository goes:
 
@@ -72,23 +76,33 @@ against one GitHub.
 
 Each repository's documents are in the SQLite database of its own Durable
 Object: durable, private to that object, limited to 10 GB per repository,
-with thirty days of point-in-time recovery. The object runs while a peer is
-connected and stops when the last one leaves; the documents stay, and the
-next peer to connect finds them. No R2 bucket is involved.
+with thirty days of point-in-time recovery. They stay there whether the
+object is running or not. No R2 bucket is involved.
 
 Losing this storage loses nothing for good: every app holds its repository's
 documents and offers them again when it connects, and git has them all.
 
 ## Good to know
 
-- An object stays in memory, and is billed for it, for as long as at least
-  one app is connected to that repository. Hibernating between messages
-  would lower that and is not done yet.
+- An app is connected for as long as it is open, edited in or not. The
+  object does not stay running for that: with nobody editing it goes out of
+  memory (WebSocket hibernation), the connections stay open at Cloudflare,
+  and no running time is billed. The next edit wakes it within a moment; it
+  reads who is connected off the connections and carries on from its
+  storage. Passes that run out are caught by an alarm, not a timer, because
+  a pending timer would keep it awake.
+- Every peer of a repository is offered every document of that repository.
+  They are all writers of it, and it is what lets the object forget, while
+  asleep, who had asked for what.
+- Nothing is sent while nobody edits. If a network silently drops such an
+  idle connection, that app can miss live edits until it connects again —
+  at the latest when its pass is renewed, within the hour. Git sync delivers
+  them meanwhile.
 - A repository's server holds every document a peer has asked about in
   memory (128 MB per object). Spec repositories are far below that.
-- Checked so far only with `wrangler dev` on a developer's machine and a
-  stand-in for GitHub's API; not yet deployed to Cloudflare, and not yet
-  checked against GitHub itself.
+- Checked so far only with `wrangler dev` on a developer's machine (which
+  does hibernate objects) and a stand-in for GitHub's API; not yet deployed
+  to Cloudflare, and not yet checked against GitHub itself.
 
 ## Work on it
 

@@ -9,13 +9,15 @@ import { Database } from "bun:sqlite";
 import { cp, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { WebSocketServer } from "ws";
+import { WebSocketServer, type WebSocket as WsSocket } from "ws";
 import { checkWriteAccess } from "../cloudflare/sync-server/src/access";
 import { createRoom, type Room } from "../cloudflare/sync-server/src/room";
 import { handle, repoKey, type RouteDeps } from "../cloudflare/sync-server/src/routes";
 import { ROW_BYTES, SqlStorageAdapter, type SqlStore } from "../cloudflare/sync-server/src/storage";
 import { signTicket, verifyTicket } from "../cloudflare/sync-server/src/tickets";
-import type { RoomSocket } from "../cloudflare/sync-server/src/network";
+import type { ListeningSocket, RoomSocket } from "../cloudflare/sync-server/src/network";
+import { sweep } from "../cloudflare/sync-server/src/expiry";
+import type { PeerId, PeerMetadata } from "@automerge/automerge-repo";
 import * as A from "@automerge/automerge";
 import { documentIdForDoc, startNetSyncClient, type NetSync } from "../src/server/automerge/netsync";
 import { importFeatureDoc } from "../src/server/automerge/reconcile";
@@ -283,7 +285,7 @@ async function startRoom(db: Database): Promise<string> {
   await new Promise((resolve) => wss!.once("listening", () => resolve(null)));
   wss.on("connection", (socket) => {
     socket.binaryType = "arraybuffer";
-    room!.network.accept(socket as unknown as RoomSocket);
+    room!.network.accept(socket as unknown as ListeningSocket);
   });
   const address = wss.address();
   return `ws://127.0.0.1:${typeof address === "object" && address !== null ? address.port : 0}`;
@@ -344,4 +346,144 @@ test("the sync server still has a repository's edits after it slept, for a peer 
   const again = await startRoom(db);
   bridges.push(await startNetSyncClient(c, again));
   await until(async () => (await readFeature(c, FILE))?.includes("while C was away") ?? false, "C to catch up");
+});
+
+// ---- sleeping under connected peers -------------------------------------------
+
+/**
+ * A repository's sync server that can be put to sleep the way a Durable
+ * Object hibernates: its room is dropped from memory while the peers'
+ * sockets stay open, and the next frame from any of them makes a new room
+ * over the same storage, which is told who is connected from what was noted
+ * on each connection (cloudflare/sync-server/src/worker.ts does the same
+ * with Cloudflare's own sockets).
+ */
+async function startSleepingServer(db: Database) {
+  interface Noted {
+    held: RoomSocket | null;
+    peerId?: PeerId;
+    peerMetadata?: PeerMetadata;
+  }
+  const noted = new Map<WsSocket, Noted>();
+  const rooms: Room[] = [];
+  let current: Room | null = null;
+
+  /** A socket as one room holds it. A room that is out of memory sends nothing. */
+  const hold = (ws: WsSocket, room: Room): RoomSocket => ({
+    get readyState() {
+      return ws.readyState;
+    },
+    send: (data) => {
+      if (current === room) ws.send(data);
+    },
+    close: (code, reason) => ws.close(code, reason),
+  });
+
+  const wake = (): Room => {
+    if (current) return current;
+    const made = createRoom({ name: "github.com/acme/specs", store: sqliteStore(db) });
+    rooms.push(made);
+    made.network.onJoin = (socket, peerId, peerMetadata) => {
+      for (const note of noted.values()) {
+        if (note.held === socket) Object.assign(note, { peerId, peerMetadata });
+      }
+    };
+    current = made;
+    for (const [ws, note] of noted) {
+      note.held = hold(ws, made);
+      if (note.peerId) made.network.adopt(note.held, note.peerId, note.peerMetadata ?? {});
+    }
+    return made;
+  };
+
+  const server = new WebSocketServer({ port: 0, host: "127.0.0.1" });
+  await new Promise((resolve) => server.once("listening", () => resolve(null)));
+  server.on("connection", (ws) => {
+    noted.set(ws, { held: null });
+    ws.on("message", async (data) => {
+      const awake = wake();
+      await awake.network.connected;
+      const note = noted.get(ws);
+      if (!note) return;
+      // A connection made while the room was awake: held from its first frame.
+      note.held ??= hold(ws, awake);
+      awake.network.receive(note.held, data);
+    });
+    ws.on("close", () => {
+      const note = noted.get(ws);
+      noted.delete(ws);
+      if (note?.held) current?.network.closed(note.held);
+    });
+  });
+  const address = server.address();
+  return {
+    url: `ws://127.0.0.1:${typeof address === "object" && address !== null ? address.port : 0}`,
+    /** How many rooms there have been: one, plus one for every waking. */
+    rooms: () => rooms.length,
+    connections: () => noted.size,
+    /** Drop the room once nothing more is arriving, leaving the sockets open. */
+    async sleep(): Promise<void> {
+      for (;;) {
+        const before = current;
+        await before?.repo.flush();
+        await Bun.sleep(300);
+        if (current === before) break; // quiet for a while: nothing woke it meanwhile
+      }
+      await current?.repo.flush();
+      current = null;
+    },
+    async stop(): Promise<void> {
+      current = null;
+      for (const ws of noted.keys()) ws.terminate();
+      server.close();
+    },
+  };
+}
+
+test("the sync server sleeps while its peers stay connected, and passes on the next edit when it wakes", async () => {
+  const [a, b] = (await clones("a", "b")) as [string, string];
+  const server = await startSleepingServer(new Database(":memory:"));
+  try {
+    bridges.push(await startNetSyncClient(a, server.url));
+    bridges.push(await startNetSyncClient(b, server.url));
+    const edit = async (dir: string, from: string, to: string) =>
+      saveFeature(dir, FILE, (await readFeature(dir, FILE))!.replace(from, to));
+    const has = (dir: string, text: string) => async () => (await readFeature(dir, FILE))?.includes(text) ?? false;
+
+    await edit(a, "- line one", "- line one, before the sleep");
+    await until(has(b, "before the sleep"), "the first edit to reach B");
+    expect(server.rooms()).toBe(1);
+
+    // Nobody is editing: the server goes out of memory. The peers are not
+    // told, and neither reconnects.
+    await server.sleep();
+    await edit(a, "- line two", "- line two, after the sleep");
+    await until(has(b, "after the sleep"), "the edit that woke the server to reach B");
+    expect(server.rooms()).toBe(2);
+    expect(server.connections()).toBe(2);
+
+    // And the other way round, after another sleep: B, which sent nothing
+    // since the server woke, is still someone it answers.
+    await server.sleep();
+    await edit(b, "# Seed", "# Seed, renamed on B");
+    await until(has(a, "renamed on B"), "B's edit to reach A");
+    expect(server.rooms()).toBe(3);
+    expect(server.connections()).toBe(2);
+    expect(await readFeature(a, FILE)).toBe(await readFeature(b, FILE));
+  } finally {
+    await server.stop();
+  }
+}, 30_000);
+
+test("a connection is closed when its pass runs out, and the next check is set for the next one", () => {
+  const first = { name: "first", expiresAt: 100 };
+  const second = { name: "second", expiresAt: 160 };
+  const third = { name: "third", expiresAt: 130 };
+  // Seconds on the pass, milliseconds on the clock.
+  expect(sweep([first, second, third], 99_999)).toEqual({ expired: [], nextAt: 100_000 });
+  expect(sweep([first, second, third], 100_000)).toEqual({ expired: [first], nextAt: 130_000 });
+  expect(sweep([first, second, third], 150_000)).toEqual({ expired: [first, third], nextAt: 160_000 });
+  // Nobody left to check on: no further alarm.
+  expect(sweep([first, second, third], 200_000)).toEqual({ expired: [first, second, third], nextAt: null });
+  expect(sweep([], 0)).toEqual({ expired: [], nextAt: null });
 });
