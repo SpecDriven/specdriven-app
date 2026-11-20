@@ -31,6 +31,8 @@ import { getLogger } from "../telemetry";
 import type { RunOptions, RunResult } from "../run";
 import type { GitBackend, PathMove, PullResult, SyncResult } from "./backend";
 import { isRepoRoot } from "./repoRoot";
+import { BUILT_IN_CANNOT_SIGN, SIGN_CONFIG, makesCommit, maySign, signingHint, signsCommitsIn } from "./signing";
+import { signingEnv, signingTimeoutMs } from "./signingKey";
 import { localTurn, remoteTurn } from "./turns";
 import { FALLBACK_TITLE, pathsInStatus, summarizeSavedChanges } from "./saveSummary";
 import { PROJECT_SETTINGS_FILE } from "../members";
@@ -74,6 +76,12 @@ export function signInHint(): string {
 export interface GitContext {
   config: string[];
   env: Record<string, string>;
+  /**
+   * Who authors the commits, as `-c` overrides (identityConfig) — apart
+   * from the rest so a commit that is signed can leave them out: it is
+   * authored by this computer's git user, whose key signs it (signing.ts).
+   */
+  identity?: string[];
 }
 
 /** Runs one git command; `null` repoDir means "outside any repository". */
@@ -132,9 +140,9 @@ export function tokenContext(token: string, name: string, email: string, host: s
       "-c", `credential.${base}.helper=`,
       "-c",
       `credential.${base}.helper=!f(){ echo username=x-access-token; echo "password=$SPECDRIVEN_GIT_TOKEN"; };f`,
-      ...identityConfig(name, email),
     ],
     env: { SPECDRIVEN_GIT_TOKEN: token },
+    identity: identityConfig(name, email),
   };
 }
 
@@ -166,9 +174,9 @@ export function brokeredContext(name: string, email: string): GitContext {
       "-c", `credential.${base}.helper=`,
       "-c", `credential.${base}.helper=!${shellWord(process.execPath)} ${shellWord(HOSTED_CREDENTIAL_HELPER)}`,
       "-c", `credential.${base}.useHttpPath=true`,
-      ...identityConfig(name, email),
     ],
     env: {},
+    identity: identityConfig(name, email),
   };
 }
 
@@ -343,16 +351,33 @@ export const HOSTED_GIT_CONFIG = [
  * anyway: they report their progress, and are stopped when they have gone
  * quiet. The context is resolved per command, so a sign-in mid-session is
  * picked up by the next operation.
+ *
+ * A command that can make a commit, in a repository whose commits are
+ * signed (signing.ts), signs it — and leaves the author to this computer's
+ * git config, where the signing key is.
+ *
+ * Any commit may be signed, though: git signs wherever its own config says
+ * so, on the list or off it. So every command that makes a commit on this
+ * computer runs with what answers ssh-keygen for the key's passphrase — the
+ * one kept in Settings (signingKey.ts), or "none" — instead of a prompt on
+ * the terminal the app was started from, and with a time limit: a commit
+ * waiting on a question nobody sees would hold the folder's every later
+ * save, and a switch to another folder, behind it. A hosted worker signs
+ * nothing and keeps no passphrase.
  */
 export function subprocessRun(context: () => Promise<GitContext>): GitRun {
   return async (repoDir, ...args) => {
-    const { config, env } = await context();
+    const { config, env, identity = [] } = await context();
     const base = [...(repoDir ? ["-C", repoDir] : []), ...(isHostedMode() ? HOSTED_GIT_CONFIG : [])];
     const [verb, ...rest] = args;
     const reports = verb !== undefined && PROGRESS_VERBS.has(verb);
-    const res = await run("git", [...base, ...config, ...(reports ? [...RECEIVE_REPORTS, verb, "--progress", ...rest] : args)], {
-      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...env },
-      ...limitsFor(verb),
+    const signs = repoDir !== null && makesCommit(verb) && (await signsCommitsIn(repoDir));
+    const who = signs ? SIGN_CONFIG : identity;
+    const guarded = repoDir !== null && maySign(verb) && !isHostedMode();
+    const unlock = guarded ? await signingEnv() : {};
+    const res = await run("git", [...base, ...config, ...who, ...(reports ? [...RECEIVE_REPORTS, verb, "--progress", ...rest] : args)], {
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...env, ...unlock },
+      ...(guarded ? { timeoutMs: signingTimeoutMs() } : limitsFor(verb)),
       label: `git ${verb ?? ""}`.trim(),
     });
     return reports && !res.timedOut ? { ...res, stderr: withoutProgress(res.stderr) } : res;
@@ -526,7 +551,11 @@ export function createGitBackend({ name, git, clone: cloneWith, remoteBesideLoca
     if (res.exitCode === 0) return;
     const output = (res.stderr + res.stdout).trim();
     if (/nothing to commit|no changes added/i.test(output)) return;
-    throw new Error(`git commit failed: ${output}`);
+    // A locked signing key is fixed in Settings, wherever git signs; and
+    // where commits are signed the usual reason is the signature, so say
+    // where git looks for the key. Either follows git's own words.
+    const hint = output.includes(BUILT_IN_CANNOT_SIGN) ? null : signingHint(output, await signsCommitsIn(repoDir));
+    throw new Error(`git commit failed: ${output}${hint ? ` — ${hint}` : ""}`);
   }
 
   async function push(repoDir: string): Promise<SyncResult> {

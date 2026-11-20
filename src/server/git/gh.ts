@@ -220,9 +220,9 @@ async function ghContext(): Promise<GitContext> {
         "-c", `credential.https://${host}.helper=`,
         "-c", `credential.https://${host}.helper=${helper}`,
       ]),
-      ...(who ? identityConfig(who.name ?? who.login, who.email) : []),
     ],
     env: {},
+    identity: who ? identityConfig(who.name ?? who.login, who.email) : [],
   };
 }
 

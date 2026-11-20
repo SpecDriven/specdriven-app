@@ -79,7 +79,7 @@ test("the token reaches git through the credential helper's environment, not arg
   const context = tokenContext("ghp_secret", "SpecDriven gateway", "gateway@specdriven.invalid");
   expect(context.env).toEqual({ SPECDRIVEN_GIT_TOKEN: "ghp_secret" });
   expect(context.config.join(" ")).not.toContain("ghp_secret");
-  expect(context.config).toContain("user.name=SpecDriven gateway");
+  expect(context.identity).toContain("user.name=SpecDriven gateway");
   expect(context.config.some((c) => c.includes("password=$SPECDRIVEN_GIT_TOKEN"))).toBe(true);
 });
 

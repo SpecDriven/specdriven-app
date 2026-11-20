@@ -58,6 +58,8 @@ import { usesGithubApp } from "./hostedToken";
 import { isReadOnlyMode, READ_ONLY_REFUSAL, readOnlyAllows, readOnlySite } from "./readOnlyMode";
 import { canChooseFolder, chooseFolder } from "./folderChooser";
 import {
+  checkSigningPassphrase,
+  clearSigningPassphrase,
   cliGitAvailable,
   currentEngine,
   effectiveGitAccess,
@@ -66,12 +68,19 @@ import {
   ghAvailable,
   ghHosts,
   ghSignedIn,
+  isRepoRoot,
   jsGitAvailable,
   normalizeGitAccess,
   normalizeGitEngine,
+  normalizeSignedCommitRepos,
+  parseRepoScope,
+  passphraseRefusal,
   pushProblem,
+  saveSigningPassphrase,
   setAppSignIn,
   setGitEngine,
+  setSignedCommitRepos,
+  signingPassphrase,
 } from "./git";
 import {
   getAuth,
@@ -514,6 +523,9 @@ export async function applyStartupState(): Promise<void> {
   // sync below, which is the first thing to use it.
   setGitEngine(normalizeGitEngine(state.gitEngine));
   applyAppSignIn(state);
+  // The repositories whose commits are signed (src/server/git/signing.ts),
+  // before the first sync commits anything.
+  setSignedCommitRepos(normalizeSignedCommitRepos(state.signedCommitRepos));
   // The profile (specs/app/plugins.feature.md "Each data folder keeps its
   // own plugins"): an older settings file — the per-module switches, or one
   // device-wide `plugins.enabled` — is read as that list once and copied to
@@ -650,6 +662,9 @@ function applyAppSignIn(state: SpecDrivenState): void {
 function gitEngineFields(state: SpecDrivenState) {
   return {
     gitAccess: effectiveGitAccess(currentEngine(), state.gitAccess, normalizeGithubAccount(state.githubAccount)),
+    // Signed commits (specs/app/user-info-settings.feature.md): the GitHub
+    // urls whose commits the app signs.
+    signedCommitRepos: normalizeSignedCommitRepos(state.signedCommitRepos),
     gitEngine: normalizeGitEngine(state.gitEngine),
     gitEngineEffective: currentEngine(),
     cliGitAvailable: cliGitAvailable(),
@@ -941,6 +956,9 @@ async function stateFields(state: SpecDrivenState) {
     // (specs/app/data-format.feature.md): data a newer app wrote blocks it.
     dataFormat: await dataFormatField(state),
     ...gitEngineFields(state),
+    // Whether a passphrase for the SSH signing key is kept
+    // (src/server/git/signingKey.ts) — never the passphrase itself.
+    signingPassphrase: !isHostedMode() && !isDemoMode() && (await signingPassphrase()) !== null,
     ...(await authFields()),
   };
 }
@@ -1028,6 +1046,7 @@ function hostedStateRefusal(body: {
   forgetCodeRepo?: unknown;
   gitEngine?: unknown;
   gitAccess?: unknown;
+  signedCommitRepos?: unknown;
   plugins?: { sources?: unknown; trust?: unknown; marketplaces?: unknown };
   pluginSettings?: unknown;
   syncServerUrl?: unknown;
@@ -1048,6 +1067,8 @@ function hostedStateRefusal(body: {
   if (body.gitEngine === "gh") return "The GitHub CLI engine is not available in the hosted app";
   // The hosted app's token lives on the gateway's account page.
   if (body.gitAccess !== undefined) return "Git access cannot be changed in the hosted app";
+  // A signature needs a key on the machine that commits; a worker has none.
+  if (body.signedCommitRepos !== undefined) return "Commits cannot be signed in the hosted app";
   if (
     body.plugins &&
     typeof body.plugins === "object" &&
@@ -1082,6 +1103,8 @@ const putState: Handler = async (req) => {
     autosaveIntervalSeconds?: number;
     gitEngine?: string | null;
     gitAccess?: string;
+    /** The GitHub urls whose commits are signed (src/server/git/signing.ts): the whole list. */
+    signedCommitRepos?: unknown;
     showTestLinks?: boolean;
     openTestsInIdea?: boolean;
     ghostty?: boolean;
@@ -1128,6 +1151,7 @@ const putState: Handler = async (req) => {
     body.autosaveIntervalSeconds === undefined &&
     body.gitEngine === undefined &&
     body.gitAccess === undefined &&
+    body.signedCommitRepos === undefined &&
     body.showTestLinks === undefined &&
     body.openTestsInIdea === undefined &&
     body.ghostty === undefined &&
@@ -1161,7 +1185,7 @@ const putState: Handler = async (req) => {
     return json(
       {
         error:
-          "dataRepo, forgetDataRepo, openCodeRepo, forgetCodeRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, gitAccess, showTestLinks, openTestsInIdea, ghostty, projectManagement, projectManagementTool, publishExternalLinks, ahaLinks, ahaImport, figmaLinks, qtestLinks, jiraEnabled, confluenceEnabled, codeGen, codeGenTarget, deletePublished, assignments, featureFlags, scenarioPolarity, githubAccount, plugins, pluginSettings, roadmap, tasks, notebook, models, testing, googleCalendar, issues or syncServerUrl is required",
+          "dataRepo, forgetDataRepo, openCodeRepo, forgetCodeRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, gitAccess, signedCommitRepos, showTestLinks, openTestsInIdea, ghostty, projectManagement, projectManagementTool, publishExternalLinks, ahaLinks, ahaImport, figmaLinks, qtestLinks, jiraEnabled, confluenceEnabled, codeGen, codeGenTarget, deletePublished, assignments, featureFlags, scenarioPolarity, githubAccount, plugins, pluginSettings, roadmap, tasks, notebook, models, testing, googleCalendar, issues or syncServerUrl is required",
       },
       400,
     );
@@ -1177,6 +1201,7 @@ const putState: Handler = async (req) => {
       body.forgetCodeRepo !== undefined ||
       body.gitEngine !== undefined ||
       body.gitAccess !== undefined ||
+      body.signedCommitRepos !== undefined ||
       body.syncServerUrl !== undefined)
   ) {
     return json({ error: "changing the data directory is disabled in demo mode" }, 403);
@@ -1238,6 +1263,29 @@ const putState: Handler = async (req) => {
       else delete state.gitAccess;
     }
     setGitEngine(state.gitEngine);
+  }
+  // Signed commits (specs/app/user-info-settings.feature.md "Signed
+  // commits"): the list taken whole, each entry a url that names a
+  // repository, an owner or a host. One that names none is refused rather
+  // than dropped, so a typo is not taken for a repository that is signed.
+  // Applied before a dataRepo change, like the engine.
+  if (body.signedCommitRepos !== undefined) {
+    if (!Array.isArray(body.signedCommitRepos)) {
+      return json({ error: "signedCommitRepos must be a list of GitHub urls" }, 400);
+    }
+    const unusable = body.signedCommitRepos.find((entry) => typeof entry !== "string" || !parseRepoScope(entry));
+    if (unusable !== undefined) {
+      return json(
+        {
+          error: `${JSON.stringify(unusable)} is not a GitHub url — enter a repository (https://github.com/owner/repo), an owner (https://github.com/owner) or a host`,
+        },
+        400,
+      );
+    }
+    const repos = normalizeSignedCommitRepos(body.signedCommitRepos);
+    if (repos.length > 0) state.signedCommitRepos = repos;
+    else delete state.signedCommitRepos;
+    setSignedCommitRepos(repos);
   }
   // The directory a newly picked data repo resolves to; null when this
   // request leaves the data repo alone.
@@ -1771,6 +1819,33 @@ const postAuthToken: Handler = async (req) => {
   } catch {
     return json({ error: "GitHub did not accept this token — check it and its expiry" }, 400);
   }
+};
+
+// The SSH signing key's passphrase (specs/app/user-info-settings.feature.md
+// "Signed commits", src/server/git/signingKey.ts): kept on this device for
+// the app to sign with, tried on the key git signs with in the open folder
+// before it is kept, and never sent back.
+const putSigningPassphrase: Handler = async (req) => {
+  const body = (await req.json().catch(() => ({}))) as { passphrase?: unknown };
+  const refusal = passphraseRefusal(body.passphrase);
+  if (refusal) return json({ error: refusal }, 400);
+  const passphrase = body.passphrase as string;
+  // git config is read where the commits are made: the open folder's own
+  // config, and an `includeIf "gitdir:…"` rule, may name the key.
+  const state = await readState(getAppRoot());
+  const open = codeRepoMode(state) ? state.openCodeRepo! : specsOpen(state) ? dataRepoDir(state.dataRepo!, getAppRoot()) : null;
+  const dir = open && (await isRepoRoot(open)) ? open : null;
+  const check = await checkSigningPassphrase(passphrase, dir);
+  if (check.outcome === "wrong") {
+    return json({ error: `That passphrase does not unlock ${check.key}` }, 400);
+  }
+  await saveSigningPassphrase(passphrase);
+  return json({ signingPassphrase: true, checked: check.outcome === "unlocks", key: check.key });
+};
+
+const deleteSigningPassphrase: Handler = async () => {
+  await clearSigningPassphrase();
+  return json({ signingPassphrase: false });
 };
 
 /** A posted GitHub host: github.com when absent, a bare `name[:port]` otherwise; null when malformed. */
@@ -4587,6 +4662,8 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/auth/github/callback", unlessHosted(unlessDemo(getAuthWebCallback))],
   ["POST", "/api/auth/github/token", unlessHosted(unlessDemo(postAuthToken))],
   ["DELETE", "/api/auth/github", unlessHosted(unlessDemo(deleteAuth))],
+  ["PUT", "/api/signing/passphrase", unlessHosted(unlessDemo(putSigningPassphrase))],
+  ["DELETE", "/api/signing/passphrase", unlessHosted(unlessDemo(deleteSigningPassphrase))],
   ["POST", "/api/logout", unlessHosted(unlessDemo(postLogout))],
   ["GET", "/api/features", getFeatures],
   ["POST", "/api/features", postFeatures],

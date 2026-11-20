@@ -81,6 +81,15 @@ export interface SpecDrivenState {
    * token. The GitHub CLI access is `gitEngine: "gh"`.
    */
   gitAccess?: "token" | "account";
+  /**
+   * The GitHub urls whose commits the app signs
+   * (specs/app/user-info-settings.feature.md "Signed commits"): a
+   * repository, an owner or a host, each as `https://host[/owner[/repo]]`.
+   * A commit to a repository one of them covers is signed with the key in
+   * this computer's git config (src/server/git/signing.ts). Absent means
+   * none.
+   */
+  signedCommitRepos?: string[];
   /** Show the test-links table on scenario cards
       (specs/traceability.feature.md); absent means ON. */
   showTestLinks?: boolean;
