@@ -57,6 +57,16 @@ export interface NetSync {
   stop(): Promise<void>;
 }
 
+export interface NetSyncOptions {
+  /**
+   * Called once a peer's operations are in the chunk store and the markdown
+   * file, with the feature they changed — what lets an open page show the
+   * edit as it arrives rather than on its next timed refresh. Not called
+   * when what arrived held nothing new.
+   */
+  onAbsorbed?: (fileName: string) => void;
+}
+
 /** One feature document as shared on a {@link SyncTransport}. */
 export interface SharedDoc {
   /** Merge local state into the shared copy; peers receive the new operations. */
@@ -103,14 +113,19 @@ export function repoTransport(adapters: NetworkAdapterInterface[]): SyncTranspor
 }
 
 /** Start the bridge against wss://… — the production entry point. */
-export async function startNetSyncClient(dataDir: string, serverUrl: string): Promise<NetSync> {
-  return startNetSync(dataDir, repoTransport([new WebSocketClientAdapter(serverUrl)]));
+export async function startNetSyncClient(
+  dataDir: string,
+  serverUrl: string,
+  options: NetSyncOptions = {},
+): Promise<NetSync> {
+  return startNetSync(dataDir, repoTransport([new WebSocketClientAdapter(serverUrl)]), options);
 }
 
 /** Start the bridge over an explicit transport (tests use a loopback or a double). */
 export async function startNetSync(
   dataDir: string,
   transport: SyncTransport,
+  options: NetSyncOptions = {},
 ): Promise<NetSync> {
   const shared = new Map<DocumentId, SharedDoc>();
   const fileNames = new Map<DocumentId, string>();
@@ -212,6 +227,13 @@ export async function startNetSync(
         writing.delete(fileName);
       }
     });
+    // The file and the document both hold the edit now: say so. A listener
+    // that throws must not undo an absorb that already landed.
+    try {
+      options.onAbsorbed?.(fileName);
+    } catch (e) {
+      log.warn(`the listener for absorbed operations failed`, errorAttributes(e));
+    }
     // The save above is muted (writing), so the local disk edit it absorbed
     // would otherwise reach peers only through git: hand it to the network.
     // The change this fires here finds nothing new.

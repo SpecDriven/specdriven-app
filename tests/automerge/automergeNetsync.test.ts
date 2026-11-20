@@ -14,8 +14,13 @@ import {
   WebSocketServerAdapter,
 } from "@automerge/automerge-repo-network-websocket";
 import { WebSocketServer } from "ws";
-import { documentIdForDoc, repoTransport, startNetSync } from "../../src/server/automerge/netsync";
-import type { NetSync, SyncTransport } from "../../src/server/automerge/netsync";
+import {
+  documentIdForDoc,
+  repoTransport,
+  startNetSync,
+  startNetSyncClient,
+} from "../../src/server/automerge/netsync";
+import type { NetSync, NetSyncOptions, SyncTransport } from "../../src/server/automerge/netsync";
 import { importDrift } from "../../src/server/automerge/driftSync";
 import { importFeatureDoc } from "../../src/server/automerge/reconcile";
 import { createFeatureDoc, docDir, loadFeatureDoc } from "../../src/server/automerge/store";
@@ -62,10 +67,14 @@ async function startServer(): Promise<string> {
 }
 
 /** A bridge to the loopback websocket server, or to a fake one. */
-async function bridge(dataDir: string, to: string | FakeSyncServer): Promise<NetSync> {
+async function bridge(
+  dataDir: string,
+  to: string | FakeSyncServer,
+  options: NetSyncOptions = {},
+): Promise<NetSync> {
   const transport =
     typeof to === "string" ? repoTransport([new WebSocketClientAdapter(to)]) : to.transport(basename(dataDir));
-  const started = await startNetSync(dataDir, transport);
+  const started = await startNetSync(dataDir, transport, options);
   bridges.push(started);
   return started;
 }
@@ -278,4 +287,52 @@ test("a live-sync peer's operations are not absorbed while the folder is blocked
   expect(after).toContain("edited on A");
   expect(after).toContain("after the rollback");
   expect(after).toBe(await readFeature(a, FILE));
+});
+
+test("a peer's edit is announced once it has landed, and only an edit that changed something", async () => {
+  // What the open pages wait for (src/server/api.ts hands it to the change
+  // stream): without it an edit sat on the receiver's disk until the page's
+  // next timed refresh, up to a minute away.
+  const { a, b } = await twoDirs();
+  const server = new FakeSyncServer();
+  const heardOnA: string[] = [];
+  const heardOnB: string[] = [];
+  const peerA = await bridge(a, server, { onAbsorbed: (file) => heardOnA.push(file) });
+  const peerB = await bridge(b, server, {
+    onAbsorbed: (file) => {
+      heardOnB.push(file);
+      // A listener that fails leaves the absorb standing.
+      throw new Error("the page went away");
+    },
+  });
+  await server.settle(peerA, peerB);
+  // Joining with the same document on both sides brought nothing new.
+  expect(heardOnA).toEqual([]);
+  expect(heardOnB).toEqual([]);
+
+  await saveFeature(a, FILE, SEED.replace("- line one", "- line one, edited on A"));
+  await server.settle(peerA, peerB);
+
+  // B heard of it once, with the edit already in its file; A, whose own
+  // save it was, heard nothing.
+  expect(heardOnB).toEqual([FILE]);
+  expect(await readFeature(b, FILE)).toContain("edited on A");
+  expect(heardOnA).toEqual([]);
+});
+
+test("an edit that comes over a real websocket server is announced the same way", async () => {
+  // The production entry point (src/server/api.ts starts the bridge with
+  // it), against the stock server adapter rather than the fake.
+  const { a, b } = await twoDirs();
+  const url = await startServer();
+  const heardOnB: string[] = [];
+  bridges.push(await startNetSyncClient(a, url));
+  bridges.push(await startNetSyncClient(b, url, { onAbsorbed: (file) => heardOnB.push(file) }));
+
+  await saveFeature(a, FILE, SEED.replace("- line two", "- line two, edited on A"));
+
+  await until(async () => heardOnB.length > 0, "peer B to hear of the edit");
+  // It is told once the edit is in the file, not before.
+  expect(heardOnB).toEqual([FILE]);
+  expect(await readFeature(b, FILE)).toContain("edited on A");
 });

@@ -271,6 +271,13 @@ import {
   syncDataDir,
 } from "./reload";
 import { startNetSyncClient } from "./automerge/netsync";
+import {
+  renewDelayMs,
+  resolveSyncAddress,
+  retryDelayMs,
+  withoutPass,
+  type SyncAddress,
+} from "./automerge/repoSyncServer";
 import { setProjectionOptions } from "./automerge/project";
 import type { NetSync } from "./automerge/netsync";
 import { errorAttributes, getLogger, setLogVerbosity } from "./telemetry";
@@ -289,6 +296,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { bodyOf, json, type Handler, type Params } from "./http";
 import {
+  notifyDocumentsChange,
   notifyPluginChange,
   pluginStates,
   provideDataAccess,
@@ -375,6 +383,77 @@ let netSync: NetSync | null = null;
 let netSyncKey: string | null = null;
 /** Start/stop must not interleave; applies queue behind one another. */
 let netSyncTurn: Promise<void> = Promise.resolve();
+/**
+ * The next look at a repository's own sync server
+ * (src/server/automerge/repoSyncServer.ts): a pass renewed before it runs
+ * out, or a start tried again after the server could not be reached.
+ */
+let netSyncTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearNetSyncTimer(): void {
+  if (netSyncTimer !== null) clearTimeout(netSyncTimer);
+  netSyncTimer = null;
+}
+
+async function stopNetSync(): Promise<void> {
+  const old = netSync;
+  netSync = null;
+  if (!old) return;
+  try {
+    await old.stop();
+  } catch (e) {
+    // A bridge that fails to stop cleanly is abandoned, not kept.
+    netsyncLog.warn("bridge did not stop cleanly; abandoning it", errorAttributes(e));
+  }
+}
+
+/**
+ * Start the bridge for `key` (the Settings address and the folder), or
+ * replace the running one with a bridge on a fresh pass. Runs inside
+ * netSyncTurn.
+ */
+async function startNetSyncFor(url: string, dir: string, key: string, passEndsAt: number | null): Promise<void> {
+  const again = (ms: number, endsAt: number | null) => {
+    clearNetSyncTimer();
+    netSyncTimer = setTimeout(() => {
+      netSyncTimer = null;
+      netSyncTurn = netSyncTurn.then(async () => {
+        // Settings or the folder changed meanwhile: that apply has it now.
+        if (netSyncKey === key) await startNetSyncFor(url, dir, key, endsAt);
+      });
+    }, ms);
+    netSyncTimer.unref?.();
+  };
+  let address: SyncAddress;
+  try {
+    address = await resolveSyncAddress(url, dir);
+  } catch (e) {
+    netsyncLog.error(`not syncing with ${withoutPass(url)}: ${(e as Error).message}`, errorAttributes(e));
+    // The running bridge keeps its connection for as long as its pass lasts;
+    // after that the server turns it away, so it is stopped rather than left
+    // knocking every few seconds.
+    const retryIn = retryDelayMs(e);
+    if (retryIn === null || passEndsAt === null || Date.now() >= passEndsAt) await stopNetSync();
+    // Asked again by itself only when that can help: a server that did not
+    // answer, not one that said no. After a no, the next apply asks again.
+    if (retryIn === null) netSyncKey = null;
+    else again(retryIn, passEndsAt);
+    return;
+  }
+  await stopNetSync();
+  try {
+    // A peer's edit that landed is shown by the open pages at once
+    // (specs/datastore/automerge-store.feature.md).
+    netSync = await startNetSyncClient(dir, address.url, { onAbsorbed: notifyDocumentsChange });
+    netsyncLog.info(`syncing with ${withoutPass(address.url)}`);
+  } catch (e) {
+    netsyncLog.error((e as Error).message, errorAttributes(e));
+    // Nothing runs: the next apply starts over.
+    netSyncKey = null;
+    return;
+  }
+  if (address.expiresAt !== null) again(renewDelayMs(address.expiresAt, Date.now()), address.expiresAt);
+}
 
 export function applyNetSync(state: SpecDrivenState): Promise<void> {
   netSyncTurn = netSyncTurn.then(async () => {
@@ -389,25 +468,12 @@ export function applyNetSync(state: SpecDrivenState): Promise<void> {
     }
     const key = url && dir ? `${url}\n${dir}` : null;
     if (key === netSyncKey) return;
-    const old = netSync;
-    netSync = null;
+    clearNetSyncTimer();
     netSyncKey = null;
-    if (old) {
-      try {
-        await old.stop();
-      } catch (e) {
-        // A bridge that fails to stop cleanly is abandoned, not kept.
-        netsyncLog.warn("bridge did not stop cleanly; abandoning it", errorAttributes(e));
-      }
-    }
-    if (!url || !dir) return;
-    try {
-      netSync = await startNetSyncClient(dir, url);
-      netSyncKey = key;
-      netsyncLog.info(`syncing with ${url}`);
-    } catch (e) {
-      netsyncLog.error((e as Error).message, errorAttributes(e));
-    }
+    await stopNetSync();
+    if (!url || !dir || !key) return;
+    netSyncKey = key;
+    await startNetSyncFor(url, dir, key, null);
   });
   return netSyncTurn;
 }
@@ -422,6 +488,7 @@ export async function stopBackgroundWork(): Promise<void> {
   reloader.stop();
   stopWatching();
   netSyncTurn = netSyncTurn.then(async () => {
+    clearNetSyncTimer();
     const old = netSync;
     netSync = null;
     netSyncKey = null;

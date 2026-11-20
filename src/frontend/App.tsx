@@ -155,6 +155,7 @@ import {
   watchPluginChanges,
   type PluginStatus,
 } from "../plugins/client/loader";
+import { coalesced } from "./coalesce";
 import {
   tabReachable,
   useRegistry,
@@ -384,6 +385,8 @@ function applyThemePref(pref: ThemePref): void {
 // itself stays opt-in — nothing is sent anywhere until the switch is on and
 // saved.
 const DEFAULT_SYNC_SERVER_URL = "wss://sync.automerge.org";
+/** How long a peer's edit waits for others arriving with it before the view is re-read. */
+const PEER_EDIT_REFRESH_MS = 100;
 
 // Autosync (specs/ui/ui.feature.md "Settings"): the frequency the seconds field
 // falls back to when the switch is turned back on. Autosync is on by default,
@@ -3374,12 +3377,24 @@ export function App() {
   }, []);
   useEffect(() => {
     if (loading || demo) return;
-    // A change is also an agent's sign-in moving on: its models and the
-    // pane header's account chip are asked for again.
-    return watchPluginChanges(() => {
-      void refreshPlugins();
-      void agentChat.reloadChoices();
-    });
+    // The stream also says when a peer's edit arrived over live sync
+    // (specs/datastore/automerge-store.feature.md): the view is re-read then,
+    // by the rules of the timed refresh, not up to a minute later. Edits that
+    // arrive together — a peer catching up — share one re-read.
+    const showPeerEdits = coalesced(() => refreshViewRef.current(), PEER_EDIT_REFRESH_MS);
+    const unwatch = watchPluginChanges(
+      () => {
+        // A change is also an agent's sign-in moving on: its models and the
+        // pane header's account chip are asked for again.
+        void refreshPlugins();
+        void agentChat.reloadChoices();
+      },
+      () => showPeerEdits(),
+    );
+    return () => {
+      showPeerEdits.cancel();
+      unwatch();
+    };
   }, [loading, demo, refreshPlugins]);
 
   /**
@@ -9742,7 +9757,11 @@ export function App() {
               Syncs edits between running apps in near-real time over websocket; git
               remains the source of record. On a public server such as
               wss://sync.automerge.org, anyone who has a document&apos;s id can read
-              that document — leave it off to keep specs in the git repo only.
+              that document — leave it off to keep specs in the git repo only. An
+              address with {"{repo}"} in it, such as wss://sync.example.com/{"{repo}"},
+              names a SpecDriven sync server that keeps a separate server for each data
+              repository and lets in only people who can push to it: your GitHub access
+              is sent to that server to prove it.
             </span>
           </span>
           <span className="switch">

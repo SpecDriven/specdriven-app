@@ -35,3 +35,11 @@ export type HostSharedModule = (typeof HOST_SHARED_MODULES)[number];
  * or the server's for a host half (src/plugins/host/loader.ts).
  */
 export const SDK_GLOBAL = "__specdriven";
+
+/**
+ * The name of the event the change stream (`GET /api/plugins/events`) sends
+ * when a peer's edit to a feature landed in the data folder
+ * (src/plugins/host/loader.ts `notifyDocumentsChange`). Its data is
+ * `{ file }`, the feature that changed.
+ */
+export const DOCUMENTS_EVENT = "documents";

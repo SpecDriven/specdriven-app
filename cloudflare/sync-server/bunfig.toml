@@ -1,0 +1,3 @@
+[install]
+# As in the app: a version must be three days old before it is installed.
+minimumReleaseAge = 259200
