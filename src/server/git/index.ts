@@ -23,6 +23,20 @@ export { jsGitAvailable } from "./js";
 export { currentGitAccess, effectiveGitAccess, normalizeGitAccess, setAppSignIn } from "./access";
 export type { GitAccess } from "./access";
 export { isRepoRoot } from "./repoRoot";
+export {
+  normalizeSignedCommitRepos,
+  parseRepoScope,
+  setSignedCommitRepos,
+  signsAnyCommits,
+  signsCommitsIn,
+} from "./signing";
+export {
+  checkSigningPassphrase,
+  clearSigningPassphrase,
+  passphraseRefusal,
+  saveSigningPassphrase,
+  signingPassphrase,
+} from "./signingKey";
 
 export type GitEngine = "cli" | "gh" | "js";
 
@@ -235,9 +249,21 @@ export async function resolveConflict(
 }
 
 export async function syncSavedChanges(repoDir: string): Promise<SyncResult> {
+  let result: SyncResult;
+  try {
+    result = await traced("sync_saved_changes", repoDir, () => backend().syncSavedChanges(repoDir), syncOutcome);
+  } catch (e) {
+    // A commit that failed — above all one that could not be signed
+    // (signing.ts) — leaves what was saved in the working tree, where it
+    // reaches the remote no more than a commit that was not pushed. The page
+    // is told the same way, and hears it is over from the sync that commits.
+    const reason = (e as Error).message;
+    if (pushProblems.get(repoDir) !== reason) log.warn(reason, { "specdriven.dir": repoDir });
+    pushProblems.set(repoDir, reason);
+    throw e;
+  }
   // A conflict being resolved pushes nothing and says nothing about what is
   // waiting; any other answer has looked at everything there was to push.
-  const result = await traced("sync_saved_changes", repoDir, () => backend().syncSavedChanges(repoDir), syncOutcome);
   return notePush(repoDir, result, !result.message.startsWith("merge conflict in progress"));
 }
 

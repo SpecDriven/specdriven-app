@@ -224,6 +224,7 @@ const KNOWN: Record<string, Known> = {
     format: words({ token: "Personal access token", account: "GitHub account sign-in" }),
   },
   githubAccount: { section: "Git & GitHub", label: "GitHub account" },
+  signedCommitRepos: { section: "Git & GitHub", label: "Signed commits" },
   useGhAccount: { section: "Git & GitHub", label: "Use the GitHub CLI's account", deprecated: true },
 
   reloadFrequencySeconds: { section: "Sync", label: "Autosync frequency", format: secondsValue(true) },

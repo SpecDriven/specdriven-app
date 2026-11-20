@@ -292,6 +292,7 @@ import { CloneFromGitHub, GITHUB_HOST, PasteToken, TokenSignInDialog } from "./G
 import { accountMenuEntries } from "./accountMenu";
 import { SettingsFileDialog, type SettingsFile } from "./SettingsFileDialog";
 import { accessShown, GitAccessChoice, type GitAccess } from "./GitAccessChoice";
+import { SignedCommits } from "./SignedCommits";
 import { ConfluenceTokens, fetchConfluenceTokens, type ConfluenceWiki } from "./ConfluenceToken";
 import { JiraTokens, fetchJiraTokens, type JiraSite } from "./JiraToken";
 import { ImportFromJiraWikiDialog } from "./ImportFromJiraWikiDialog";
@@ -3262,7 +3263,8 @@ export function App() {
     if (syncProblemToast.current !== null) toast.dismiss(syncProblemToast.current);
     // A credential problem is fixed in Settings; the hosted app's token
     // lives on the account page instead, which the message itself names.
-    const settingsFixIt = !hosted && /authentication required|sign in with GitHub/i.test(reason);
+    // So is a commit that could not be signed (src/server/git/signing.ts).
+    const settingsFixIt = !hosted && /authentication required|sign in with GitHub|Signed commits/i.test(reason);
     syncProblemToast.current = toast.error(
       syncProblemMessage(reason),
       settingsFixIt ? { action: { label: "Open Settings", run: () => openSettingsAt("settings-git") } } : undefined,
@@ -9700,6 +9702,15 @@ export function App() {
             <span className="switch-track" aria-hidden="true" />
           </span>
         </label>
+        {/* Signed commits (specs/app/user-info-settings.feature.md "Signed
+            commits"): the GitHub urls whose commits the app signs, and the
+            passphrase of the SSH key that signs them. */}
+        <SignedCommits
+          repos={Array.isArray(settingsPayload.signedCommitRepos) ? (settingsPayload.signedCommitRepos as string[]) : []}
+          passphraseKept={settingsPayload.signingPassphrase === true}
+          onSave={(repos) => patchSettings({ signedCommitRepos: repos })}
+          onPassphraseKept={(kept) => setSettingsPayload((p) => ({ ...p, signingPassphrase: kept }))}
+        />
       </PageSection>
       )}
       {renderPluginSettings("git")}

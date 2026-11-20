@@ -4,7 +4,15 @@ import { DEMO_USER, isDemoMode } from "./demoMode";
 import { isHostedMode } from "./hostedMode";
 import { getAppRoot } from "./paths";
 import { isReadOnlyMode, READ_ONLY_USER } from "./readOnlyMode";
-import { cliGitAvailable, currentEngine, ghAccount, ghAccountInUse, isRepoRoot } from "./git";
+import {
+  cliGitAvailable,
+  currentEngine,
+  ghAccount,
+  ghAccountInUse,
+  isRepoRoot,
+  signsAnyCommits,
+  signsCommitsIn,
+} from "./git";
 import { dataRepoDir } from "./repo";
 import { run } from "./run";
 import { readState } from "./state";
@@ -74,16 +82,11 @@ export async function getCurrentUser(): Promise<CurrentUser> {
   // the GitHub CLI's when that is the access, else the app's own sign-in.
   const gh = (await ghAccountInUse()) ? await ghAccount() : null;
   if (gh) {
-    return { username, login: gh.login, name: gh.name ?? gh.login, email: gh.email };
+    return { username, login: gh.login, ...(await commitAuthor(gh.name ?? gh.login, gh.email)) };
   }
   const auth = currentEngine() === "gh" ? null : await getAuth();
   if (auth) {
-    return {
-      username,
-      login: auth.login,
-      name: auth.name ?? auth.login,
-      email: auth.email,
-    };
+    return { username, login: auth.login, ...(await commitAuthor(auth.name ?? auth.login, auth.email)) };
   }
   const repo = await dataRepoFolder();
   return {
@@ -91,5 +94,24 @@ export async function getCurrentUser(): Promise<CurrentUser> {
     login: null,
     name: await gitConfig("user.name", repo),
     email: await gitConfig("user.email", repo),
+  };
+}
+
+/**
+ * Who authors the commits of a signed-in account: the account — except in a
+ * data repo whose commits are signed (src/server/git/signing.ts), which
+ * this computer's git user authors, since its key signs them. The built-in
+ * engine signs nothing, so the account stays the answer there.
+ */
+async function commitAuthor(
+  name: string,
+  email: string | null,
+): Promise<{ name: string | null; email: string | null }> {
+  if (!signsAnyCommits() || currentEngine() === "js") return { name, email };
+  const repo = await dataRepoFolder();
+  if (!repo || !(await signsCommitsIn(repo))) return { name, email };
+  return {
+    name: (await gitConfig("user.name", repo)) ?? name,
+    email: (await gitConfig("user.email", repo)) ?? email,
   };
 }
