@@ -74,8 +74,12 @@ fails on any such path.
 
 The bundle registers the `specdriven://` url scheme with the OS — through
 `Info.plist` on macOS, through the desktop entry's `MimeType` on Linux — so
-spec links launch or focus the installed app. Builds are unsigned for now:
-first launch needs Gatekeeper approval on macOS, and the `.deb` is installed
+spec links launch or focus the installed app. Builds need no Apple Developer
+account: the macOS app is signed ad hoc (`build.mac.identity` is `"-"`), never
+with a Developer ID certificate, even when the keychain holds one, and is not
+notarized. An app built on the machine that runs it, as install.sh does,
+starts without a Gatekeeper prompt; a dmg downloaded from elsewhere needs
+Gatekeeper approval on first launch. The `.deb` is installed
 with `sudo apt install ./specdriven_<version>_amd64.deb` (the AppImage just
 needs `chmod +x`).
 

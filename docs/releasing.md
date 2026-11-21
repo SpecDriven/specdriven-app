@@ -90,7 +90,9 @@ exists is not overwritten — re-running on the same tag fails, on purpose.
 
 Build the desktop artifacts from the tagged commit, not from whatever is
 checked out — electron-builder reads the version out of `package.json`, so a
-build from any other commit is mislabelled.
+build from any other commit is mislabelled. No Apple Developer account is
+needed: the macOS app is signed ad hoc, not with a Developer ID, and is not
+notarized ([building.md](building.md#what-the-bundle-carries)).
 
 ## Signing and provenance
 
