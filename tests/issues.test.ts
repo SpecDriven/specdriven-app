@@ -17,7 +17,6 @@ import {
   createIssue,
   getIssue,
   githubRepoOfRemote,
-  issueImageUrl,
   listComments,
   listIssues,
   originUrl,
@@ -299,87 +298,44 @@ describe("the GitHub API", () => {
     const bytes = new Uint8Array([1, 2, 3, 4]);
     // The stored name images.ts storeImage would generate for these bytes.
     const stored = currentImageName("shot.png", bytes); // shot-<hash>.png
-    const shownUrl = `https://github.com/acme/app/blob/specdriven-issue-images/${stored}?raw=true`;
-    const contentsPath = `/repos/acme/app/contents/${stored}`;
-    const branchRef = "/repos/acme/app/git/ref/heads/specdriven-issue-images";
+    const contentsPath = `/repos/acme/app/contents/.specdriven/issue-images/${stored}`;
+    const fileUrl = `https://github.com/acme/app/blob/main/.specdriven/issue-images/${stored}`;
+    const shownUrl = `${fileUrl}?raw=true`;
 
     beforeEach(async () => {
       await mkdir(join(root, ".images"), { recursive: true });
       await writeFile(join(root, ".images", stored), bytes);
     });
 
-    test("a stored image is committed to the images branch and its url rewritten", async () => {
+    test("a stored image is committed to the repo and its url rewritten", async () => {
       await signIn();
-      // The branch exists, the image is not on it yet (GET 404): the PUT commits it there.
-      answers[`GET ${branchRef}`] = { body: { ref: "refs/heads/specdriven-issue-images" } };
-      answers[`PUT ${contentsPath}`] = { status: 201, body: { content: { download_url: "https://raw/x?token=t" } } };
+      // Not committed yet (GET 404): the PUT commits it to the default branch.
+      answers[`PUT ${contentsPath}`] = { status: 201, body: { content: { html_url: fileUrl } } };
       answers["POST /repos/acme/app/issues"] = { status: 201, body: rawIssue(20) };
       await createIssue(REPO, root, { title: "Bug", body: `See ![image](/api/images/${stored}) here.` });
-      expect(seen[0]!.path).toBe(`${contentsPath}?ref=specdriven-issue-images`);
+      expect(seen[0]!.path).toBe(contentsPath);
       const put = seen.find((s) => s.method === "PUT")!;
       expect(put.path).toBe(contentsPath);
       expect(put.body).toEqual({
         message: `Add issue image: ${stored}`,
         content: Buffer.from(bytes).toString("base64"),
-        branch: "specdriven-issue-images",
       });
-      // Never the default branch, and no branch is created when it is there.
-      expect(seen.some((s) => s.path.includes("/git/refs"))).toBe(false);
       const post = seen.find((s) => s.path === "/repos/acme/app/issues")!;
       expect((post.body as { body: string }).body).toBe(`See ![image](${shownUrl}) here.`);
     });
 
-    test("a missing images branch is created as an orphan before the first commit", async () => {
-      await signIn();
-      answers["POST /repos/acme/app/git/trees"] = { status: 201, body: { sha: "tree-1" } };
-      answers["POST /repos/acme/app/git/commits"] = { status: 201, body: { sha: "commit-1" } };
-      answers["POST /repos/acme/app/git/refs"] = { status: 201, body: { ref: "refs/heads/specdriven-issue-images" } };
-      answers[`PUT ${contentsPath}`] = { status: 201, body: {} };
-      answers["POST /repos/acme/app/issues"] = { status: 201, body: rawIssue(24) };
-      await createIssue(REPO, root, { title: "Bug", body: `![](/api/images/${stored})` });
-      const commit = seen.find((s) => s.path.endsWith("/git/commits"))!;
-      expect(commit.body).toEqual({ message: "Start the issue images branch", tree: "tree-1", parents: [] });
-      const ref = seen.find((s) => s.path.endsWith("/git/refs"))!;
-      expect(ref.body).toEqual({ ref: "refs/heads/specdriven-issue-images", sha: "commit-1" });
-      // The branch comes first, then the image goes onto it.
-      expect(seen.indexOf(ref)).toBeLessThan(seen.findIndex((s) => s.method === "PUT"));
-      expect((seen.find((s) => s.path === "/repos/acme/app/issues")!.body as { body: string }).body).toBe(
-        `![](${shownUrl})`,
-      );
-    });
-
-    test("an images branch made by a concurrent upload is used, not an error", async () => {
-      await signIn();
-      answers["POST /repos/acme/app/git/trees"] = { status: 201, body: { sha: "tree-1" } };
-      answers["POST /repos/acme/app/git/commits"] = { status: 201, body: { sha: "commit-1" } };
-      answers["POST /repos/acme/app/git/refs"] = { status: 422, body: { message: "Reference already exists" } };
-      answers[`PUT ${contentsPath}`] = { status: 201, body: {} };
-      answers["POST /repos/acme/app/issues"] = { status: 201, body: rawIssue(25) };
-      await createIssue(REPO, root, { title: "Bug", body: `![](/api/images/${stored})` });
-      expect((seen.find((s) => s.path === "/repos/acme/app/issues")!.body as { body: string }).body).toBe(
-        `![](${shownUrl})`,
-      );
-    });
-
     test("an already-committed image reuses its url without a second commit", async () => {
       await signIn();
-      // Already on the branch: the GET finds it, and nothing is written.
-      answers[`GET ${contentsPath}`] = { body: { name: stored, type: "file" } };
+      // Already in the repo: the GET finds it, and nothing is written.
+      answers[`GET ${contentsPath}`] = { body: { name: stored, type: "file", html_url: fileUrl } };
       answers["POST /repos/acme/app/issues/7/comments"] = {
         status: 201,
         body: { id: 2, body: "x", html_url: "u", user: null, created_at: "t", updated_at: "t" },
       };
       await addComment(REPO, root, 7, `look ![](/api/images/${stored})`);
-      expect(seen.some((s) => s.method === "PUT" || s.path.includes("/git/"))).toBe(false);
+      expect(seen.some((s) => s.method === "PUT")).toBe(false);
       const comment = seen.find((s) => s.path.endsWith("/comments"))!;
       expect((comment.body as { body: string }).body).toBe(`look ![](${shownUrl})`);
-    });
-
-    test("an image on a GitHub Enterprise repo is shown from that host", () => {
-      const ghe = { url: "https://ghe.example.com/acme/app", host: "ghe.example.com", owner: "acme", name: "app" };
-      expect(issueImageUrl(ghe, stored)).toBe(
-        `https://ghe.example.com/acme/app/blob/specdriven-issue-images/${stored}?raw=true`,
-      );
     });
 
     test("an image with no bytes on disk is left as-is", async () => {
@@ -395,9 +351,8 @@ describe("the GitHub API", () => {
 
     test("a refused upload keeps the local link rather than failing the issue", async () => {
       await signIn();
-      // The branch is there but the PUT is refused (no push access): the
-      // create still goes through, with the image left as a local link.
-      answers[`GET ${branchRef}`] = { body: { ref: "refs/heads/specdriven-issue-images" } };
+      // The PUT is refused (no push access): the create still goes through,
+      // with the image left as a local link.
       answers[`PUT ${contentsPath}`] = { status: 403, body: { message: "Resource not accessible" } };
       answers["POST /repos/acme/app/issues"] = { status: 201, body: rawIssue(23) };
       const issue = await createIssue(REPO, root, { title: "Bug", body: `x ![](/api/images/${stored})` });
@@ -411,7 +366,7 @@ describe("the GitHub API", () => {
       await signIn();
       answers["POST /repos/acme/app/issues"] = { status: 201, body: rawIssue(22) };
       await createIssue(REPO, root, { title: "Bug", body: "plain text with a [link](https://x)" });
-      expect(seen.some((s) => s.path.includes("/contents/") || s.path.includes("/git/"))).toBe(false);
+      expect(seen.some((s) => s.path.includes("/contents/"))).toBe(false);
     });
   });
 
