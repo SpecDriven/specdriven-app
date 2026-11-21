@@ -1236,9 +1236,12 @@ export async function endChatSession(id: string, why = "Session ended."): Promis
  * another folder ends and is forgotten, as its tab's × would — a worktree
  * with changes in it is kept. Answers how many went.
  */
-export async function closeOtherProjects(project: string): Promise<number> {
-  const open = resolve(project);
-  const others = [...registry().values()].filter((s) => s.meta.project !== open).map((s) => s.meta.id);
+export async function closeOtherProjects(projects: string | readonly string[]): Promise<number> {
+  // Several folders are open when several windows are
+  // (specs/app/multiple-windows.feature.md): a session ends when no window
+  // shows its folder.
+  const open = new Set((typeof projects === "string" ? [projects] : projects).map((p) => resolve(p)));
+  const others = [...registry().values()].filter((s) => !open.has(s.meta.project)).map((s) => s.meta.id);
   await Promise.all(others.map((id) => endChatSession(id, "The folder was switched; this session belonged to another folder.").catch(() => undefined)));
   return others.length;
 }

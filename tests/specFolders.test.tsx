@@ -248,6 +248,72 @@ describe("SpecFoldersDialog — Manage specification folders", () => {
   });
 });
 
+// specs/app/multiple-windows.feature.md "Opening a window".
+describe("SpecFoldersDialog — Open in new window", () => {
+  const folders = [
+    { path: "/specs/insurance", kind: "spec" },
+    { path: "/specs/banking", kind: "spec" },
+    { path: "/code/app", kind: "code" },
+  ] satisfies FolderEntry[];
+  const open = folders[0]!;
+
+  test("every folder but the open one can be opened in a window of its own, where there are windows to open", () => {
+    const markup = html(
+      <SpecFoldersDialog folders={folders} current={open} onOpen={noop} onOpenInNewWindow={noop} onRemove={noop} onAdd={noop} onClose={noop} />,
+    );
+    expect(markup.match(/class="icon-button spec-folder-window"/g)).toHaveLength(2);
+    expect(markup).toContain('aria-label="Open banking in a new window"');
+    expect(markup).toContain('title="Open /code/app in a new window"');
+    expect(markup).not.toContain('aria-label="Open insurance in a new window"');
+    // The plain Open, which switches this window, stays beside it.
+    expect(markup.match(/>Open<\/button>/g)).toHaveLength(2);
+  });
+
+  test("outside the desktop app the action is not offered", () => {
+    const markup = html(<SpecFoldersDialog folders={folders} current={open} onOpen={noop} onRemove={noop} onAdd={noop} onClose={noop} />);
+    expect(markup).not.toContain("in a new window");
+  });
+
+  test("the action hands back the entry with its kind, and switches nothing", () => {
+    const window = new Window({ url: "http://localhost/" });
+    const g = globalThis as unknown as Record<string, unknown>;
+    const saved = { window: g.window, document: g.document, act: g.IS_REACT_ACT_ENVIRONMENT };
+    g.window = window;
+    g.document = window.document;
+    g.IS_REACT_ACT_ENVIRONMENT = true;
+    try {
+      const opened: FolderEntry[] = [];
+      const inWindow: FolderEntry[] = [];
+      const host = window.document.createElement("div");
+      window.document.body.appendChild(host);
+      const root = createRoot(host as unknown as HTMLElement);
+      act(() =>
+        root.render(
+          <SpecFoldersDialog
+            folders={folders}
+            current={open}
+            onOpen={(f) => opened.push(f)}
+            onOpenInNewWindow={(f) => inWindow.push(f)}
+            onRemove={noop}
+            onAdd={noop}
+            onClose={noop}
+          />,
+        ),
+      );
+      const button = host.querySelector('button[aria-label="Open app in a new window"]') as unknown as HTMLButtonElement;
+      act(() => button.click());
+      expect(inWindow).toEqual([{ path: "/code/app", kind: "code" }]);
+      expect(opened).toEqual([]);
+      act(() => root.unmount());
+    } finally {
+      g.window = saved.window;
+      g.document = saved.document;
+      g.IS_REACT_ACT_ENVIRONMENT = saved.act;
+      void window.happyDOM.close();
+    }
+  });
+});
+
 describe("parseRecentFolders", () => {
   test("keeps well-formed entries in order and drops the rest", () => {
     expect(

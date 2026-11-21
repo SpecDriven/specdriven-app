@@ -15,10 +15,15 @@
  * protocol: document complete and something mounted under #root), a hold,
  * then SIGTERM — which Electron turns into app.quit(), so a clean shutdown
  * exits 0. Every run after the first is a restart on the same profile, so
- * remembered state (window geometry, settings) is loaded back. The last of
+ * remembered state (window geometry, settings) is loaded back — and a
+ * restart with two windows to bring back, each on a folder of its own
+ * (specs/app/multiple-windows.feature.md): the first run is a first run, on
+ * an empty profile, and the profile is then left as an app with two folders
+ * open would leave it (seedTwoWindows), so every later run must render
+ * both. The last of
  * two or more runs is launched by a `specdriven://` link to a nested page
  * (LINK_PATH), the way the OS starts the app for a link clicked while it
- * is closed: its window must render at that path, not just at `/`. A run fails
+ * is closed: one of its windows must render at that path, not just at `/`. A run fails
  * when the process dies before it is asked to, the window never renders or
  * stops answering, the quit hangs or exits non-zero, the main process
  * throws an uncaught exception or leaves a promise rejection unhandled (a
@@ -38,6 +43,7 @@ import { $ } from "bun";
 import type { Subprocess } from "bun";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { SETTINGS_VERSION } from "../src/server/settingsModel";
 import { bundleDesktop, hostPlatform, type Platform } from "./build-desktop";
 
 // ---------------------------------------------------------------------------
@@ -155,6 +161,57 @@ export function linkLaunch(run: number, runs: number): string | null {
   return `specdriven:/${LINK_PATH}`;
 }
 
+/**
+ * How many windows a run must render: one on the empty profile of the first
+ * run, two on every restart — the profile then says two were left open.
+ */
+export function windowsExpected(run: number): number {
+  return run === 1 ? 1 : 2;
+}
+
+/**
+ * Leave the profile as an app with two windows open would: two plain
+ * folders with a spec each, the settings naming the first, and the window
+ * list (src/electron/windowSession.ts) naming both — the second in front,
+ * so that is the one a link with no folder of its own goes to. The window
+ * geometry the first run saved is kept.
+ */
+export function seedTwoWindows(profile: string, home: string, settingsVersion: number): string[] {
+  const folders = ["one", "two"].map((name) => join(profile, "folders", name));
+  for (const dir of folders) {
+    mkdirSync(join(dir, "specs"), { recursive: true });
+    writeFileSync(join(dir, "specs", "sample.feature.md"), "# Sample\n");
+  }
+  mkdirSync(home, { recursive: true });
+  writeFileSync(
+    join(home, "settings.yaml"),
+    [
+      `settingsVersion: ${settingsVersion}`,
+      `dataRepo: ${JSON.stringify(folders[0])}`,
+      "recentFolders:",
+      ...folders.flatMap((dir) => [`  - path: ${JSON.stringify(dir)}`, "    kind: spec"]),
+      "",
+    ].join("\n"),
+  );
+  const file = join(profile, "window-state.json");
+  let saved: Record<string, unknown> = {};
+  try {
+    saved = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+  } catch {
+    // The first run saved nothing: the windows open at the default place.
+  }
+  writeFileSync(
+    file,
+    JSON.stringify({
+      version: 2,
+      bounds: saved.bounds ?? {},
+      windows: [{ folder: { dataRepo: folders[0] } }, { folder: { dataRepo: folders[1] }, focused: true }],
+      mirror: { dataRepo: folders[0] },
+    }),
+  );
+  return folders;
+}
+
 /** The path a `specdriven://` launch url asks for (the url's host + path). */
 export function linkPath(url: string): string {
   const u = new URL(url);
@@ -262,6 +319,9 @@ export interface RunResult {
   link: string | null;
   /** The url the document was loaded at (before the app rewrote it), once rendered. */
   entry: string | null;
+  /** How many windows the run was to bring up, and how many rendered. */
+  expectedWindows: number;
+  windows: number;
   findings: Finding[];
   /** Crash dumps that appeared in the profile's Crashpad directory. */
   crashDumps: number;
@@ -282,7 +342,11 @@ export function judge(
   if (r.exitedEarly) {
     problems.push(`ended on its own (${describeExit(r)}) before it was asked to quit`);
   } else if (r.readyMs === null) {
-    problems.push(`window did not render within ${o.readyTimeout}s`);
+    problems.push(
+      r.expectedWindows > 1 && r.windows > 0
+        ? `only ${r.windows} of the ${r.expectedWindows} windows the run before left open rendered within ${o.readyTimeout}s`
+        : `window did not render within ${o.readyTimeout}s`,
+    );
   }
   // Each entry starts with its kind: "uncaught exception: …" or "unhandled rejection: …".
   for (const e of r.mainExceptions) problems.push(`main process ${e}`);
@@ -479,23 +543,46 @@ const PAGE_STATE = `(() => {
   return { ready: document.readyState, title: document.title, children: root ? root.childElementCount : -1, text, entry: (nav && nav.name) || location.href };
 })()`;
 
-async function findPage(port: number): Promise<string | null> {
+/** The debugger url of every window's page, in the order the app lists them. */
+async function findPages(port: number): Promise<string[]> {
   try {
     const res = await fetch(`http://127.0.0.1:${port}/json/list`, {
       signal: AbortSignal.timeout(CDP_TIMEOUT_MS),
     });
-    if (!res.ok) return null;
+    if (!res.ok) return [];
     const targets = (await res.json()) as Array<{
       type: string;
       url: string;
       webSocketDebuggerUrl?: string;
     }>;
-    const page = targets.find(
-      (t) => t.type === "page" && !t.url.startsWith("devtools://") && t.url !== "about:blank",
-    );
-    return page?.webSocketDebuggerUrl ?? null;
+    return targets
+      .filter((t) => t.type === "page" && !t.url.startsWith("devtools://") && t.url !== "about:blank")
+      .flatMap((t) => (t.webSocketDebuggerUrl ? [t.webSocketDebuggerUrl] : []));
   } catch {
-    return null;
+    return [];
+  }
+}
+
+/** One look at a window other than the one the run holds on to; null while it cannot be asked. */
+async function pageState(wsUrl: string): Promise<PageState | null> {
+  const cdp = await Cdp.connect(wsUrl).catch(() => null);
+  if (!cdp) return null;
+  try {
+    return await cdp.evaluate<PageState>(PAGE_STATE).catch(() => null);
+  } finally {
+    cdp.close();
+  }
+}
+
+const rendered = (state: PageState | null): state is PageState =>
+  state !== null && state.ready === "complete" && state.children > 0;
+
+/** Whether a document was loaded at `path`. */
+function loadedAt(entry: string, path: string): boolean {
+  try {
+    return new URL(entry).pathname === path;
+  } catch {
+    return false;
   }
 }
 
@@ -618,6 +705,8 @@ async function launchOnce(run: number, launch: Launch): Promise<RunResult> {
     screen: "",
     link: linkLaunch(run, opts.runs),
     entry: null,
+    expectedWindows: windowsExpected(run),
+    windows: 0,
     findings: [],
     crashDumps: 0,
     log: join(launch.outDir, `run-${run}.log`),
@@ -649,6 +738,8 @@ async function launchOnce(run: number, launch: Launch): Promise<RunResult> {
   });
 
   let page: Cdp | null = null;
+  /** The debugger url of the window `page` is connected to. */
+  let held: string | null = null;
   let inspector: string | null = null;
   let pageCrashed = false;
   try {
@@ -665,25 +756,33 @@ async function launchOnce(run: number, launch: Launch): Promise<RunResult> {
           result.mainWatched = (await evaluateInMain<string>(inspector, MAIN_HOOK)) === "installed";
         }
       }
-      if (!page) {
-        const port = devToolsPort(output);
-        const wsUrl = port === null ? null : await findPage(port);
-        if (wsUrl) {
-          page = await Cdp.connect(wsUrl).catch(() => null);
-          if (page) {
-            page.on("Inspector.targetCrashed", () => {
-              pageCrashed = true;
-            });
-            await page.send("Inspector.enable").catch(() => {});
-          }
+      const port = devToolsPort(output);
+      const wsUrls = port === null ? [] : await findPages(port);
+      if (!page && wsUrls[0]) {
+        held = wsUrls[0];
+        page = await Cdp.connect(held).catch(() => null);
+        if (page) {
+          page.on("Inspector.targetCrashed", () => {
+            pageCrashed = true;
+          });
+          await page.send("Inspector.enable").catch(() => {});
         }
       }
       if (page) {
+        // Every window the run is to bring up must render: the one held on
+        // to for the rest of the run, and a look at each of the others.
         const state = await page.evaluate<PageState>(PAGE_STATE).catch(() => null);
-        if (state && state.ready === "complete" && state.children > 0) {
+        const others: (PageState | null)[] = [];
+        for (const url of wsUrls) if (url !== held) others.push(await pageState(url));
+        const up = [state, ...others].filter(rendered);
+        result.windows = up.length;
+        if (rendered(state) && up.length >= result.expectedWindows) {
           result.readyMs = Math.round(performance.now() - started);
           result.screen = state.text;
-          result.entry = state.entry;
+          // A launch by link: the window that took the link is the one to
+          // report, whichever that is.
+          const wanted = result.link ? linkPath(result.link) : null;
+          result.entry = (wanted ? up.find((s) => loadedAt(s.entry, wanted)) : undefined)?.entry ?? state.entry;
           break;
         }
       }
@@ -836,10 +935,16 @@ async function main(argv: string[]): Promise<number> {
     for (let run = 1; run <= opts.runs; run++) {
       const r = await launchOnce(run, { binary, args: launchArgs, env, profile, outDir, opts });
       results.push(r);
+      // From the second run on the app has two windows to bring back.
+      if (run === 1 && opts.runs > 1) seedTwoWindows(profile, env.SPECDRIVEN_HOME!, SETTINGS_VERSION);
       const problems = judge(r, opts);
       const timing = [
         r.link ? `by link to ${linkPath(r.link)}` : null,
-        r.readyMs === null ? "no window" : `rendered in ${seconds(r.readyMs)}`,
+        r.readyMs === null
+          ? r.windows > 0
+            ? `${r.windows} of ${r.expectedWindows} windows`
+            : "no window"
+          : `${r.windows > 1 ? `${r.windows} windows ` : ""}rendered in ${seconds(r.readyMs)}`,
         r.readyMs === null ? null : `held ${opts.uptime}s`,
         r.exitedEarly ? describeExit(r) : r.quitMs === null ? "killed" : `quit in ${seconds(r.quitMs)} (${describeExit(r)})`,
       ]

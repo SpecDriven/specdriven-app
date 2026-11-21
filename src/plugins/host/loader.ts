@@ -18,13 +18,14 @@ import { version as appVersion } from "../../../package.json";
 import { Context, type Disposer, type Plugin, type Scope } from "../kernel";
 import type { PluginManifest } from "../manifest";
 import type { InstallRecord } from "../marketplace";
-import { PROFILE_KEY, autoEnablePlugins, readProfile, writeProfile } from "../profile";
+import { PROFILE_KEY, autoEnablePlugins, profileRepo, readProfile, writeProfile } from "../profile";
 import { builtinHostPlugins } from "../builtin/host";
 import { builtinManifests, profileManifests, retiredManifest } from "../builtin/manifests";
 import * as hostSdk from "../sdk/host";
 import { DOCUMENTS_EVENT, SDK_GLOBAL } from "../shared";
 import { addSearchScope } from "../../server/search";
 import { getAppRoot } from "../../server/paths";
+import { currentWorkspace, detached, workspaces, type Workspace } from "../../server/workspace";
 import { readState, writeState } from "../../server/state";
 import type { SpecDrivenState } from "../../server/state";
 import { secretStore, type SecretStore } from "../../server/secrets";
@@ -32,11 +33,13 @@ import { agents } from "./agents";
 import { createPluginSettings, type PluginSettings } from "./pluginSettings";
 import { safeId as secretSafeId } from "./sources";
 import {
+  asPlugin,
   createRouteRegistry,
   createSessionParts,
   createShellPaths,
   createSyncHooks,
   type DataAccess,
+  type PluginGate,
 } from "./services";
 import {
   discoverPlugins,
@@ -170,15 +173,74 @@ interface External {
   /** Its url prefixes on the shell, on or off, while it is installed. */
   shellOff: Disposer[];
   watcher?: FSWatcher;
+  /** The data repo a `repo` plugin lives in: that folder's alone. */
+  repo?: string;
 }
 
 const external = new Map<string, External>();
 const mounted = new Map<string, { scope: Scope; rev?: string }>();
-/** The profile as last synced: the enabled ids in tab order. */
-let profile: string[] = [];
+/**
+ * The profile of each open folder as last synced — the enabled ids in tab
+ * order — by the folder as the settings name it (profile.ts profileRepo),
+ * "" for none. One entry, except in the desktop app with several windows
+ * (specs/app/multiple-windows.feature.md "Background work"): every folder
+ * keeps its own plugins, and what is mounted is all of them together.
+ */
+const profiles = new Map<string, string[]>();
+/** Each of those folders' data dir, or null: a code repository, or none reachable. */
+const folderDirs = new Map<string, string | null>();
+/** The folder synced last: the open one wherever no window is behind the caller. */
+let lastKey = "";
 /** Mounts and unmounts happen one at a time; concurrent settings writes queue. */
 let turn: Promise<void> = Promise.resolve();
 let lastOptions: SyncOptions = {};
+
+const keyOf = (state: Record<string, unknown>) => profileRepo(state) ?? "";
+
+/** The folder the caller works for: its window's, else the one synced last. */
+function keyNow(): string {
+  const workspace = currentWorkspace();
+  return workspace ? keyOf(workspace.folder as Record<string, unknown>) : lastKey;
+}
+
+/** The caller's folder's profile. */
+function profileNow(): string[] {
+  return profiles.get(keyNow()) ?? [];
+}
+
+/** Every plugin some open folder lists: what is mounted. */
+function wanted(first: readonly string[] = []): string[] {
+  return [...new Set([...first, ...[...profiles.values()].flat()])];
+}
+
+/** A plugin in a data repo's own folder is that folder's; the rest are everyone's. */
+function visibleIn(entry: External, dataDir: string | null): boolean {
+  return entry.source !== "repo" || entry.repo === undefined || entry.repo === dataDir;
+}
+
+/**
+ * The plugins a window's request may reach: its folder's. No gate for a
+ * caller with no window behind it, nor for a folder not synced yet — its
+ * page cannot name a plugin before /api/state, which syncs, has listed it.
+ */
+export function pluginGate(): PluginGate | undefined {
+  const workspace = currentWorkspace();
+  const enabled = workspace ? profiles.get(keyOf(workspace.folder as Record<string, unknown>)) : undefined;
+  return enabled ? (plugin) => enabled.includes(plugin) : undefined;
+}
+
+/**
+ * The plugins whose sync hooks run on a data dir: the ones its folder
+ * lists. With several folders open a plugin one of them enabled must not
+ * write its files into another — nor into a folder no window shows any
+ * more, whose profile is forgotten. No gate while no window is registered.
+ */
+export function pluginGateFor(dir: string): PluginGate | undefined {
+  if (workspaces().length === 0) return undefined;
+  const key = [...folderDirs].find(([, d]) => d === dir)?.[0];
+  const enabled = (key === undefined ? undefined : profiles.get(key)) ?? [];
+  return (plugin) => enabled.includes(plugin);
+}
 
 export interface SyncOptions {
   /**
@@ -194,12 +256,24 @@ export interface SyncOptions {
   /** The data repo, for its own plugins folder; null when none is configured. */
   dataDir?: string | null;
   /**
+   * With several windows open: the folders they show, as the settings name
+   * them — the profiles kept besides this one — and their data repos, whose
+   * plugins folders are read too. Absent, the folder synced is the only one.
+   */
+  open?: { keys: readonly string[]; dataDirs: readonly string[] };
+  /**
    * Store the settings after the loader changed them — a plugin found for
    * the first time goes into the profile, so its tab appears at once.
    */
   persist?: (state: Record<string, unknown>) => Promise<void>;
   /** Re-read the settings, for a rescan a folder change triggers. */
   readState?: () => Promise<Record<string, unknown>>;
+  /**
+   * Sync again, for that rescan, in place of `readState`: with several
+   * folders open each has its settings reading and its options, which only
+   * the caller can put together.
+   */
+  resync?: () => Promise<void>;
 }
 
 /**
@@ -220,16 +294,19 @@ export function syncPlugins(
     const section = profileSection(state);
     let { enabled } = readProfile(state, profileManifests);
     let changed = false;
+    const here = options.dataDir ?? null;
+    const dataDirs = [...new Set([...(options.open?.dataDirs ?? []), ...(here ? [here] : [])])];
 
     if (options.sources) {
       const found = await discoverPlugins({
-        dataDir: options.dataDir ?? null,
+        dataDir: here,
+        dataDirs,
         paths: options.paths === false ? [] : sourcePaths(section),
         appVersion,
       });
       const trusted = stringList(section.trusted);
       const seen = stringList(section.seen);
-      const adopted = await absorbDiscovered(found, trusted);
+      const adopted = await absorbDiscovered(found, trusted, dataDirs);
       // A plugin found for the first time goes on in the open data folder's
       // list, at the end of the tab order, unless its manifest says it
       // starts off; one switched off later stays off — `seen`, kept for the
@@ -237,6 +314,8 @@ export function syncPlugins(
       let adoptedNew = false;
       for (const entry of adopted) {
         if (!entry.manifest || entry.error || !entry.trusted) continue;
+        // Another open folder's own plugin is not this folder's to adopt.
+        if (!visibleIn(entry, here)) continue;
         if (enabled.includes(entry.id) || seen.includes(entry.id)) continue;
         seen.push(entry.id);
         if (entry.manifest.defaultEnabled) enabled = [...enabled, entry.id];
@@ -249,13 +328,13 @@ export function syncPlugins(
       }
       watchFolders(options);
     } else {
-      await absorbDiscovered([], []);
+      await absorbDiscovered([], [], dataDirs);
     }
     // The plugins that switch themselves on in a folder (manifest.autoEnable):
     // the coding agents, built in or installed, which have no tab to cost
     // the sidebar.
     const installed = [...external.values()]
-      .filter((e) => e.manifest && e.trusted && !e.error)
+      .filter((e) => e.manifest && e.trusted && !e.error && visibleIn(e, here))
       .map((e) => e.manifest!);
     const auto = autoEnablePlugins(state, enabled, [...profileManifests, ...installed]);
     if (auto) {
@@ -263,22 +342,35 @@ export function syncPlugins(
       changed = true;
     }
     if (changed) await options.persist?.(state);
-    profile = enabled;
+    // This folder's profile, beside those of the other folders still open.
+    const key = keyOf(state);
+    const keep = new Set([key, ...(options.open?.keys ?? [])]);
+    for (const other of [...profiles.keys()]) {
+      if (!keep.has(other)) {
+        profiles.delete(other);
+        folderDirs.delete(other);
+      }
+    }
+    profiles.set(key, enabled);
+    folderDirs.set(key, here);
+    lastKey = key;
+    // Mounted is what any open folder lists; a plugin goes when none does.
+    const all = wanted(enabled);
 
     for (const [id, { scope }] of [...mounted]) {
       const entry = external.get(id);
       const stillOn =
-        enabled.includes(id) && (!entry || (entry.trusted && !!entry.manifest && !entry.error));
+        all.includes(id) && (!entry || (entry.trusted && !!entry.manifest && !entry.error));
       if (!stillOn) {
         mounted.delete(id);
         await scope.dispose();
       }
     }
-    for (const id of enabled) {
+    for (const id of all) {
       const builtin = builtinHostPlugins.find((p) => p.manifest.id === id);
       if (builtin) {
         if (mounted.has(id)) continue;
-        const scope = host.plugin(builtin.plugin, hostConfigFor(builtin.manifest, ""));
+        const scope = mount(id, builtin.plugin, hostConfigFor(builtin.manifest, ""));
         mounted.set(id, { scope });
         await scope.ready;
         continue;
@@ -291,9 +383,19 @@ export function syncPlugins(
   return run;
 }
 
-/** The profile as last synced: the enabled plugin ids in tab order. */
+/**
+ * Mount a plugin as itself and for no window: what it registers carries its
+ * id (services.ts asPlugin), and what it starts — a timer, a watcher, a
+ * child process — does not go on reading the folder of the window whose
+ * request happened to mount it (src/server/workspace.ts).
+ */
+function mount<Cfg>(id: string, plugin: Plugin<Context, Cfg>, config: HostConfig): Scope {
+  return detached(() => asPlugin(id, () => host.plugin(plugin, config)));
+}
+
+/** The caller's folder's profile as last synced: the enabled plugin ids in tab order. */
 export function enabledPlugins(): string[] {
-  return [...profile];
+  return [...profileNow()];
 }
 
 /**
@@ -303,6 +405,8 @@ export function enabledPlugins(): string[] {
  */
 export function pluginStates(): PluginState[] {
   const rows: PluginState[] = [];
+  const profile = profileNow();
+  const dataDir = folderDirs.get(keyNow()) ?? null;
   for (const id of profile) {
     const manifest = builtinManifests.find((m) => m.id === id);
     const entry = external.get(id);
@@ -338,6 +442,8 @@ export function pluginStates(): PluginState[] {
     // A folder plugin with a built-in's id is refused at discovery and
     // logged; the built-in's row is the one that shows.
     if (builtinManifests.some((m) => m.id === entry.id)) continue;
+    // Another open folder's own plugin is not offered here.
+    if (!visibleIn(entry, dataDir)) continue;
     if (!profile.includes(entry.id)) rows.push(externalState(entry, false));
   }
   return rows;
@@ -355,8 +461,9 @@ function builtinState(manifest: PluginManifest, enabled: boolean): PluginState {
     installed: true,
     trusted: true,
     enabled,
-    active: scope?.status === "active",
-    ...(scope?.error ? { error: scope.error.message } : {}),
+    // Mounted for another open folder is not active in this one.
+    active: enabled && scope?.status === "active",
+    ...(enabled && scope?.error ? { error: scope.error.message } : {}),
   };
 }
 
@@ -375,7 +482,7 @@ function externalState(entry: External, enabled: boolean): PluginState {
     installed: true,
     trusted: entry.trusted,
     enabled,
-    active: scope?.status === "active",
+    active: enabled && scope?.status === "active",
     ...(build?.clientCode ? { client: clientUrl(entry.id, build.rev), rev: build.rev } : {}),
     ...(entry.manifest?.permissions ? { permissions: entry.manifest.permissions } : {}),
     ...(entry.install ? { install: entry.install } : {}),
@@ -435,7 +542,13 @@ function stringList(value: unknown): string[] {
  * added, with a repo plugin's trust and a duplicate of a built-in's id
  * refused.
  */
-async function absorbDiscovered(found: DiscoveredPlugin[], trusted: string[]): Promise<External[]> {
+async function absorbDiscovered(
+  found: DiscoveredPlugin[],
+  trusted: string[],
+  dataDirs: readonly string[] = [],
+): Promise<External[]> {
+  /** The open data repo whose plugins folder holds `dir`. */
+  const repoOf = (dir: string) => dataDirs.find((d) => dirname(dir) === repoPluginsDir(d));
   const keep = new Set(found.map((p) => p.id));
   for (const [id, entry] of [...external]) {
     if (keep.has(id)) continue;
@@ -455,6 +568,7 @@ async function absorbDiscovered(found: DiscoveredPlugin[], trusted: string[]): P
       entry.manifest = plugin.manifest;
       entry.install = plugin.install;
       entry.trusted = isTrusted;
+      entry.repo = plugin.source === "repo" ? repoOf(plugin.dir) : undefined;
       // A discovery error replaces an old one; an old build or mount error
       // stays until the next build clears it.
       if (error) entry.error = error;
@@ -472,6 +586,7 @@ async function absorbDiscovered(found: DiscoveredPlugin[], trusted: string[]): P
         error,
         discoveryError: error,
         shellOff: [],
+        ...(plugin.source === "repo" && repoOf(plugin.dir) ? { repo: repoOf(plugin.dir) } : {}),
       };
       external.set(plugin.id, entry);
     }
@@ -530,7 +645,7 @@ async function mountExternal(entry: External): Promise<void> {
     // A browser-only plugin still gets a scope, so it reports as active.
     plugin = { name: entry.id, apply() {} };
   }
-  const scope = host.plugin(plugin, hostConfigFor(entry.manifest!, entry.dir));
+  const scope = mount(entry.id, plugin, hostConfigFor(entry.manifest!, entry.dir));
   mounted.set(entry.id, { scope, rev: built.rev });
   await scope.ready;
   watchSource(entry);
@@ -641,11 +756,13 @@ function watchSource(entry: External): void {
   if (entry.watcher || !canBuild() || !entry.manifest?.src) return;
   if (entry.source === "repo") return;
   try {
-    entry.watcher = watch(entry.dir, { recursive: true }, (_event, file) => {
-      const name = typeof file === "string" ? file : "";
-      if (/(^|[\\/])(dist|node_modules|\.git)([\\/]|$)/.test(name)) return;
-      schedule(entry.id, () => rebuildPlugin(entry.id));
-    });
+    entry.watcher = detached(() =>
+      watch(entry.dir, { recursive: true }, (_event, file) => {
+        const name = typeof file === "string" ? file : "";
+        if (/(^|[\\/])(dist|node_modules|\.git)([\\/]|$)/.test(name)) return;
+        schedule(entry.id, () => rebuildPlugin(entry.id));
+      }),
+    );
     entry.watcher.unref?.();
   } catch (e) {
     console.error(`[plugins] cannot watch ${entry.dir}: ${(e as Error).message}`);
@@ -671,7 +788,7 @@ function schedule(key: string, fn: () => Promise<void>): void {
 export function rebuildPlugin(id: string): Promise<void> {
   const run = turn.then(async () => {
     const entry = external.get(id);
-    if (!entry || !entry.manifest || !entry.trusted || !profile.includes(id)) return;
+    if (!entry || !entry.manifest || !entry.trusted || !wanted().includes(id)) return;
     const before = mounted.get(id)?.rev;
     await mountExternal(entry);
     const after = mounted.get(id)?.rev;
@@ -686,7 +803,8 @@ const folderWatchers = new Map<string, FSWatcher>();
 /** A folder appearing or going under a plugins folder triggers a rescan. */
 function watchFolders(options: SyncOptions): void {
   if (!options.readState) return;
-  const dirs = [pluginsHome(), ...(options.dataDir ? [repoPluginsDir(options.dataDir)] : [])];
+  const dataDirs = new Set([...(options.open?.dataDirs ?? []), ...(options.dataDir ? [options.dataDir] : [])]);
+  const dirs = [pluginsHome(), ...[...dataDirs].map(repoPluginsDir)];
   for (const [dir, watcher] of [...folderWatchers]) {
     if (!dirs.includes(dir)) {
       watcher.close();
@@ -696,7 +814,8 @@ function watchFolders(options: SyncOptions): void {
   for (const dir of dirs) {
     if (folderWatchers.has(dir)) continue;
     try {
-      const watcher = watch(dir, () => schedule(`rescan:${dir}`, rescan));
+      // Nobody's watcher: it outlives the request that set it up.
+      const watcher = detached(() => watch(dir, () => schedule(`rescan:${dir}`, rescan)));
       watcher.unref?.();
       folderWatchers.set(dir, watcher);
     } catch {
@@ -717,7 +836,8 @@ export async function rescanPlugins(): Promise<void> {
 async function rescan(): Promise<void> {
   if (!lastOptions.readState) return;
   const before = new Map([...external].map(([id, e]) => [id, e.build?.rev]));
-  await syncPlugins(await lastOptions.readState(), lastOptions);
+  if (lastOptions.resync) await lastOptions.resync();
+  else await syncPlugins(await lastOptions.readState(), lastOptions);
   const after = new Map([...external].map(([id, e]) => [id, e.build?.rev]));
   const changed =
     before.size !== after.size || [...after].some(([id, rev]) => before.get(id) !== rev);
@@ -759,13 +879,19 @@ routes.add("GET", "/plugins/:id/client.js", (req, params) => {
   });
 });
 
-const streams = new Set<ReadableStreamDefaultController<Uint8Array>>();
+/**
+ * The open change streams, each with the window it was opened from
+ * (src/server/workspace.ts) — null for a page with no window behind it, as
+ * every page of the web version is.
+ */
+const streams = new Map<ReadableStreamDefaultController<Uint8Array>, Workspace | null>();
 const encoder = new TextEncoder();
 
-/** Send one server-sent event to every open change stream. */
-function broadcast(event: string): void {
+/** Send one server-sent event to every open change stream, or to those `only` picks. */
+function broadcast(event: string, only?: (workspace: Workspace | null) => boolean): void {
   const chunk = encoder.encode(event);
-  for (const controller of [...streams]) {
+  for (const [controller, workspace] of [...streams]) {
+    if (only && !only(workspace)) continue;
     try {
       controller.enqueue(chunk);
     } catch {
@@ -788,8 +914,10 @@ export function notifyPluginChange(): void {
  * connections per host — as a named event, which a page listening for the
  * unnamed plugin messages never sees.
  */
-export function notifyDocumentsChange(file: string): void {
-  broadcast(`event: ${DOCUMENTS_EVENT}\ndata: ${JSON.stringify({ file })}\n\n`);
+export function notifyDocumentsChange(file: string, shows?: (workspace: Workspace | null) => boolean): void {
+  // With several windows open the edit is one folder's: `shows` picks the
+  // windows showing it (specs/app/multiple-windows.feature.md).
+  broadcast(`event: ${DOCUMENTS_EVENT}\ndata: ${JSON.stringify({ file })}\n\n`, shows);
 }
 
 /** How many browsers are listening for plugin changes. */
@@ -823,7 +951,8 @@ routes.add("GET", "/api/plugins/events", () => {
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
       self = controller;
-      streams.add(controller);
+      // Taken now, while the request that opened the stream is running.
+      streams.set(controller, currentWorkspace());
       controller.enqueue(encoder.encode(": connected\n\n"));
       heartbeat = setInterval(() => {
         try {

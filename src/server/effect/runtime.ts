@@ -12,11 +12,12 @@
 // they import this file (tests/importCycles.test.ts).
 
 import { context as otelContext, ROOT_CONTEXT } from "@opentelemetry/api";
-import { Effect, Fiber, Layer, ManagedRuntime } from "effect";
+import { Context, Effect, Fiber, Layer, ManagedRuntime } from "effect";
 import { PersistenceLive } from "../persistence/layer";
 import { RepoLocks } from "../sync/RepoLocks";
 import { settle, type Throwable } from "./bridge";
 import { SpanContext } from "./Tracing";
+import { currentWorkspace, runInWorkspace, type Workspace } from "../workspace";
 
 /** Every service of the app runtime, as the app runs them. */
 export const AppLive = Layer.mergeAll(PersistenceLive, RepoLocks.layer);
@@ -33,9 +34,21 @@ function live(): ManagedRuntime.ManagedRuntime<App, never> {
   return (runtime ??= ManagedRuntime.make(AppLive));
 }
 
-/** Seed the program with the caller's active span. */
+/**
+ * The window a program was started for (src/server/workspace.ts), or null
+ * for none. It travels with the fiber for the same reason the span does: a
+ * fiber does not run inside one async call chain.
+ */
+const WorkspaceContext = Context.Reference<Workspace | null>("specdriven/effect/WorkspaceContext", {
+  defaultValue: () => null,
+});
+
+/** Seed the program with the caller's active span and the window it works for. */
 const inCallerSpan = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-  Effect.provideService(effect, SpanContext, otelContext.active());
+  effect.pipe(
+    Effect.provideService(SpanContext, otelContext.active()),
+    Effect.provideService(WorkspaceContext, currentWorkspace()),
+  );
 
 /**
  * End the runtime (src/server/shutdown.ts): every program still running on
@@ -67,10 +80,13 @@ export function runSync<A>(effect: Effect.Effect<A, Throwable, App>): A {
 /**
  * Start a program that runs on its own — a loop — and hand back its fiber.
  * It outlives whatever started it, so its spans are roots of their own, not
- * children of the request that happened to start it.
+ * children of the request that happened to start it, and it works for no
+ * window: a loop a window's request started is not that window's.
  */
 export function fork<A>(effect: Effect.Effect<A, never, App>): Fiber.Fiber<A, never> {
-  return live().runFork(Effect.provideService(effect, SpanContext, ROOT_CONTEXT));
+  return live().runFork(
+    effect.pipe(Effect.provideService(SpanContext, ROOT_CONTEXT), Effect.provideService(WorkspaceContext, null)),
+  );
 }
 
 /** Interrupt a fiber `fork` started, without waiting for it to end. */
@@ -82,8 +98,14 @@ export function interrupt(fiber: Fiber.Fiber<unknown, unknown>): void {
  * A Promise function as an Effect, called with the program's span active.
  * A fiber that waited — for a lock, say — may be resumed from another
  * fiber's async context, so the span is put back explicitly: telemetry.ts
- * withSpan and the loggers inside `thunk` then see the caller's span. A
- * rejection is a defect, which the bridge rethrows as it was thrown.
+ * withSpan and the loggers inside `thunk` then see the caller's span — and
+ * the window the program works for with it, so `thunk` reads that window's
+ * folder and no other's. A rejection is a defect, which the bridge rethrows
+ * as it was thrown.
  */
 export const promised = <A>(thunk: () => Promise<A>): Effect.Effect<A> =>
-  Effect.flatMap(Effect.service(SpanContext), (span) => Effect.promise(() => otelContext.with(span, thunk)));
+  Effect.flatMap(Effect.service(SpanContext), (span) =>
+    Effect.flatMap(Effect.service(WorkspaceContext), (workspace) =>
+      Effect.promise(() => runInWorkspace(workspace, () => otelContext.with(span, thunk))),
+    ),
+  );

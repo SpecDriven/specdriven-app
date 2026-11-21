@@ -1,16 +1,66 @@
 // The application menu (specs/app/desktop-app.feature.md "Window",
 // specs/app/app-updates.feature.md "Check for Updates…"): Electron's
 // standard roles, plus Check for Updates… where each platform keeps it — the
-// app menu on macOS, Help elsewhere — and, in a development run, the Debug
-// menu (src/electron/debugger.ts). A template, so it tests without Electron.
+// app menu on macOS, Help elsewhere — the File menu's New Window, Open
+// Folder… and Open Recent (specs/app/multiple-windows.feature.md) and, in a
+// development run, the Debug menu (src/electron/debugger.ts). A template, so
+// it tests without Electron.
 
 import type { MenuItemConstructorOptions } from "electron";
 
 export const CHECK_FOR_UPDATES = "Check for Updates…";
 
+/** One row of File → Open Recent. */
+export interface RecentItem {
+  /** The folder as the recent list names it. */
+  label: string;
+  onOpen: () => void;
+}
+
+/**
+ * The File menu's window items (specs/app/multiple-windows.feature.md
+ * "Opening a window"): each opens a window, never changes the one in front.
+ */
+export interface FileMenuInput {
+  onNewWindow: () => void;
+  onOpenFolder: () => void;
+  /** The recent folders, most recent first. */
+  recent: RecentItem[];
+}
+
+export const NEW_WINDOW = "New Window";
+export const OPEN_FOLDER = "Open Folder…";
+export const OPEN_RECENT = "Open Recent";
+
+function fileMenu(input: FileMenuInput, mac: boolean): MenuItemConstructorOptions {
+  return {
+    label: "File",
+    submenu: [
+      { id: "new-window", label: NEW_WINDOW, accelerator: "CmdOrCtrl+Shift+N", click: input.onNewWindow },
+      { id: "open-folder", label: OPEN_FOLDER, accelerator: "CmdOrCtrl+O", click: input.onOpenFolder },
+      {
+        id: "open-recent",
+        label: OPEN_RECENT,
+        submenu:
+          input.recent.length > 0
+            ? input.recent.map((r) => ({ label: r.label, click: r.onOpen }))
+            : [{ label: "No Recent Folders", enabled: false }],
+      },
+      { type: "separator" },
+      // What the standard File menu holds: Close Window on macOS, Quit elsewhere.
+      mac ? { role: "close" } : { role: "quit" },
+    ],
+  };
+}
+
 export interface AppMenuInput {
   platform: NodeJS.Platform;
   onCheckForUpdates: () => void;
+  /**
+   * The File menu's window items; absent, the standard File menu — a
+   * development run, whose pages the dev server answers for one folder.
+   */
+  file?: FileMenuInput;
   /** The Debug submenu, in a development run; nothing in a packaged app. */
   debug?: MenuItemConstructorOptions[];
 }
@@ -39,7 +89,7 @@ export function appMenuTemplate(input: AppMenuInput): MenuItemConstructorOptions
           },
         ]
       : []),
-    { role: "fileMenu" },
+    input.file ? fileMenu(input.file, mac) : { role: "fileMenu" },
     { role: "editMenu" },
     { role: "viewMenu" },
     { role: "windowMenu" },

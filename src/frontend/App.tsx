@@ -44,6 +44,7 @@ import {
 import { Logo } from "./Logo";
 import { SidebarSection } from "./SidebarSection";
 import {
+  AppWindow,
   Activity,
   Check,
   ChevronDown,
@@ -1385,6 +1386,11 @@ export function App() {
   // Whether the runtime offers a native folder chooser
   // (specs/ui/app-start.feature.md).
   const [canChooseFolder, setCanChooseFolder] = useState(false);
+  // Several windows (specs/app/multiple-windows.feature.md): whether a folder
+  // can be opened in a window of its own — the desktop app — and the folder
+  // this window was opened for, which it opens once it has booted.
+  const [canOpenWindows, setCanOpenWindows] = useState(false);
+  const [pendingFolder, setPendingFolder] = useState<{ path: string; kind?: FolderKind } | null>(null);
   // Demo mode: the data directory is a fixed ephemeral copy — everything that
   // changes or syncs it (✎, recents ▾, Sync, git/GitHub settings) hides.
   const [demo, setDemo] = useState(false);
@@ -2219,6 +2225,11 @@ export function App() {
         }
         setSyncServerUrl(typeof state.syncServerUrl === "string" ? state.syncServerUrl : null);
         setCanChooseFolder(Boolean(state.canChooseFolder));
+        setCanOpenWindows(Boolean(state.canOpenWindows));
+        if (typeof state.pendingFolder?.path === "string") {
+          const kind = state.pendingFolder.kind;
+          setPendingFolder({ path: state.pendingFolder.path, ...(kind === "spec" || kind === "code" ? { kind } : {}) });
+        }
         setDemo(Boolean(state.demo));
         setReadOnly(Boolean(state.readOnly));
         setHosted(Boolean(state.hosted));
@@ -2762,6 +2773,38 @@ export function App() {
     }
   };
 
+  // A window opened for a folder (specs/app/multiple-windows.feature.md
+  // "Opening a window" — File → Open Folder…, Open Recent, "Open in new
+  // window", a link to a folder no window shows) starts with none and opens
+  // that one here, the way the first-run screen opens the folder typed into
+  // it: asked about when it is missing or its kind is not clear, and with
+  // the entry link honored.
+  useEffect(() => {
+    if (!pendingFolder || !needsRepo || settingRepo) return;
+    const { path, kind } = pendingFolder;
+    setPendingFolder(null);
+    void (kind === "code" ? openCodeRepo(path) : kind === "spec" ? saveRepo(path) : openStartFolder(path));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingFolder, needsRepo, settingRepo]);
+
+  /**
+   * Open a folder in a window of its own, or — with none named — a new
+   * window that asks for one. The window that already shows the folder
+   * comes forward instead (the shell's answer either way).
+   */
+  const openInNewWindow = async (folder?: FolderEntry) => {
+    try {
+      const res = await fetch("/api/windows", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(folder ? { path: folder.path, kind: folder.kind } : {}),
+      });
+      if (!res.ok) toast.error((await res.json().catch(() => null))?.error ?? "Could not open a window");
+    } catch {
+      toast.error("Could not open a window — the app did not answer");
+    }
+  };
+
   // Open another data folder — Manage folders → "Open another folder…"
   // (specs/ui/app-start.feature.md "changing the data repo"): pre-filled prompt; on success the view resets
   // to home, since the current selection belonged to the old repo.
@@ -2886,7 +2929,9 @@ export function App() {
           await openFromLocationRef.current(entryPath, false, pullProblemOf(state));
         }
       } else {
-        toast.error(state.error ?? "Could not use this directory");
+        // A folder another window shows came forward there
+        // (specs/app/multiple-windows.feature.md); nothing failed here.
+        if (state.openElsewhere !== true) toast.error(state.error ?? "Could not use this directory");
         // The README was emptied for the switch; the folder stays, so it
         // comes back.
         await loadReadme();
@@ -2930,7 +2975,8 @@ export function App() {
         const error = state.error ?? "Could not open this folder";
         if (first) setRepoError(error);
         else {
-          toast.error(error);
+          // Open in another window, which came forward: nothing failed here.
+          if (state.openElsewhere !== true) toast.error(error);
           // The README was emptied to leave; the folder stays, so it comes back.
           await loadReadme();
         }
@@ -10971,6 +11017,19 @@ export function App() {
                       icon: <FolderInput size={13} />,
                       onSelect: () => setFoldersOpen(true),
                     },
+                    // Another window, which asks for its folder
+                    // (specs/app/multiple-windows.feature.md "Opening a
+                    // window") — the desktop app's alone.
+                    ...(canOpenWindows
+                      ? [
+                          {
+                            id: "new-window",
+                            label: "New window",
+                            icon: <AppWindow size={13} />,
+                            onSelect: () => void openInNewWindow(),
+                          } satisfies MenuItem,
+                        ]
+                      : []),
                   ]}
                 />
               </div>
@@ -13980,6 +14039,16 @@ export function App() {
             void (folder.kind === "code" ? openCodeRepo(folder.path) : switchRepo(folder.path));
           }}
           onRemove={(folder) => void (folder.kind === "code" ? forgetCodeRepo(folder.path) : forgetRepo(folder.path))}
+          // A window of its own for a folder, in the desktop app
+          // (specs/app/multiple-windows.feature.md "Opening a window").
+          {...(canOpenWindows
+            ? {
+                onOpenInNewWindow: (folder: FolderEntry) => {
+                  setFoldersOpen(false);
+                  void openInNewWindow(folder);
+                },
+              }
+            : {})}
           onAdd={() => {
             setFoldersOpen(false);
             void changeRepo();

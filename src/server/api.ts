@@ -96,6 +96,25 @@ import { GITHUB_HOST } from "./github";
 import { getCurrentUser } from "./user";
 import { getAppRoot } from "./paths";
 import {
+  canOpenWindows,
+  closeOtherWindows,
+  focusWindow,
+  openProjects,
+  openWindow,
+  projectDir,
+  syncedDir,
+  windowShowing,
+} from "./windows";
+import {
+  currentWorkspace,
+  detached,
+  onWorkspaceChange,
+  runInWorkspace,
+  workspaces,
+  type PendingFolder,
+  type Workspace,
+} from "./workspace";
+import {
   listFeatures,
   listFolders,
   listFolderDescriptions,
@@ -307,6 +326,7 @@ import { bodyOf, json, type Handler, type Params } from "./http";
 import {
   notifyDocumentsChange,
   notifyPluginChange,
+  pluginGate,
   pluginStates,
   provideDataAccess,
   rescanPlugins,
@@ -333,6 +353,7 @@ import {
   PROFILE_KEY,
   legacyFields,
   migrateProfile,
+  profileRepo,
   readProfile,
   sameProfile,
   startFolderLists,
@@ -354,15 +375,40 @@ async function syncTick(run: () => Promise<string>): Promise<void> {
   }
 }
 
+/**
+ * Run `work` for every open folder (specs/app/multiple-windows.feature.md
+ * "Background work"): once inside each window's workspace, where a settings
+ * read names that window's folder — or once as it is while no window is
+ * registered (the web version, the desktop app with every window closed),
+ * where the settings file names the folder.
+ */
+async function inEveryWorkspace(work: () => Promise<void>): Promise<void> {
+  const open = workspaces();
+  if (open.length === 0) return work();
+  await Promise.all(open.map((workspace) => runInWorkspace(workspace, work)));
+}
+
 // Cron data reload (crud-feature.md): git pull every n seconds,
 // where n comes from the Settings dialog and is stored in the settings file.
-export const reloader = createReloadScheduler(() => syncTick(() => reloadData(getAppRoot())));
+// Every open folder has its tick; folders take no turns with one another.
+export const reloader = createReloadScheduler(() =>
+  inEveryWorkspace(() => syncTick(() => reloadData(getAppRoot()))),
+);
 
 // App start (specs/ui/app-start.feature.md "the data repo is pulled on start"):
 // one sync tick before the app is read, so it opens on the latest data instead
 // of on whatever the last run left behind. Startup itself does not wait on the
 // network — reads of the data repo wait on this handle instead.
 let startupSync: Promise<void> = Promise.resolve();
+/**
+ * The same for a window (specs/app/multiple-windows.feature.md): its
+ * folder's pull when the window opened, by workspace id.
+ */
+const windowSyncs = new Map<string, Promise<void>>();
+/** The last sync of each folder a window left, while it runs. */
+const leavingSyncs = new Set<Promise<void>>();
+/** applyStartupState ran: a window opened from here on starts its own folder's work. */
+let started = false;
 
 /** How long a data read waits for the app-start pull before serving anyway. */
 export const STARTUP_SYNC_WAIT_MS = 15_000;
@@ -377,36 +423,65 @@ function after(ms: number): Promise<void> {
  * Wait for the app-start sync, so the first screen shows pulled data. A pull
  * that hangs — an unreachable remote, a remote asking for credentials — must
  * not wedge the app, so the wait is bounded: past it the read is served from
- * what is on disk, and the pull finishes into the next reload tick.
+ * what is on disk, and the pull finishes into the next reload tick. A
+ * window's read waits for its own folder's pull, not for another window's.
  */
 export function syncedOnStart(): Promise<void> {
-  return Promise.race([startupSync, after(STARTUP_SYNC_WAIT_MS)]);
+  const workspace = currentWorkspace();
+  const pending = workspace
+    ? (windowSyncs.get(workspace.id) ?? startupSync)
+    : Promise.all([startupSync, ...windowSyncs.values(), ...leavingSyncs]).then(() => undefined);
+  return Promise.race([pending, after(STARTUP_SYNC_WAIT_MS)]);
+}
+
+/**
+ * Pull the folder a window opened with; its reads wait for this
+ * (syncedOnStart). A window opened after the app's start has its folder's
+ * plugins mounted first (`plugins`), so the pull runs their part of the tick.
+ */
+function startWindowSync(workspace: Workspace, opts: { plugins?: boolean } = {}): Promise<void> {
+  const sync = runInWorkspace(workspace, async () => {
+    if (opts.plugins) {
+      try {
+        await syncHostPlugins(await readState(getAppRoot()));
+      } catch (e) {
+        reloadLog.error((e as Error).message, errorAttributes(e));
+      }
+    }
+    await syncTick(() => reloadData(getAppRoot()));
+  });
+  windowSyncs.set(workspace.id, sync);
+  return sync;
 }
 
 // Optional websocket document sync
-// (specs/datastore/automerge-store.feature.md): a bridge between the data
+// (specs/datastore/automerge-store.feature.md): a bridge between a data
 // repo's chunk store and the sync server named in Settings, running only while
-// one is named. Off by default — git is the transport.
-let netSync: NetSync | null = null;
-/** What the running bridge was started with, to skip no-op re-applies. */
-let netSyncKey: string | null = null;
+// one is named. Off by default — git is the transport. One bridge per open
+// specifications folder (specs/app/multiple-windows.feature.md), by folder.
+interface Bridge {
+  /** What the bridge was started with (the Settings address and the folder), to skip no-op re-applies. */
+  key: string;
+  sync: NetSync | null;
+  /**
+   * The next look at a repository's own sync server
+   * (src/server/automerge/repoSyncServer.ts): a pass renewed before it runs
+   * out, or a start tried again after the server could not be reached.
+   */
+  timer: ReturnType<typeof setTimeout> | null;
+}
+const bridges = new Map<string, Bridge>();
 /** Start/stop must not interleave; applies queue behind one another. */
 let netSyncTurn: Promise<void> = Promise.resolve();
-/**
- * The next look at a repository's own sync server
- * (src/server/automerge/repoSyncServer.ts): a pass renewed before it runs
- * out, or a start tried again after the server could not be reached.
- */
-let netSyncTimer: ReturnType<typeof setTimeout> | null = null;
 
-function clearNetSyncTimer(): void {
-  if (netSyncTimer !== null) clearTimeout(netSyncTimer);
-  netSyncTimer = null;
+function clearBridgeTimer(bridge: Bridge): void {
+  if (bridge.timer !== null) clearTimeout(bridge.timer);
+  bridge.timer = null;
 }
 
-async function stopNetSync(): Promise<void> {
-  const old = netSync;
-  netSync = null;
+async function stopBridgeSync(bridge: Bridge): Promise<void> {
+  const old = bridge.sync;
+  bridge.sync = null;
   if (!old) return;
   try {
     await old.stop();
@@ -416,22 +491,34 @@ async function stopNetSync(): Promise<void> {
   }
 }
 
+/** Stop a folder's bridge and forget it. Runs inside netSyncTurn. */
+async function dropBridge(dir: string): Promise<void> {
+  const bridge = bridges.get(dir);
+  if (!bridge) return;
+  bridges.delete(dir);
+  clearBridgeTimer(bridge);
+  await stopBridgeSync(bridge);
+}
+
 /**
- * Start the bridge for `key` (the Settings address and the folder), or
- * replace the running one with a bridge on a fresh pass. Runs inside
- * netSyncTurn.
+ * Start `bridge` — the one for `dir` — or replace its running connection
+ * with one on a fresh pass. Runs inside netSyncTurn.
  */
-async function startNetSyncFor(url: string, dir: string, key: string, passEndsAt: number | null): Promise<void> {
+async function startNetSyncFor(url: string, dir: string, bridge: Bridge, passEndsAt: number | null): Promise<void> {
   const again = (ms: number, endsAt: number | null) => {
-    clearNetSyncTimer();
-    netSyncTimer = setTimeout(() => {
-      netSyncTimer = null;
-      netSyncTurn = netSyncTurn.then(async () => {
-        // Settings or the folder changed meanwhile: that apply has it now.
-        if (netSyncKey === key) await startNetSyncFor(url, dir, key, endsAt);
-      });
-    }, ms);
-    netSyncTimer.unref?.();
+    clearBridgeTimer(bridge);
+    // Nobody's timer: it belongs to the folder, not to the window whose
+    // request happened to start the bridge.
+    bridge.timer = detached(() =>
+      setTimeout(() => {
+        bridge.timer = null;
+        netSyncTurn = netSyncTurn.then(async () => {
+          // Settings or the folder changed meanwhile: that apply has it now.
+          if (bridges.get(dir) === bridge) await startNetSyncFor(url, dir, bridge, endsAt);
+        });
+      }, ms),
+    );
+    bridge.timer.unref?.();
   };
   let address: SyncAddress;
   try {
@@ -442,28 +529,43 @@ async function startNetSyncFor(url: string, dir: string, key: string, passEndsAt
     // after that the server turns it away, so it is stopped rather than left
     // knocking every few seconds.
     const retryIn = retryDelayMs(e);
-    if (retryIn === null || passEndsAt === null || Date.now() >= passEndsAt) await stopNetSync();
+    if (retryIn === null || passEndsAt === null || Date.now() >= passEndsAt) await stopBridgeSync(bridge);
     // Asked again by itself only when that can help: a server that did not
     // answer, not one that said no. After a no, the next apply asks again.
-    if (retryIn === null) netSyncKey = null;
-    else again(retryIn, passEndsAt);
+    if (retryIn === null) {
+      if (bridges.get(dir) === bridge) bridges.delete(dir);
+    } else again(retryIn, passEndsAt);
     return;
   }
-  await stopNetSync();
+  await stopBridgeSync(bridge);
   try {
-    // A peer's edit that landed is shown by the open pages at once
+    // A peer's edit that landed is shown by the folder's open pages at once
     // (specs/datastore/automerge-store.feature.md).
-    netSync = await startNetSyncClient(dir, address.url, { onAbsorbed: notifyDocumentsChange });
+    bridge.sync = await startNetSyncClient(dir, address.url, {
+      onAbsorbed: (file) => notifyDocumentsChange(file, (workspace) => !workspace || syncedDir(workspace.folder) === dir),
+    });
     netsyncLog.info(`syncing with ${withoutPass(address.url)}`);
   } catch (e) {
     netsyncLog.error((e as Error).message, errorAttributes(e));
     // Nothing runs: the next apply starts over.
-    netSyncKey = null;
+    if (bridges.get(dir) === bridge) bridges.delete(dir);
     return;
   }
   if (address.expiresAt !== null) again(renewDelayMs(address.expiresAt, Date.now()), address.expiresAt);
 }
 
+/** The specifications folders the open windows sync; null while no window is registered. */
+function openSyncedDirs(): Set<string> | null {
+  const open = workspaces();
+  return open.length === 0 ? null : new Set(open.flatMap((w) => syncedDir(w.folder) ?? []));
+}
+
+/**
+ * Bring the bridge of `state`'s folder in line with Settings — started,
+ * restarted on a changed address, or stopped — and stop the bridge of every
+ * folder no window shows any more. `state` is one window's reading of the
+ * settings; with no window registered its folder is the only one.
+ */
 export function applyNetSync(state: SpecDrivenState): Promise<void> {
   netSyncTurn = netSyncTurn.then(async () => {
     const url = normalizeSyncServerUrl(state.syncServerUrl);
@@ -475,33 +577,86 @@ export function applyNetSync(state: SpecDrivenState): Promise<void> {
         // No reachable data repo means no bridge — the next apply retries.
       }
     }
-    const key = url && dir ? `${url}\n${dir}` : null;
-    if (key === netSyncKey) return;
-    clearNetSyncTimer();
-    netSyncKey = null;
-    await stopNetSync();
-    if (!url || !dir || !key) return;
-    netSyncKey = key;
-    await startNetSyncFor(url, dir, key, null);
+    // What stays: this folder's bridge, and the other open folders'.
+    const keep = openSyncedDirs() ?? new Set<string>();
+    if (dir) keep.add(dir);
+    for (const other of [...bridges.keys()]) {
+      if (!url || !keep.has(other)) await dropBridge(other);
+    }
+    if (!url || !dir) return;
+    const key = `${url}\n${dir}`;
+    if (bridges.get(dir)?.key === key) return;
+    await dropBridge(dir);
+    const bridge: Bridge = { key, sync: null, timer: null };
+    bridges.set(dir, bridge);
+    await startNetSyncFor(url, dir, bridge, null);
   });
   return netSyncTurn;
+}
+
+/** The same for every open folder: a changed address in Settings is every window's. */
+export function applyNetSyncEverywhere(): Promise<void> {
+  return inEveryWorkspace(async () => applyNetSync(await readState(getAppRoot())));
+}
+
+/** How many folders have a live-sync bridge — for the tests. */
+export function netSyncFolders(): string[] {
+  return [...bridges.keys()];
+}
+
+// A window opened, closed or changed folder (src/server/workspace.ts). The
+// app's own start (applyStartupState) begins the work of the windows open by
+// then; one opened later begins its own here. A folder no window shows any
+// more is synced once more — what was saved in it is committed and pushed
+// rather than left for the day it is opened again — and loses its bridge;
+// closing a window while another stays ends the sessions of its folder
+// (specs/app/multiple-windows.feature.md "Closing and restarting"). The
+// listener outlives a `bun --hot` reload of this module, so a reload
+// replaces the earlier one.
+{
+  const WATCH = Symbol.for("specdriven.api.workspaceWatch");
+  const g = globalThis as Record<symbol, unknown>;
+  (g[WATCH] as (() => void) | undefined)?.();
+  g[WATCH] = onWorkspaceChange((change, workspace, before) => {
+    if (change === "closed") windowSyncs.delete(workspace.id);
+    if (!started) return;
+    if (change === "opened") {
+      void startWindowSync(workspace, { plugins: true });
+      void runInWorkspace(workspace, async () => applyNetSync(await readState(getAppRoot()))).catch(() => {});
+      return;
+    }
+    const left = syncedDir(before);
+    const stillOpen = openSyncedDirs();
+    if (left && stillOpen && !stillOpen.has(left)) {
+      const last = detached(() => syncTick(() => syncDataDir(left))).finally(() => leavingSyncs.delete(last));
+      leavingSyncs.add(last);
+      netSyncTurn = netSyncTurn.then(() => dropBridge(left));
+    }
+    if (change === "closed" && workspaces().length > 0 && !isHostedMode()) {
+      void closeOtherProjects(openProjects()).catch(() => {});
+      // A plugin only the closed window's folder used is unmounted.
+      void syncEveryFolderPlugins().catch(() => {});
+    }
+  });
 }
 
 /**
  * Shutdown (src/server/shutdown.ts): what repeats or watches by itself
  * stops — the reload timer, the plugin folders' watchers, the document sync
- * bridge. A sync tick that is running is not cut short here; the folder
+ * bridges. A sync tick that is running is not cut short here; the folder
  * locks wait for it (src/server/sync/RepoLocks.ts `close`).
  */
 export async function stopBackgroundWork(): Promise<void> {
   reloader.stop();
   stopWatching();
   netSyncTurn = netSyncTurn.then(async () => {
-    clearNetSyncTimer();
-    const old = netSync;
-    netSync = null;
-    netSyncKey = null;
-    await old?.stop();
+    for (const dir of [...bridges.keys()]) {
+      const bridge = bridges.get(dir)!;
+      bridges.delete(dir);
+      clearBridgeTimer(bridge);
+      await bridge.sync?.stop();
+      bridge.sync = null;
+    }
   });
   await netSyncTurn;
 }
@@ -533,8 +688,10 @@ export async function applyStartupState(): Promise<void> {
   if (migrateProfile(state as Record<string, unknown>, profileManifests)) {
     await writeState(state, getAppRoot());
   }
-  // The plugins the profile asks for, and the folders' (src/plugins/host/loader.ts).
-  await syncHostPlugins(state);
+  // The plugins the profile asks for, and the folders' (src/plugins/host/loader.ts)
+  // — of every folder a window shows.
+  if (workspaces().length === 0) await syncHostPlugins(state);
+  else await syncEveryFolderPlugins();
   // External links go into the markdown projections only while the setting
   // says so (specs/external-links/project-management-jira-linear-etc.
   // feature.md) — decided before the first sync tick writes a projection.
@@ -544,10 +701,18 @@ export async function applyStartupState(): Promise<void> {
   // specs/ui/app-start.feature.md: pull the data repo on start. Not awaited
   // here — reads wait for it through syncedOnStart(); everything else starts
   // now.
-  startupSync = syncTick(() => reloadData(getAppRoot()));
+  // Every window open by now has its folder pulled; with no window
+  // registered the folder is the one the settings file names.
+  const open = workspaces();
+  windowSyncs.clear();
+  startupSync =
+    open.length === 0
+      ? syncTick(() => reloadData(getAppRoot()))
+      : Promise.all(open.map((workspace) => startWindowSync(workspace))).then(() => undefined);
+  started = true;
   // Not awaited: resolving the data repo may clone it, and startup must not
   // wait on the network for an optional accelerator.
-  void applyNetSync(state);
+  void (open.length === 0 ? applyNetSync(state) : applyNetSyncEverywhere());
   // The agent plugins for the commands this machine has (specs/agents/
   // agent-plugins.feature.md "Agent plugins are installed for the commands
   // found on this machine"): not awaited either — the marketplace may be
@@ -782,6 +947,9 @@ function checkedAgentModels(lists: AgentModels): AgentModels {
  */
 async function syncHostPlugins(state: SpecDrivenState): Promise<void> {
   const raw = state as Record<string, unknown>;
+  // With several windows (specs/app/multiple-windows.feature.md): `state`
+  // is one window's reading, and the other open folders keep their plugins.
+  const open = workspaces();
   // A hosted worker shares its container with other users' workers, so it
   // runs the built-in plugins alone: a plugin folder is code (hostedMode.ts).
   // So does the read-only site, which runs no code but the app's: its data
@@ -790,6 +958,15 @@ async function syncHostPlugins(state: SpecDrivenState): Promise<void> {
     sources: !isHostedMode() && !isReadOnlyMode(),
     paths: !isDemoMode() && !isReadOnlyMode(),
     dataDir: isDemoMode() || isReadOnlyMode() ? null : await currentDataDir(),
+    ...(open.length > 0
+      ? {
+          open: {
+            keys: open.map((w) => profileRepo(w.folder as Record<string, unknown>) ?? ""),
+            dataDirs: open.flatMap((w) => syncedDir(w.folder) ?? []),
+          },
+          resync: syncEveryFolderPlugins,
+        }
+      : {}),
     // Only the profile section goes to disk, onto the file as it is now: a
     // sync runs beside other writers (a demo reseed, a Settings change),
     // and the state it was handed may be behind them.
@@ -799,6 +976,11 @@ async function syncHostPlugins(state: SpecDrivenState): Promise<void> {
     },
     readState: async () => (await readState(getAppRoot())) as Record<string, unknown>,
   });
+}
+
+/** The plugins of every open folder, each synced from its own window's reading of the settings. */
+function syncEveryFolderPlugins(): Promise<void> {
+  return inEveryWorkspace(async () => syncHostPlugins(await readState(getAppRoot())));
 }
 
 /** The profile's `plugins` section as stored, whatever keys it has. */
@@ -878,7 +1060,8 @@ async function stateFields(state: SpecDrivenState) {
     // The coding agents the plugins supply (specs/agents/agent-plugins
     // .feature.md), by rank, each saying whether its CLI is on PATH — what
     // the pane and the session dialog offer. A hosted worker runs none.
-    agents: isHostedMode() ? [] : agents.describe(),
+    // An agent a plugin provides is offered where that plugin is on.
+    agents: isHostedMode() ? [] : agents.describe().filter((a) => a.plugin === "core" || (pluginGate()?.(a.plugin) ?? true)),
     // Marketplace plugins that would supply an agent, not installed, from
     // the cached indexes (src/plugins/host/autoInstall.ts); the pane
     // offers them. None for a hosted worker or the demo.
@@ -934,6 +1117,9 @@ async function stateFields(state: SpecDrivenState) {
     // Whether the runtime can open a native folder chooser
     // (specs/ui/app-start.feature.md) — gates the Browse… buttons.
     canChooseFolder: !isHostedMode() && canChooseFolder(),
+    // Several windows (specs/app/multiple-windows.feature.md): whether a
+    // folder can be opened in a window of its own — the desktop app.
+    canOpenWindows: canOpenWindows() && !isHostedMode(),
     // Demo mode: the client hides everything that changes or syncs the data
     // directory — the dataset is ephemeral and resets on every page load.
     demo: isDemoMode(),
@@ -982,8 +1168,15 @@ const getState: Handler = async (req) => {
   // A demo reseed above rewrote the switches; the plugins follow them, and a
   // plugin folder that appeared meanwhile is picked up.
   await syncHostPlugins(state);
+  // The folder this window was opened for and has yet to open
+  // (src/server/workspace.ts PendingFolder), told to its page once, as it
+  // boots: the page opens it as a folder picked by hand is opened.
+  const pending = currentWorkspace()?.pending;
+  const tell = pending && !pending.told && new URL(req.url).searchParams.has("boot");
+  if (tell) pending.told = true;
   return json({
     ...(await stateFields(state)),
+    ...(tell ? { pendingFolder: { path: pending.path, ...(pending.kind ? { kind: pending.kind } : {}) } } : {}),
     ...readOnlyFields(),
     // specs/user-info-settings.feature.md: the OS user by default, with
     // the git identity that authors data-repo commits.
@@ -1081,6 +1274,40 @@ function hostedStateRefusal(body: {
   if (body.syncServerUrl !== undefined) return "The sync server cannot be changed in the hosted app";
   return null;
 }
+
+/** What removing a folder from the list answers while a window shows it. */
+const OPEN_IN_A_WINDOW = "the folder is open in another window — close that window first";
+
+/**
+ * A folder is open in at most one window (specs/app/multiple-windows.feature.md):
+ * picking one that another window shows brings that window forward and
+ * leaves the asking window as it is. Null when no other window shows it.
+ */
+function openElsewhere(folder: PendingFolder): Response | null {
+  const other = windowShowing(folder, currentWorkspace());
+  if (!other) return null;
+  focusWindow(other);
+  return json({ error: "That folder is open in another window", openElsewhere: true }, 409);
+}
+
+// POST /api/windows (specs/app/multiple-windows.feature.md "Opening a
+// window"): the folder dialog's "Open in new window" — a window of its own
+// for `path`, or the window that already shows it brought forward; with no
+// path, a new window that asks for a folder. The desktop app's alone: with
+// no shell to open a window the route is not there.
+const postWindow: Handler = async (req) => {
+  if (!canOpenWindows()) return json({ error: "not found" }, 404);
+  const body = (await req.json().catch(() => null)) as { path?: unknown; kind?: unknown } | null;
+  if (body?.path !== undefined && (typeof body.path !== "string" || !normalizeDataRepo(body.path))) {
+    return json({ error: "path must be a folder path or url" }, 400);
+  }
+  if (body?.kind !== undefined && body.kind !== "spec" && body.kind !== "code") {
+    return json({ error: "kind must be spec or code" }, 400);
+  }
+  const path = typeof body?.path === "string" ? normalizeDataRepo(body.path) : null;
+  const kind = body?.kind as "spec" | "code" | undefined;
+  return json({ window: openWindow(path ? { path, ...(kind ? { kind } : {}) } : undefined) });
+};
 
 const putState: Handler = async (req) => {
   const body = (await req.json()) as {
@@ -1293,6 +1520,8 @@ const putState: Handler = async (req) => {
   if (body.dataRepo !== undefined) {
     const dataRepo = normalizeDataRepo(body.dataRepo);
     if (!dataRepo) return json({ error: "dataRepo is required" }, 400);
+    const elsewhere = openElsewhere({ path: dataRepo, kind: "spec" });
+    if (elsewhere) return elsewhere;
     // Verify access before recording: a GitHub url is cloned on first use
     // (crud-feature.md: "user is verified to have access to the
     // data GH repo").
@@ -1347,6 +1576,9 @@ const putState: Handler = async (req) => {
     if (target === open) {
       return json({ error: "the open folder cannot be removed — switch to another folder first" }, 409);
     }
+    if (windowShowing({ path: target, kind: "spec" }, currentWorkspace())) {
+      return json({ error: OPEN_IN_A_WINDOW }, 409);
+    }
     // Any other name the list kept for that repository goes with it, so it
     // never comes back in its place — the open folder excepted.
     const names = await sameRepoAs(target, recentDataRepos(state), getAppRoot());
@@ -1371,6 +1603,8 @@ const putState: Handler = async (req) => {
     if (!(await directoryExists(dir))) {
       return json({ error: `There is no folder at ${dir}`, missing: true, path: dir }, 404);
     }
+    const elsewhere = openElsewhere({ path: dir, kind: "code" });
+    if (elsewhere) return elsewhere;
     // The profile's per-folder lists, as for a picked data folder: the code
     // repository keeps a list of its own, where the coding agents switch
     // themselves on.
@@ -1386,6 +1620,9 @@ const putState: Handler = async (req) => {
     const target = normalizeDataRepo(body.forgetCodeRepo);
     if (codeRepoMode(state) && target === normalizeDataRepo(state.openCodeRepo!)) {
       return json({ error: "the open folder cannot be removed — switch to another folder first" }, 409);
+    }
+    if (windowShowing({ path: target, kind: "code" }, currentWorkspace())) {
+      return json({ error: OPEN_IN_A_WINDOW }, 409);
     }
     forgetCodeRepo(state, target);
   }
@@ -1686,6 +1923,7 @@ const putState: Handler = async (req) => {
   }
   // Websocket document sync (specs/datastore/automerge-store.feature.md):
   // opt-in, empty or null turns it off — the default, stored as an absent key.
+  let syncServerChanged = false;
   if (body.syncServerUrl !== undefined) {
     if (body.syncServerUrl !== null && typeof body.syncServerUrl !== "string") {
       return json({ error: "syncServerUrl must be a string or null" }, 400);
@@ -1694,6 +1932,7 @@ const putState: Handler = async (req) => {
     if (url && normalizeSyncServerUrl(url) === null) {
       return json({ error: "syncServerUrl must be a ws:// or wss:// url" }, 400);
     }
+    syncServerChanged = (state.syncServerUrl ?? "") !== url;
     if (url) state.syncServerUrl = url;
     else delete state.syncServerUrl;
   }
@@ -1744,7 +1983,8 @@ const putState: Handler = async (req) => {
     const dir = pickedDir;
     await syncTick(() => syncDataDir(dir));
   }
-  await applyNetSync(state);
+  // The address is every window's; the folder is this one's.
+  await (syncServerChanged ? applyNetSyncEverywhere() : applyNetSync(state));
   // specs/agents/agent-pane.feature.md S14: a folder switch tries every
   // agent's API again — a proxy that went quiet while the user was in the
   // other folder is woken now, not by the first turn that waits on it. Not
@@ -1756,7 +1996,10 @@ const putState: Handler = async (req) => {
   // folder's sessions": the pane is for the folder now open. Awaited, so the
   // client's next read of the sessions — which follows this response —
   // already has them gone.
-  const closedSessions = opened && !isHostedMode() ? await closeOtherProjects(opened) : 0;
+  // With several windows the other folders are those no window shows
+  // (specs/app/multiple-windows.feature.md).
+  const closedSessions =
+    opened && !isHostedMode() ? await closeOtherProjects(currentWorkspace() ? openProjects() : [opened]) : 0;
   // A link that asked for this switch opens right after it: when the pull
   // above failed, the note for a page it does not find says so.
   const pullFailed = pickedDir ? pullProblem(pickedDir) : null;
@@ -2581,14 +2824,20 @@ const deleteAuth: Handler = async () => {
 // pushed first, while the sign-in still stands. The folder lists stay, and
 // so does the GitHub CLI's own sign-in, a Git access of its own.
 const postLogout: Handler = async () => {
-  const dir = await currentDataDir();
-  if (dir) await syncTick(() => syncDataDir(dir));
+  // Every open folder's, with several windows: the sign-in is all of theirs.
+  await inEveryWorkspace(async () => {
+    const dir = await currentDataDir();
+    if (dir) await syncTick(() => syncDataDir(dir));
+  });
   await signOut();
   const state = await readState(getAppRoot());
   delete state.dataRepo;
   delete state.openCodeRepo;
   await writeState(state, getAppRoot());
   await applyNetSync(state);
+  // The other windows close (specs/app/multiple-windows.feature.md "Signing
+  // out … signs every window out"); this one shows the sign-in screen.
+  closeOtherWindows(currentWorkspace());
   return json(await stateFields(state));
 };
 
@@ -3903,8 +4152,16 @@ function effortOf(value: unknown): { effort: ReturnType<typeof normalizeEffort> 
 
 // A hosted worker runs no agents; its pane lists none rather than refusing,
 // so the client's boot-time restore stays quiet (src/server/hostedMode.ts).
-const getAgentChats: Handler = () =>
-  json({ sessions: isHostedMode() || isReadOnlyMode() ? [] : listChatSessions() });
+const getAgentChats: Handler = () => {
+  if (isHostedMode() || isReadOnlyMode()) return json({ sessions: [] });
+  // A window lists its own folder's sessions, and those of no window at all
+  // — a self-fix session works in the app's own source — but not another
+  // window's (specs/app/multiple-windows.feature.md).
+  const workspace = currentWorkspace();
+  const mine = workspace ? projectDir(workspace.folder) : null;
+  const others = new Set(workspace ? openProjects().filter((dir) => dir !== mine) : []);
+  return json({ sessions: listChatSessions().filter((s) => !others.has(s.project)) });
+};
 
 const getAgentChat: Handler = (_req, params) => {
   const meta = getChatSession(params.id!);
@@ -4623,6 +4880,7 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/plugins/:id/update", unlessHosted(market.postUpdate)],
   ["DELETE", "/api/plugins/:id", unlessHosted(market.deletePlugin)],
   ["POST", "/api/choose-folder", unlessHosted(postChooseFolder)],
+  ["POST", "/api/windows", unlessHosted(postWindow)],
   ["POST", "/api/folder-kind", unlessHosted(postFolderKind)],
   ["GET", "/api/confluence/tokens", unlessHosted(getConfluenceTokens)],
   ["POST", "/api/confluence/tokens", unlessHosted(postConfluenceToken)],
@@ -4758,7 +5016,8 @@ export type { ApiMatch } from "../plugins/host/services";
 
 /** Match a request line against the route table — core rows, then the mounted plugins. */
 export function matchApi(method: string, pathname: string) {
-  return routeRegistry.match(method, pathname);
+  // A window reaches its own folder's plugins (src/plugins/host/loader.ts pluginGate).
+  return routeRegistry.match(method, pathname, pluginGate());
 }
 
 /**
@@ -4770,7 +5029,13 @@ export function matchApi(method: string, pathname: string) {
 const OUTDATED_ALLOWED = /^\/api\/(state|reload|choose-folder|folder-kind|logs|auth|data)(\/|$)/;
 
 /** Serve an API request, or null when the path is not an API route. */
-export async function handleApi(req: Request): Promise<Response | null> {
+export function handleApi(req: Request, opts: { workspace?: Workspace } = {}): Promise<Response | null> {
+  // A desktop window's request (src/server/workspace.ts) is answered for the
+  // folder open in that window.
+  return opts.workspace ? runInWorkspace(opts.workspace, () => answerApi(req)) : answerApi(req);
+}
+
+async function answerApi(req: Request): Promise<Response | null> {
   const pathname = new URL(req.url).pathname;
   const match = matchApi(req.method, pathname);
   // The read-only site (src/server/readOnlyMode.ts) answers its allowlist

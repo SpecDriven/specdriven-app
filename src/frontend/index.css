@@ -10614,7 +10614,8 @@ aside.rail .rail-btn.pomodoro-chip.flash {
   flex-shrink: 0;
 }
 
-.spec-folder-remove {
+.spec-folder-remove,
+.spec-folder-window {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -10632,7 +10633,15 @@ aside.rail .rail-btn.pomodoro-chip.flash {
   background: var(--danger-bg);
 }
 
-.spec-folder-remove:disabled {
+/* "Open in new window" (specs/app/multiple-windows.feature.md): beside
+   Open, in the desktop app. */
+.spec-folder-window:hover:not(:disabled) {
+  color: var(--text-1);
+  background: var(--surface-3);
+}
+
+.spec-folder-remove:disabled,
+.spec-folder-window:disabled {
   opacity: 0.35;
   cursor: not-allowed;
 }

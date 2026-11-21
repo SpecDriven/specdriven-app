@@ -2,12 +2,14 @@
 // either stays in the window, follows a `specdriven://` link in place, or
 // opens in the default browser (specs/app/desktop-app.feature.md "External
 // links"); a `specdriven://` link — from the OS, a second launch or a spec
-// body — is shown in the one window, launching it if none is up
-// (specs/ui/navigation.feature.md "Links from outside the app").
+// body — is shown in the window that has its folder open, in a window
+// opened for a folder none shows, or else in the window used last
+// (specs/ui/navigation.feature.md "Links from outside the app",
+// specs/app/multiple-windows.feature.md "Opening a window").
 // Pure logic, kept out of main.ts so it runs under bun test; main.ts wires
-// it to the BrowserWindow.
+// it to the BrowserWindows.
 
-import { linkEntry } from "../frontend/route";
+import { linkEntry, matchAppPage, splitRepoPath } from "../frontend/route";
 import { deepLinkFromArgv, parseDesktopLink } from "./deepLink";
 
 export type LinkTarget =
@@ -38,8 +40,9 @@ export function navigationTarget(url: string, appOrigins: readonly string[]): Li
 }
 
 /**
- * A request for a new window (target=_blank, window.open). The app never
- * opens a second window, so even one of its own urls is not followed.
+ * A request for a new window (target=_blank, window.open). A page never
+ * opens a window of the app by itself — that is the File menu's and the
+ * folder dialog's to do — so even one of its own urls is not followed.
  */
 export function windowOpenTarget(url: string): LinkTarget {
   return outside(url);
@@ -71,11 +74,51 @@ export interface LinkWindow {
   run(script: string): void;
 }
 
+/** Where a link from outside belongs, among the app's windows. */
+export type LinkPlace =
+  /** The window that shows the folder the link names. */
+  | { kind: "window"; id: string }
+  /** No window shows that folder, and it is one opened before: a window of its own. */
+  | { kind: "folder"; repo: string }
+  /** The link names no folder this machine knows: the window used last. */
+  | { kind: "front" };
+
+/**
+ * The words a path starts with when it names a page rather than a folder,
+ * as far as the shell can tell: a feature, or one of the app's own pages. A
+ * plugin's pages are its window's to know (App.tsx reads the link again).
+ */
+function namesPage(path: string): boolean {
+  const segs = path.split("/").filter(Boolean);
+  return (segs[0] === "features" && segs.length > 1) || matchAppPage(path) !== null;
+}
+
+/**
+ * Which window a link's path belongs in. A link names its specifications
+ * folder first (route.ts desktopLink): `open` are the windows showing one,
+ * `recent` the folders opened before.
+ */
+export function linkPlace(
+  path: string,
+  open: readonly { id: string; repo: string }[],
+  recent: readonly string[],
+): LinkPlace {
+  const { repo } = splitRepoPath(path, [...open.map((w) => w.repo), ...recent], namesPage);
+  if (!repo) return { kind: "front" };
+  const shown = open.find((w) => w.repo === repo);
+  return shown ? { kind: "window", id: shown.id } : { kind: "folder", repo };
+}
+
 export interface LinkRouterDeps {
-  /** The app window, or null when there is none (macOS, all closed). */
-  window(): LinkWindow | null;
-  /** Open the app window; it takes its entry url from takeEntry(). */
-  openWindow(): void;
+  /**
+   * The open window a link is shown in — the one showing its folder, else
+   * the one used last — or null when it gets a window of its own: none is
+   * open (macOS, all closed), or it names a folder none shows. A null
+   * `path` asks for the window used last.
+   */
+  window(path: string | null): LinkWindow | null;
+  /** Open the window for `path`; it takes its entry url from takeEntry(). */
+  openWindow(path: string): void;
 }
 
 export function createLinkRouter(deps: LinkRouterDeps) {
@@ -89,10 +132,10 @@ export function createLinkRouter(deps: LinkRouterDeps) {
 
   /** Show an app path that came from outside. */
   function open(path: string): void {
-    const win = deps.window();
+    const win = deps.window(path);
     if (!win) {
       pending = path;
-      deps.openWindow();
+      deps.openWindow(path);
       return;
     }
     bringToFront(win);
@@ -112,8 +155,8 @@ export function createLinkRouter(deps: LinkRouterDeps) {
 
     /**
      * A second launch of the app (Windows and Linux deliver a deep link as
-     * its argument): the link, if any, is shown in the running window;
-     * either way the one window comes to the front and no other opens.
+     * its argument): the link, if any, is shown where it belongs; without
+     * one the window used last comes to the front. No second app starts.
      */
     secondLaunch(argv: readonly string[]): void {
       const path = deepLinkFromArgv(argv);
@@ -121,13 +164,18 @@ export function createLinkRouter(deps: LinkRouterDeps) {
         open(path);
         return;
       }
-      const win = deps.window();
+      const win = deps.window(null);
       if (win) bringToFront(win);
     },
 
     /** The link this process was launched with, held for the first window. */
     holdLaunchLink(argv: readonly string[]): void {
       pending ??= deepLinkFromArgv(argv);
+    },
+
+    /** The link held for a window still to open, as it arrived; null for none. */
+    held(): string | null {
+      return pending;
     },
 
     /** The entry url for a window about to open; consumes a held link. */

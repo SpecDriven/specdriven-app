@@ -12,6 +12,7 @@ import { execFile } from "node:child_process";
 import { accessSync, constants, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { currentWorkspace } from "./workspace";
 
 /** Resolves the picked absolute path, or null when the user cancels. */
 export type FolderChooser = (title?: string) => Promise<string | null>;
@@ -138,7 +139,12 @@ export function platformChooser(
 }
 
 let chooser: FolderChooser | null = platformChooser();
-let inFlight: Promise<string | null> | null = null;
+/**
+ * The dialog that is open, per window (src/server/workspace.ts): each window
+ * of the desktop app has its own, and its own answer; "" stands for a page
+ * with no window behind it.
+ */
+const inFlight = new Map<string, Promise<string | null>>();
 
 /**
  * Swap the chooser (desktop shell, tests); null means "no native chooser
@@ -155,11 +161,15 @@ export function canChooseFolder(): boolean {
   return chooser !== null;
 }
 
-/** Open the chooser. Concurrent calls share the one open dialog. */
+/** Open the chooser. Concurrent calls from one window share its one open dialog. */
 export function chooseFolder(purpose: FolderPurpose = "data-repo"): Promise<string | null> {
   if (!chooser) return Promise.resolve(null);
-  inFlight ??= chooser(FOLDER_TITLES[purpose]).finally(() => {
-    inFlight = null;
+  const asker = currentWorkspace()?.id ?? "";
+  const open = inFlight.get(asker);
+  if (open) return open;
+  const dialog = chooser(FOLDER_TITLES[purpose]).finally(() => {
+    if (inFlight.get(asker) === dialog) inFlight.delete(asker);
   });
-  return inFlight;
+  inFlight.set(asker, dialog);
+  return dialog;
 }

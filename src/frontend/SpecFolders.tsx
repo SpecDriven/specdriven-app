@@ -4,7 +4,7 @@
 // plain views: App.tsx owns the state and the requests, so the markup here
 // can be checked on its own (tests/specFolders.test.tsx).
 
-import { BookText, CodeXml, FolderOpen, Trash2 } from "lucide-react";
+import { AppWindow, BookText, CodeXml, FolderOpen, Trash2 } from "lucide-react";
 import { backdropDismiss } from "./backdropDismiss";
 import type { KeyboardEvent, RefObject } from "react";
 import { repoDisplayName } from "./route";
@@ -153,6 +153,7 @@ export function SpecFoldersDialog({
   dirs = {},
   busy = false,
   onOpen,
+  onOpenInNewWindow,
   onRemove,
   onAdd,
   onAddCodeRepo,
@@ -168,6 +169,12 @@ export function SpecFoldersDialog({
   /** A request is in flight: the buttons wait for it. */
   busy?: boolean;
   onOpen: (folder: FolderEntry) => void;
+  /**
+   * Open a folder in a window of its own, leaving this one as it is
+   * (specs/app/multiple-windows.feature.md "Opening a window"); absent where
+   * there are no windows to open — everywhere but the desktop app.
+   */
+  onOpenInNewWindow?: (folder: FolderEntry) => void;
   onRemove: (folder: FolderEntry) => void;
   /** Pick another folder from the file system (the Data directory prompt). */
   onAdd: () => void;
@@ -238,6 +245,18 @@ export function SpecFoldersDialog({
                         onClick={() => onOpen(folder)}
                       >
                         Open
+                      </button>
+                    )}
+                    {!isCurrent && onOpenInNewWindow && (
+                      <button
+                        type="button"
+                        className="icon-button spec-folder-window"
+                        disabled={busy}
+                        aria-label={`Open ${name} in a new window`}
+                        title={`Open ${folder.path} in a new window`}
+                        onClick={() => onOpenInNewWindow(folder)}
+                      >
+                        <AppWindow size={14} aria-hidden="true" />
                       </button>
                     )}
                     <button

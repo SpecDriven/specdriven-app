@@ -13,6 +13,7 @@
 import { run } from "./persistence/runtime";
 import { Settings } from "./persistence/Settings";
 import type { SettingsFileView, SpecDrivenState } from "./settingsModel";
+import { currentWorkspace, folderOf, noteSettingsFolder, setWorkspaceFolder, withFolder } from "./workspace";
 
 export * from "./settingsModel";
 
@@ -55,7 +56,12 @@ export async function settingsDirectory(rootDir: string = process.cwd()): Promis
  * on the next write.
  */
 export async function readState(rootDir: string = process.cwd()): Promise<SpecDrivenState> {
-  return run(Settings.use((settings) => settings.read(rootDir)));
+  // A window's request (workspace.ts) reads the shared settings with that
+  // window's folder as the open one. Taken before the read: what runs after
+  // an await is this call chain's again, but nothing needs to rely on it.
+  const workspace = currentWorkspace();
+  const state = await run(Settings.use((settings) => settings.read(rootDir)));
+  return workspace ? withFolder(state, workspace.folder) : state;
 }
 
 /** The settings file readState reads, or null when there is none anywhere. */
@@ -85,5 +91,13 @@ export async function writeState(
   state: SpecDrivenState,
   rootDir: string = process.cwd(),
 ): Promise<void> {
+  // A window's write (workspace.ts): the folder the state names is that
+  // window's from here on — a folder switch is such a write — and the file
+  // keeps it as the folder a run without windows opens.
+  const workspace = currentWorkspace();
+  if (workspace) {
+    setWorkspaceFolder(workspace, folderOf(state));
+    noteSettingsFolder(folderOf(state));
+  }
   return run(Settings.use((settings) => settings.write(state, rootDir)));
 }
