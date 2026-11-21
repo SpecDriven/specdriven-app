@@ -4,6 +4,10 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.292 — 2026-11-21
+
+- Desktop build: sign the macOS app ad hoc, without an Apple Developer account ([#488](https://github.com/SpecDriven/specdriven-app/pull/488))
+
 ## v0.1.291 — 2026-11-21
 
 - Multiple windows: the desktop app opens several folders at once, each in a window of its own ([#487](https://github.com/SpecDriven/specdriven-app/pull/487))
