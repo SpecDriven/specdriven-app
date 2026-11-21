@@ -155,7 +155,7 @@ describe("SpecFoldersDialog — Manage specification folders", () => {
         onOpen={noop}
         onRemove={noop}
         onAdd={noop}
-        onAddCodeRepo={noop}
+        codeRepos
         onClose={noop}
       />,
     );
@@ -168,7 +168,9 @@ describe("SpecFoldersDialog — Manage specification folders", () => {
     expect(markup.match(/aria-label="Code repository"/g)).toHaveLength(2);
     expect(markup.match(/aria-label="Specification folder"/g)).toHaveLength(1);
     expect(markup).toContain("specification folders and code repositories");
-    expect(markup).toContain(">Open a code repository…</button>");
+    // One button opens another folder of either kind.
+    expect(markup.match(/>Open another folder…<\/button>/g)).toHaveLength(1);
+    expect(markup).not.toContain("Open a code repository");
   });
 
   test("the open folder is badged whether it is a spec folder or a code repository", () => {
@@ -190,7 +192,6 @@ describe("SpecFoldersDialog — Manage specification folders", () => {
         onOpen={noop}
         onRemove={noop}
         onAdd={noop}
-        onAddCodeRepo={noop}
         onClose={noop}
       />,
     );
@@ -228,7 +229,6 @@ describe("SpecFoldersDialog — Manage specification folders", () => {
             onOpen={(f) => opened.push(f)}
             onRemove={(f) => removed.push(f)}
             onAdd={noop}
-            onAddCodeRepo={noop}
             onClose={noop}
           />,
         ),
@@ -303,6 +303,100 @@ describe("SpecFoldersDialog — Open in new window", () => {
       const button = host.querySelector('button[aria-label="Open app in a new window"]') as unknown as HTMLButtonElement;
       act(() => button.click());
       expect(inWindow).toEqual([{ path: "/code/app", kind: "code" }]);
+      expect(opened).toEqual([]);
+      act(() => root.unmount());
+    } finally {
+      g.window = saved.window;
+      g.document = saved.document;
+      g.IS_REACT_ACT_ENVIRONMENT = saved.act;
+      void window.happyDOM.close();
+    }
+  });
+});
+
+// specs/app/multiple-windows.feature.md "The folder dialog and the windows".
+describe("SpecFoldersDialog — folders open in other windows", () => {
+  const folders = [
+    { path: "/specs/insurance", kind: "spec" },
+    { path: "/specs/banking", kind: "spec" },
+    { path: "/code/app", kind: "code" },
+    { path: "/specs/claims", kind: "spec" },
+  ] satisfies FolderEntry[];
+  const open = folders[0]!;
+  const elsewhere = [folders[1]!, folders[2]!];
+
+  test("a folder another window shows is badged, offers its window, and is neither opened nor removed here", () => {
+    const markup = html(
+      <SpecFoldersDialog
+        folders={folders}
+        current={open}
+        elsewhere={elsewhere}
+        onOpen={noop}
+        onOpenInNewWindow={noop}
+        onShowWindow={noop}
+        onRemove={noop}
+        onAdd={noop}
+        onClose={noop}
+      />,
+    );
+    const rows = [...markup.matchAll(/<li class="([^"]+)">(.*?)<\/li>/g)].map((m) => ({ classes: m[1]!, row: m[2]! }));
+    expect(rows.map((r) => r.classes)).toEqual([
+      "spec-folder spec-folder-spec current",
+      "spec-folder spec-folder-spec elsewhere",
+      "spec-folder spec-folder-code elsewhere",
+      "spec-folder spec-folder-spec",
+    ]);
+    // This window's folder is "open"; the others' say where they are.
+    expect(rows[0]!.row).toContain('<span class="spec-folder-badge">open</span>');
+    for (const { row } of [rows[1]!, rows[2]!]) {
+      expect(row).toContain(">other window</span>");
+      expect(row).toContain(">Show window</button>");
+      // A folder is open in at most one window: nothing here opens it again.
+      expect(row).not.toContain(">Open</button>");
+      expect(row).not.toContain("in a new window");
+      expect(row).toMatch(/<button[^>]*disabled=""[^>]*title="Open in another window — close that window first"/);
+    }
+    expect(rows[1]!.row).toContain('title="Bring the window that shows /specs/banking forward"');
+    // A folder no window shows keeps both ways of opening it, and can be removed.
+    expect(rows[3]!.row).toContain('title="Open /specs/claims in this window"');
+    expect(rows[3]!.row).toContain('aria-label="Open claims in a new window"');
+    expect(rows[3]!.row).not.toMatch(/<button[^>]*disabled=""/);
+    expect(rows[3]!.row).not.toContain("other window");
+  });
+
+  test("Show window hands back the entry of the folder whose window comes forward", () => {
+    const window = new Window({ url: "http://localhost/" });
+    const g = globalThis as unknown as Record<string, unknown>;
+    const saved = { window: g.window, document: g.document, act: g.IS_REACT_ACT_ENVIRONMENT };
+    g.window = window;
+    g.document = window.document;
+    g.IS_REACT_ACT_ENVIRONMENT = true;
+    try {
+      const shown: FolderEntry[] = [];
+      const opened: FolderEntry[] = [];
+      const host = window.document.createElement("div");
+      window.document.body.appendChild(host);
+      const root = createRoot(host as unknown as HTMLElement);
+      act(() =>
+        root.render(
+          <SpecFoldersDialog
+            folders={folders}
+            current={open}
+            elsewhere={elsewhere}
+            onOpen={(f) => opened.push(f)}
+            onOpenInNewWindow={(f) => opened.push(f)}
+            onShowWindow={(f) => shown.push(f)}
+            onRemove={noop}
+            onAdd={noop}
+            onClose={noop}
+          />,
+        ),
+      );
+      const button = host.querySelector(
+        'button[title="Bring the window that shows /code/app forward"]',
+      ) as unknown as HTMLButtonElement;
+      act(() => button.click());
+      expect(shown).toEqual([{ path: "/code/app", kind: "code" }]);
       expect(opened).toEqual([]);
       act(() => root.unmount());
     } finally {

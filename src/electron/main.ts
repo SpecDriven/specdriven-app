@@ -1,7 +1,9 @@
 // Electron entry (specs/app/desktop-app.feature.md): the desktop shell serves
 // the built frontend and the shared server/api.ts routes over an internal
 // app:// protocol — no localhost port is opened. In development
-// (ELECTRON_DEV=1) it loads the running Bun dev server instead, for HMR.
+// (ELECTRON_DEV=1) the windows load the running Bun dev server instead, for
+// HMR: the frontend is the dev server's, and the API calls its pages make
+// are answered here all the same, each for its window's folder.
 
 import {
   app,
@@ -10,6 +12,7 @@ import {
   dialog,
   Menu,
   nativeTheme,
+  net,
   protocol,
   screen,
   session,
@@ -73,6 +76,7 @@ import { appMenuTemplate } from "./appMenu";
 import { contextMenuTemplate } from "./contextMenu";
 import { startInspector, devtoolsUrl } from "./debugger";
 import { parseDesktopLink } from "./deepLink";
+import { devServerUrl, isDevServerRequest, needsShell } from "./devFrontend";
 import {
   createLinkRouter,
   linkPlace,
@@ -111,9 +115,9 @@ import {
 const APP_ORIGIN = "app://specdriven";
 /** The Updates page (src/frontend/UpdatesPage.tsx), where Check for Updates… goes. */
 const UPDATES_PATH = appPagePath("updates");
-const DEV_URL = process.env.ELECTRON_DEV
-  ? `http://localhost:${process.env.PORT || 3000}`
-  : null;
+const DEV_URL = devServerUrl(process.env);
+/** Where the windows' pages come from: the app's own origin, and in development the dev server's. */
+const APP_ORIGINS = DEV_URL ? [APP_ORIGIN, DEV_URL] : [APP_ORIGIN];
 
 // One app-data anchor for the server modules (specs/app/desktop-app.feature.md
 // "Data locations"): GitHub data repos are cloned under <userData>/repos.
@@ -226,7 +230,22 @@ async function serveShell(): Promise<Response> {
   });
 }
 
-/** app:// request handler: API first, then bundled files, then the shell. */
+/**
+ * A development run's frontend (scripts/dev-electron.ts): the dev server's
+ * own answer, hot reloading and all. A page url it has no route for — a
+ * plugin's, of a folder the dev server does not have open — gets the shell,
+ * as serveShell gives it in the packaged app.
+ */
+async function serveFromDevServer(req: Request): Promise<Response> {
+  const res = await net.fetch(req, { bypassCustomProtocolHandlers: true });
+  if (!needsShell({ method: req.method, accept: req.headers.get("accept") }, res.status)) return res;
+  return net.fetch(`${DEV_URL}/`, { bypassCustomProtocolHandlers: true });
+}
+
+/**
+ * The windows' request handler — app://, and in development the dev
+ * server's address: API first, then bundled files, then the shell.
+ */
 async function serveApp(req: Request): Promise<Response> {
   const url = new URL(req.url);
   try {
@@ -246,6 +265,7 @@ async function serveApp(req: Request): Promise<Response> {
     if (url.pathname.startsWith("/api/")) {
       return Response.json({ error: "not found" }, { status: 404 });
     }
+    if (DEV_URL) return await serveFromDevServer(req);
     const filePath = staticFilePath(rendererDir, url.pathname);
     if (filePath) {
       const data = await readFile(filePath).catch(() => null);
@@ -269,13 +289,11 @@ function openInBrowser(url: string): void {
 
 // The windows (specs/app/multiple-windows.feature.md): each shows one
 // folder, its workspace (src/server/workspace.ts), and comes back after a
-// restart where it was left (src/electron/windowSession.ts). A development
-// run has one window and no workspaces: its pages are answered by the dev
-// server, which knows one folder.
+// restart where it was left (src/electron/windowSession.ts).
 interface AppWindow {
   win: BrowserWindow;
-  /** The folder the window shows; null in a development run. */
-  workspace: Workspace | null;
+  /** The folder the window shows. */
+  workspace: Workspace;
   /** The user was asked about its working sessions and said to close it. */
   closeConfirmed: boolean;
 }
@@ -323,7 +341,7 @@ function linkWindow(w: BrowserWindow): LinkWindow {
 /** Where a link belongs among the windows open now (src/electron/linkRouting.ts). */
 function placeOf(path: string) {
   const open = [...windows.values()].flatMap((w) =>
-    w.workspace?.folder.dataRepo && !w.workspace.folder.openCodeRepo
+    w.workspace.folder.dataRepo && !w.workspace.folder.openCodeRepo
       ? [{ id: w.workspace.id, repo: w.workspace.folder.dataRepo }]
       : [],
   );
@@ -369,9 +387,9 @@ function placeOnScreen(w: BrowserWindow): WindowState {
 function openWindows(without?: AppWindow): SavedWindow[] {
   const front = [...used].reverse().find((w) => w !== without);
   return [...windows.values()]
-    .filter((w) => w !== without && w.workspace && !w.win.isDestroyed())
+    .filter((w) => w !== without && !w.win.isDestroyed())
     .map((w) => ({
-      folder: w.workspace!.folder,
+      folder: w.workspace.folder,
       bounds: placeOnScreen(w.win),
       ...(w === front ? { focused: true } : {}),
     }));
@@ -383,9 +401,8 @@ function openWindows(without?: AppWindow): SavedWindow[] {
  * its folder's place on screen is remembered.
  */
 function saveSession(without?: AppWindow): void {
-  if (DEV_URL) return;
   const mirror = settingsFolderWritten() ?? windowSession.mirror;
-  if (without?.workspace && !without.win.isDestroyed()) {
+  if (without && !without.win.isDestroyed()) {
     windowSession = sessionFor(windowSession, [{ folder: without.workspace.folder, bounds: placeOnScreen(without.win) }], mirror);
   }
   const open = openWindows(without);
@@ -408,11 +425,11 @@ function besideFront(): WindowState | null {
  * `link: false` leaves a link held for a window still to open (the launch's
  * own, on a start that brings several windows back) to the window it is for.
  */
-function createWindow(spec: { workspace: Workspace | null; bounds?: WindowState | null; link?: boolean }): AppWindow {
+function createWindow(spec: { workspace: Workspace; bounds?: WindowState | null; link?: boolean }): AppWindow {
   // Geometry from where this folder's window was left, fitted to the
   // displays present now; null (first run, corrupt file, monitor gone)
   // means the centered default.
-  const remembered = spec.bounds ?? (spec.workspace ? windowSession.bounds[folderKey(spec.workspace.folder)] : null) ?? null;
+  const remembered = spec.bounds ?? windowSession.bounds[folderKey(spec.workspace.folder)] ?? null;
   const saved = fitToDisplays(
     remembered ?? besideFront(),
     screen.getAllDisplays().map((d) => d.workArea),
@@ -452,7 +469,7 @@ function createWindow(spec: { workspace: Workspace | null; bounds?: WindowState 
   used.push(entry);
   // The second of the two marks that say which window a request came from
   // (src/electron/windowSession.ts): requests made inside a worker carry it.
-  if (spec.workspace) win.webContents.setUserAgent(windowUserAgent(win.webContents.getUserAgent(), spec.workspace.id));
+  win.webContents.setUserAgent(windowUserAgent(win.webContents.getUserAgent(), spec.workspace.id));
 
   // The right-click menu (src/electron/contextMenu.ts): suggestions for a
   // misspelt word and the edit verbs — Electron has no menu of its own, so
@@ -506,7 +523,7 @@ function createWindow(spec: { workspace: Workspace | null; bounds?: WindowState 
     // Closing a window while others stay ends its folder's coding agent
     // sessions (specs/app/multiple-windows.feature.md "Closing and
     // restarting"): one still at work is asked about first.
-    if (others && entry.workspace && !entry.closeConfirmed) {
+    if (others && !entry.closeConfirmed) {
       const working = workingSessions(entry.workspace);
       if (working > 0) {
         event.preventDefault();
@@ -526,7 +543,7 @@ function createWindow(spec: { workspace: Workspace | null; bounds?: WindowState 
     // A window its own page closed (window.close()) never had `close`: the
     // list is brought up to date here too.
     saveSession();
-    if (entry.workspace) retire(entry.workspace);
+    retire(entry.workspace);
   });
 
   // specs/app/desktop-app.feature.md "External links": target=_blank and plain
@@ -537,9 +554,8 @@ function createWindow(spec: { workspace: Workspace | null; bounds?: WindowState 
     links.follow(windowOpenTarget(url), openInBrowser);
     return { action: "deny" };
   });
-  const appOrigins = DEV_URL ? [APP_ORIGIN, DEV_URL] : [APP_ORIGIN];
   win.webContents.on("will-navigate", (event, url) => {
-    const target = navigationTarget(url, appOrigins);
+    const target = navigationTarget(url, APP_ORIGINS);
     if (target.kind === "inside") return;
     event.preventDefault();
     links.follow(target, openInBrowser);
@@ -587,8 +603,7 @@ function retire(workspace: Workspace): void {
 
 /** A window on a new workspace. */
 function openWindowOn(folder: WorkspaceFolder, pending?: PendingFolder, bounds?: WindowState | null): AppWindow {
-  const workspace = DEV_URL ? null : openWorkspace(`w${nextWindowId++}`, folder, pending);
-  return createWindow({ workspace, bounds });
+  return createWindow({ workspace: openWorkspace(`w${nextWindowId++}`, folder, pending), bounds });
 }
 
 /**
@@ -689,20 +704,15 @@ function installAppMenu(): void {
       appMenuTemplate({
         platform: process.platform,
         onCheckForUpdates: () => links.open(UPDATES_PATH),
-        // specs/app/multiple-windows.feature.md "Opening a window". Not in a
-        // development run, whose one window the dev server answers.
-        ...(DEV_URL
-          ? {}
-          : {
-              file: {
-                onNewWindow: () => void openFolderWindow(),
-                onOpenFolder: () => void chooseFolderWindow(),
-                recent: recentFolders.map((f) => ({
-                  label: f.kind === "code" ? `${f.path} — code repository` : f.path,
-                  onOpen: () => void openFolderWindow({ path: f.path, kind: f.kind }),
-                })),
-              },
-            }),
+        // specs/app/multiple-windows.feature.md "Opening a window".
+        file: {
+          onNewWindow: () => void openFolderWindow(),
+          onOpenFolder: () => void chooseFolderWindow(),
+          recent: recentFolders.map((f) => ({
+            label: f.kind === "code" ? `${f.path} — code repository` : f.path,
+            onOpen: () => void openFolderWindow({ path: f.path, kind: f.kind }),
+          })),
+        },
         ...(app.isPackaged ? {} : { debug }),
       }),
     ),
@@ -715,7 +725,6 @@ function installAppMenu(): void {
  * list is the settings file's, the same for every window.
  */
 async function refreshRecentFolders(): Promise<void> {
-  if (DEV_URL) return;
   try {
     const state = await detached(() => readState(userData));
     const list = mergeRecentFolders(state, recentDataRepos(state), recentCodeRepos(state));
@@ -855,17 +864,26 @@ if (!app.requestSingleInstanceLock()) {
       respond(permission === "clipboard-sanitized-write");
     });
     protocol.handle("app", serveApp);
+    // A development run: the dev server's address is answered here too —
+    // its API calls by this process, as app:// ones are, and the rest by
+    // the dev server. Its hot-reload socket is not a request and goes
+    // straight there; so does http to any other host.
+    if (DEV_URL) {
+      protocol.handle("http", (req) =>
+        isDevServerRequest(req.url, DEV_URL) ? serveApp(req) : net.fetch(req, { bypassCustomProtocolHandlers: true }),
+      );
+    }
     // The first of the two marks that say which window a request came from
     // (src/electron/windowSession.ts): the window's id, set where the
     // request leaves the window. Whatever a page put under that name is
-    // replaced, and nothing but the app's own origin gets it.
+    // replaced, and nothing but the app's own origins gets it.
     session.defaultSession.webRequest.onBeforeSendHeaders((details, done) => {
       const headers = { ...details.requestHeaders };
       for (const name of Object.keys(headers)) {
         if (name.toLowerCase() === WINDOW_HEADER) delete headers[name];
       }
-      const id = details.webContentsId === undefined ? undefined : windows.get(details.webContentsId)?.workspace?.id;
-      if (id && details.url.startsWith(`${APP_ORIGIN}/`)) headers[WINDOW_HEADER] = id;
+      const id = details.webContentsId === undefined ? undefined : windows.get(details.webContentsId)?.workspace.id;
+      if (id && APP_ORIGINS.some((origin) => details.url.startsWith(`${origin}/`))) headers[WINDOW_HEADER] = id;
       done({ requestHeaders: headers });
     });
     // GitHub, Confluence and Claude proxy token storage (specs/app/desktop-app.feature.md): OS-encrypted via
@@ -915,24 +933,22 @@ if (!app.requestSingleInstanceLock()) {
     });
     // "Open in new window" in the folder dialog, and a folder picked that
     // another window shows (src/server/windows.ts): the routes ask here.
-    if (!DEV_URL) {
-      setWindowOpener((folder) => openFolderWindow(folder));
-      // Signing out in one window closes the others.
-      setWindowCloser((except) => {
-        for (const entry of [...windows.values()]) {
-          if (entry.workspace === except || entry.win.isDestroyed()) continue;
-          entry.closeConfirmed = true;
-          entry.win.close();
-        }
-      });
-      // A window changed folder: the list to bring back changes with it,
-      // and the folder joins Open Recent.
-      onWorkspaceChange((change) => {
-        if (quitting) return;
-        if (change === "folder") saveSession();
-        void refreshRecentFolders();
-      });
-    }
+    setWindowOpener((folder) => openFolderWindow(folder));
+    // Signing out in one window closes the others.
+    setWindowCloser((except) => {
+      for (const entry of [...windows.values()]) {
+        if (entry.workspace === except || entry.win.isDestroyed()) continue;
+        entry.closeConfirmed = true;
+        entry.win.close();
+      }
+    });
+    // A window changed folder: the list to bring back changes with it,
+    // and the folder joins Open Recent.
+    onWorkspaceChange((change) => {
+      if (quitting) return;
+      if (change === "folder") saveSession();
+      void refreshRecentFolders();
+    });
     installAppMenu();
     if (!app.isPackaged && process.platform === "darwin" && existsSync(iconFile)) app.dock?.setIcon(iconFile);
     // A self-fix's "Rebuild & restart" (specs/app/self-healing.feature.md):
@@ -953,21 +969,19 @@ if (!app.requestSingleInstanceLock()) {
     // each on its folder. Their workspaces are registered before the app's
     // start, which pulls every one's folder and mounts its plugins; the
     // windows themselves open once that is under way, as the one window
-    // did. A development run has the one window and no workspace.
-    const settingsAtStart = DEV_URL ? null : folderOf(await detached(() => readState(userData)));
-    const restore = settingsAtStart ? planRestore(windowSession, settingsAtStart) : [];
-    const restored = restore.map((saved) => ({
+    // did.
+    const settingsAtStart = folderOf(await detached(() => readState(userData)));
+    const restored = planRestore(windowSession, settingsAtStart).map((saved) => ({
       saved,
       workspace: openWorkspace(`w${nextWindowId++}`, saved.folder),
     }));
     // The settings' folder as this start found it is the one to compare the
     // next start's against (windowSession.ts `mirror`).
-    if (settingsAtStart) windowSession = { ...windowSession, mirror: settingsAtStart };
+    windowSession = { ...windowSession, mirror: settingsAtStart };
     await applyStartupState();
     await refreshRecentFolders();
     // Launched by a link on Windows or Linux; on macOS open-url already ran.
     links.holdLaunchLink(process.argv);
-    if (DEV_URL) createWindow({ workspace: null, bounds: windowSession.bounds[""] });
     // The window used last opens last, so it is the one in front.
     const front = restored.find((r) => r.saved.focused);
     // The launch's link goes to the window that shows its folder, else to

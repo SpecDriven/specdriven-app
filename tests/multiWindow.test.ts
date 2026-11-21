@@ -34,6 +34,7 @@ import {
   projectDir,
   setWindowCloser,
   setWindowOpener,
+  shownElsewhere,
   syncedDir,
   windowShowing,
   workingSessions,
@@ -435,6 +436,36 @@ test("picking a folder another window shows brings that window forward and switc
   } finally {
     shell.restore();
   }
+});
+
+test("each window is told which folders on the list the other windows show", async () => {
+  const recentFolders = [
+    ...[alpha, beta, gamma].map((path) => ({ path, kind: "spec" as const })),
+    { path: code, kind: "code" as const },
+  ];
+  await writeState({ dataRepo: alpha, reloadFrequencySeconds: 0, recentFolders }, root);
+  const elsewhere = async (workspace: Workspace | null) => {
+    const state = (await (await api(workspace, "/api/state")).json()) as { otherWindowFolders: { path: string; kind: string }[] };
+    return state.otherWindowFolders.map((f) => `${f.kind} ${f.path}`).sort();
+  };
+  // With no window — the web version — and with one, no folder is elsewhere.
+  expect(await elsewhere(null)).toEqual([]);
+  const one = openWorkspace("1", { dataRepo: alpha });
+  expect(await elsewhere(one)).toEqual([]);
+  const two = openWorkspace("2", { dataRepo: beta });
+  openWorkspace("3", { dataRepo: gamma, openCodeRepo: code });
+  // The specifications folder a code-repository window came from is not shown by it.
+  expect(await elsewhere(one)).toEqual([`code ${code}`, `spec ${beta}`]);
+  expect(await elsewhere(two)).toEqual([`code ${code}`, `spec ${alpha}`]);
+  // A window opened for a folder holds it from the start, before its page has opened it.
+  openWorkspace("4", {}, { path: gamma, kind: "spec" });
+  expect(await elsewhere(one)).toEqual([`code ${code}`, `spec ${beta}`, `spec ${gamma}`]);
+  // A window that closes gives its folder back.
+  closeWorkspace("2");
+  expect(await elsewhere(one)).toEqual([`code ${code}`, `spec ${gamma}`]);
+  // The list is kept in the order given, and asked as nobody it names every window's folder.
+  expect(shownElsewhere(recentFolders, one).map((f) => f.path)).toEqual([gamma, code]);
+  expect(shownElsewhere(recentFolders, null).map((f) => f.path)).toEqual([alpha, gamma, code]);
 });
 
 test("a folder open in a window cannot be taken off the recent list", async () => {

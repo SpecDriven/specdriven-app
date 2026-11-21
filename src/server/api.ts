@@ -102,6 +102,7 @@ import {
   openProjects,
   openWindow,
   projectDir,
+  shownElsewhere,
   syncedDir,
   windowShowing,
 } from "./windows";
@@ -1002,6 +1003,7 @@ async function stateFields(state: SpecDrivenState) {
   // saved before that rule may still name a repo by its url and by a folder.
   const recent = await onePerRepo(recentDataRepos(state), getAppRoot());
   const codeRecent = isHostedMode() || isDemoMode() ? [] : recentCodeRepos(state);
+  const folders = mergeRecentFolders(state, recent, codeRecent);
   return {
     dataRepo: state.dataRepo ?? null,
     needsDataRepo: needsDataRepo(state),
@@ -1101,7 +1103,11 @@ async function stateFields(state: SpecDrivenState) {
     // specification folders"): every folder the app knows, each with its
     // kind, the open one first, then newest first — what the folder dialog
     // and the recent ▾ menu list.
-    recentFolders: mergeRecentFolders(state, recent, codeRecent),
+    recentFolders: folders,
+    // Those of them another window shows (specs/app/multiple-windows.feature.md
+    // "Opening a window"): the folder dialog marks each and offers its
+    // window, since a folder is open in at most one.
+    otherWindowFolders: shownElsewhere(folders, currentWorkspace()),
     // Where each GitHub url on that list is cloned on this computer
     // (specs/app/spec-folders.feature.md "Manage specification folders"),
     // which the Spec folders dialog shows under the url. The hosted server's

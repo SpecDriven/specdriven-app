@@ -7,8 +7,12 @@
  *   bun run dev:electron   in another
  *
  * The Electron main process is rebuilt on every launch (it's a ~50ms build);
- * ELECTRON_DEV makes it load http://localhost:3000 instead of app://, so
- * edits hot-reload inside the desktop window.
+ * ELECTRON_DEV makes its windows load http://localhost:3000 instead of
+ * app://, so frontend edits hot-reload inside them. The API calls those
+ * pages make are answered by the desktop process itself, as in the packaged
+ * app — which is what lets every window show a folder of its own
+ * (specs/app/multiple-windows.feature.md) — so an edit under src/server or
+ * src/electron shows after the next launch.
  */
 import { $ } from "bun";
 import { copyFile, mkdir } from "node:fs/promises";

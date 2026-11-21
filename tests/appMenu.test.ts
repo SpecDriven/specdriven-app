@@ -63,7 +63,7 @@ describe("the File menu's window items", () => {
     expect(items[2]!.submenu).toEqual([{ label: "No Recent Folders", enabled: false }]);
   });
 
-  test("without them the standard File menu stays — a development run", () => {
+  test("without them the standard File menu stays", () => {
     expect(appMenuTemplate({ platform: "darwin", onCheckForUpdates: () => {} })[1]).toEqual({ role: "fileMenu" });
   });
 });

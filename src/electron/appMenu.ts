@@ -56,10 +56,7 @@ function fileMenu(input: FileMenuInput, mac: boolean): MenuItemConstructorOption
 export interface AppMenuInput {
   platform: NodeJS.Platform;
   onCheckForUpdates: () => void;
-  /**
-   * The File menu's window items; absent, the standard File menu — a
-   * development run, whose pages the dev server answers for one folder.
-   */
+  /** The File menu's window items; absent, the standard File menu. */
   file?: FileMenuInput;
   /** The Debug submenu, in a development run; nothing in a packaged app. */
   debug?: MenuItemConstructorOptions[];

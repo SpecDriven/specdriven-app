@@ -55,6 +55,16 @@ export function windowShowing(folder: WorkspaceFolder | PendingFolder, except?: 
 }
 
 /**
+ * Of the folders on a list, those another window shows or is about to: the
+ * folder dialog marks them, and offers their window in place of opening
+ * them a second time. None wherever there are no windows.
+ */
+export function shownElsewhere<F extends PendingFolder>(folders: readonly F[], except: Workspace | null): F[] {
+  if (workspaces().every((w) => w === except)) return [];
+  return folders.filter((folder) => windowShowing(folder, except) !== null);
+}
+
+/**
  * How many coding agent sessions of a window's folder are at work: closing
  * the window ends them, so it asks first ("Closing and restarting").
  */
