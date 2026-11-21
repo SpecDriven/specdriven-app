@@ -353,88 +353,35 @@ export async function listComments(repo: GitHubRepo, number: number): Promise<Is
 
 // --- Embedded images -----------------------------------------------------------------
 
-/**
- * The branch of the code repo app images are committed to so GitHub can show
- * them: one of their own, never the default branch. A default branch is often
- * protected (a ruleset asking for pull requests), which refuses a direct
- * commit from anyone but an admin — the upload then failed and the issue kept
- * an app-local `/api/images/…` link GitHub resolves against its own site. An
- * orphan branch holding only images is also kept out of the code's history.
- */
-const ISSUE_IMAGES_BRANCH = "specdriven-issue-images";
+/** Where in the code repo an app image is committed so GitHub can show it. */
+const ISSUE_IMAGES_DIR = ".specdriven/issue-images";
 
-/** What the images branch's first commit says it is for. */
-const ISSUE_IMAGES_README =
-  "# Issue images\n\nScreenshots pasted into GitHub issues from SpecDriven, stored here so the issues can show them.\nThis branch holds only images; it is never merged.\n";
-
-/**
- * The url an issue body shows a committed image by: the file's GitHub page
- * with `?raw=true`, which GitHub answers with the bytes. Unlike the contents
- * API's `download_url` it carries no short-lived token, so the image keeps
- * showing on a private repository, and the repo url already names the host
- * (GitHub Enterprise included).
- */
-export function issueImageUrl(repo: GitHubRepo, name: string): string {
-  return `${repo.url}/blob/${ISSUE_IMAGES_BRANCH}/${encodeURIComponent(name)}?raw=true`;
+/** The part of GitHub's contents-API answer that names the file's page. */
+interface ContentsFile {
+  html_url?: string | null;
 }
 
 /**
- * Make sure the images branch exists: when it does not, create it as an
- * orphan whose one commit holds a README, through the git data API (the
- * contents API can only write to a branch that is already there). A create
- * that loses a race to another upload ("Reference already exists") is fine.
+ * Commit an image's bytes to the code repo's default branch through the
+ * contents API and return the url an issue shows it by: the file's GitHub
+ * page with `?raw=true`, which carries no expiring token, so the image shows
+ * on a private repository too. The name is content-addressed (images.ts
+ * currentImageName), so a GET first finds a screenshot already committed and
+ * the PUT only runs for a new one.
  */
-async function ensureIssueImagesBranch(repo: GitHubRepo): Promise<void> {
-  const base = repoPath(repo);
-  const ref = await github<unknown>(repo.host, `${base}/git/ref/heads/${ISSUE_IMAGES_BRANCH}`).catch(() => null);
-  if (ref) return;
-  const tree = await github<{ sha: string }>(repo.host, `${base}/git/trees`, {
-    method: "POST",
-    json: { tree: [{ path: "README.md", mode: "100644", type: "blob", content: ISSUE_IMAGES_README }] },
-  });
-  const commit = await github<{ sha: string }>(repo.host, `${base}/git/commits`, {
-    method: "POST",
-    json: { message: "Start the issue images branch", tree: tree.sha, parents: [] },
-  });
-  await github<unknown>(repo.host, `${base}/git/refs`, {
-    method: "POST",
-    json: { ref: `refs/heads/${ISSUE_IMAGES_BRANCH}`, sha: commit.sha },
-  }).catch((e: unknown) => {
-    // 422 is GitHub's "Reference already exists": someone else made it first.
-    if (!(e instanceof GitHubError && e.status === 502 && /already exists/i.test(e.message))) throw e;
-  });
-}
-
-/**
- * Commit an image's bytes to the images branch through the contents API and
- * return the url an issue shows it by (issueImageUrl). The name is
- * content-addressed (images.ts currentImageName), so the same screenshot is
- * one file no matter how many issues embed it: a GET first finds one already
- * committed, and the PUT only runs for a name the branch does not hold. Using
- * the bytes' current hash means a screenshot edited in place since it was
- * pasted is stored under the name its bytes now go by.
- */
-async function uploadIssueImage(
-  repo: GitHubRepo,
-  name: string,
-  bytes: Uint8Array,
-  ensureBranch: () => Promise<void>,
-): Promise<string> {
+async function uploadIssueImage(repo: GitHubRepo, name: string, bytes: Uint8Array): Promise<string | null> {
   const stored = currentImageName(name, bytes);
-  const path = `${repoPath(repo)}/contents/${encodeURIComponent(stored)}`;
-  const branch = encodeURIComponent(ISSUE_IMAGES_BRANCH);
-  const existing = await github<unknown>(repo.host, `${path}?ref=${branch}`).catch(() => null);
-  if (existing) return issueImageUrl(repo, stored);
-  await ensureBranch();
-  await github<unknown>(repo.host, path, {
-    method: "PUT",
-    json: {
-      message: `Add issue image: ${stored}`,
-      content: Buffer.from(bytes).toString("base64"),
-      branch: ISSUE_IMAGES_BRANCH,
-    },
-  });
-  return issueImageUrl(repo, stored);
+  const path = `${repoPath(repo)}/contents/${ISSUE_IMAGES_DIR}/${encodeURIComponent(stored)}`;
+  const existing = await github<ContentsFile>(repo.host, path).catch(() => null);
+  const htmlUrl =
+    existing?.html_url ??
+    (
+      await github<{ content?: ContentsFile | null }>(repo.host, path, {
+        method: "PUT",
+        json: { message: `Add issue image: ${stored}`, content: Buffer.from(bytes).toString("base64") },
+      })
+    ).content?.html_url;
+  return htmlUrl ? `${htmlUrl}?raw=true` : null;
 }
 
 /**
@@ -449,16 +396,12 @@ export async function uploadBodyImages(repo: GitHubRepo, dataDir: string, body: 
   const names = referencedImageNames(body);
   if (names.size === 0) return body;
   const uploaded = new Map<string, string>();
-  // The branch is looked up (and made) at most once per body, and only when
-  // an image actually has to be committed.
-  let branchReady: Promise<void> | null = null;
-  const ensureBranch = () => (branchReady ??= ensureIssueImagesBranch(repo));
   for (const name of names) {
     const bytes = await readImage(dataDir, name);
     if (!bytes) continue;
     // A refused upload (no push access, a rate limit) leaves this one link
     // local rather than failing the whole issue: a dead image beats a lost one.
-    const url = await uploadIssueImage(repo, name, bytes, ensureBranch).catch(() => null);
+    const url = await uploadIssueImage(repo, name, bytes).catch(() => null);
     if (url) uploaded.set(name, url);
   }
   let rewritten = body;
