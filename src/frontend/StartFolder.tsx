@@ -79,6 +79,19 @@ export function recentKindOf(recent: readonly FolderEntry[], path: string): Fold
   return kinds.size === 1 ? [...kinds][0]! : null;
 }
 
+/**
+ * Whether the first-run screen is on show. A window with no folder open
+ * shows it — except a window that was opened for a folder
+ * (specs/app/multiple-windows.feature.md "Opening a window") while it is
+ * opening that folder: it shows the app's loading look and then the folder,
+ * and never the question of where the work is. The screen comes up after
+ * all when the folder did not open — it is missing, or cannot be told
+ * apart — so the reason, or the question, has somewhere to be read.
+ */
+export function showsFirstRun(needsFolder: boolean, openingOwnFolder: boolean): boolean {
+  return needsFolder && !openingOwnFolder;
+}
+
 /** A folder that is neither kind by its contents: the screen asks which. */
 export interface KindQuestion {
   /** What to open as a specification folder. */

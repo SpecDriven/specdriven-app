@@ -12,6 +12,7 @@ import type { FolderEntry } from "../src/frontend/SpecFolders";
 import {
   parseFolderVerdict,
   recentKindOf,
+  showsFirstRun,
   StartFolderField,
   startFolderStep,
   type FolderVerdict,
@@ -216,5 +217,19 @@ describe("what the screen does with the server's answer", () => {
     expect(recentKindOf(recent, "/never/opened")).toBeNull();
     // Opened as both: the contents decide.
     expect(recentKindOf([code("/work/repo"), spec("/work/repo")], "/work/repo")).toBeNull();
+  });
+});
+
+// specs/app/multiple-windows.feature.md "a folder opens in a window of its
+// own from the folder dialog".
+describe("the first-run screen and a window opened for a folder", () => {
+  test("a window opening the folder it was opened for does not show the first-run screen", () => {
+    // No folder yet, and it is on its way: the loading look, not the question.
+    expect(showsFirstRun(true, true)).toBe(false);
+    // The folder did not open — missing, or of no clear kind: the screen comes up, to say so.
+    expect(showsFirstRun(true, false)).toBe(true);
+    // A window with its folder open never shows it.
+    expect(showsFirstRun(false, false)).toBe(false);
+    expect(showsFirstRun(false, true)).toBe(false);
   });
 });

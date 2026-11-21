@@ -282,6 +282,7 @@ import {
 import {
   parseFolderVerdict,
   recentKindOf,
+  showsFirstRun,
   StartFolderField,
   startFolderStep,
   type KindQuestion,
@@ -1396,6 +1397,9 @@ export function App() {
   // this window was opened for, which it opens once it has booted.
   const [canOpenWindows, setCanOpenWindows] = useState(false);
   const [pendingFolder, setPendingFolder] = useState<{ path: string; kind?: FolderKind } | null>(null);
+  // The window is opening the folder it was opened for: until that is
+  // settled the first-run screen stays away (StartFolder.tsx showsFirstRun).
+  const [openingOwnFolder, setOpeningOwnFolder] = useState(false);
   // Demo mode: the data directory is a fixed ephemeral copy — everything that
   // changes or syncs it (✎, recents ▾, Sync, git/GitHub settings) hides.
   const [demo, setDemo] = useState(false);
@@ -2234,6 +2238,7 @@ export function App() {
         if (typeof state.pendingFolder?.path === "string") {
           const kind = state.pendingFolder.kind;
           setPendingFolder({ path: state.pendingFolder.path, ...(kind === "spec" || kind === "code" ? { kind } : {}) });
+          setOpeningOwnFolder(true);
         }
         setDemo(Boolean(state.demo));
         setReadOnly(Boolean(state.readOnly));
@@ -2811,12 +2816,16 @@ export function App() {
   // window", a link to a folder no window shows) starts with none and opens
   // that one here, the way the first-run screen opens the folder typed into
   // it: asked about when it is missing or its kind is not clear, and with
-  // the entry link honored.
+  // the entry link honored. The first-run screen is not shown meanwhile: it
+  // comes up only when the folder did not open, with the reason or the
+  // question on it.
   useEffect(() => {
     if (!pendingFolder || !needsRepo || settingRepo) return;
     const { path, kind } = pendingFolder;
     setPendingFolder(null);
-    void (kind === "code" ? openCodeRepo(path) : kind === "spec" ? saveRepo(path) : openStartFolder(path));
+    void Promise.resolve(kind === "code" ? openCodeRepo(path) : kind === "spec" ? saveRepo(path) : openStartFolder(path))
+      .catch(() => {})
+      .finally(() => setOpeningOwnFolder(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingFolder, needsRepo, settingRepo]);
 
@@ -9235,20 +9244,27 @@ export function App() {
     }
   };
 
-  if (loading)
+  // Also while a window opens the folder it was opened for, so that it goes
+  // from this to the folder with no first-run screen between. A question
+  // on the way — make a missing folder? — is the app's own dialog.
+  const openingFolder = needsRepo && !showsFirstRun(needsRepo, openingOwnFolder);
+  if (loading || openingFolder)
     return (
-      <main className="layout skeleton-shell" aria-busy="true" aria-label="Loading">
-        <aside>
-          <span className="skeleton" style={{ height: "1.75rem", width: "60%" }} />
-          <span className="skeleton" style={{ height: "2rem" }} />
-          {[70, 55, 65, 50, 60, 45].map((w, i) => (
-            <span key={i} className="skeleton" style={{ height: "1.1rem", width: `${w}%` }} />
-          ))}
-        </aside>
-        <section className="editor">
-          <PageSkeleton cards={3} />
-        </section>
-      </main>
+      <>
+        <main className="layout skeleton-shell" aria-busy="true" aria-label={loading ? "Loading" : "Opening the folder"}>
+          <aside>
+            <span className="skeleton" style={{ height: "1.75rem", width: "60%" }} />
+            <span className="skeleton" style={{ height: "2rem" }} />
+            {[70, 55, 65, 50, 60, 45].map((w, i) => (
+              <span key={i} className="skeleton" style={{ height: "1.1rem", width: `${w}%` }} />
+            ))}
+          </aside>
+          <section className="editor">
+            <PageSkeleton cards={3} />
+          </section>
+        </main>
+        {openingFolder && modal}
+      </>
     );
 
   // The page's first read failed (specs/ui/app-start.feature.md "the server

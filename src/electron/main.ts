@@ -102,6 +102,7 @@ import {
   safeStorageAvailable,
 } from "./secureToken";
 import { mimeType, shellHtml, staticFilePath } from "./static";
+import { windowFolderName, windowTitle } from "./windowTitle";
 import { bundleOf, handoverCommand, handoverEnv, planActivation, previousBundle, swapBundle } from "./updateActivation";
 import {
   DEFAULT_HEIGHT,
@@ -294,6 +295,8 @@ interface AppWindow {
   win: BrowserWindow;
   /** The folder the window shows. */
   workspace: Workspace;
+  /** The title its page last gave itself; the window's own names the folder too. */
+  pageTitle: string;
   /** The user was asked about its working sessions and said to close it. */
   closeConfirmed: boolean;
 }
@@ -377,6 +380,17 @@ app.on("open-url", (event, url) => {
   const path = parseDesktopLink(url);
   if (path) links.open(path);
 });
+
+/**
+ * Name a window after its folder and the page open in it
+ * (src/electron/windowTitle.ts): what the Dock menu, the Window menu and
+ * the task switcher list it by, where every page's own title starts with
+ * the app's name.
+ */
+function retitle(entry: AppWindow): void {
+  if (entry.win.isDestroyed()) return;
+  entry.win.setTitle(windowTitle(entry.pageTitle, windowFolderName(entry.workspace.folder)));
+}
 
 /** A window's place on screen as it is saved. */
 function placeOnScreen(w: BrowserWindow): WindowState {
@@ -462,7 +476,7 @@ function createWindow(spec: { workspace: Workspace; bounds?: WindowState | null;
       spellcheck: true,
     },
   });
-  const entry: AppWindow = { win, workspace: spec.workspace, closeConfirmed: false };
+  const entry: AppWindow = { win, workspace: spec.workspace, pageTitle: "", closeConfirmed: false };
   // Looked up by id from here on: `win.webContents` is gone once the window is.
   const contentsId = win.webContents.id;
   windows.set(contentsId, entry);
@@ -483,6 +497,15 @@ function createWindow(spec: { workspace: Workspace; bounds?: WindowState | null;
     });
     if (template) Menu.buildFromTemplate(template).popup({ window: win });
   });
+
+  // The page titles itself; the window takes that and puts its folder's
+  // name first.
+  win.on("page-title-updated", (event, title) => {
+    event.preventDefault();
+    entry.pageTitle = title;
+    retitle(entry);
+  });
+  retitle(entry);
 
   if (saved?.maximized) win.maximize();
 
@@ -944,9 +967,14 @@ if (!app.requestSingleInstanceLock()) {
     });
     // A window changed folder: the list to bring back changes with it,
     // and the folder joins Open Recent.
-    onWorkspaceChange((change) => {
+    onWorkspaceChange((change, workspace) => {
       if (quitting) return;
-      if (change === "folder") saveSession();
+      if (change === "folder") {
+        saveSession();
+        // The window is named after the folder it shows now.
+        const entry = windowOf(workspace);
+        if (entry) retitle(entry);
+      }
       void refreshRecentFolders();
     });
     installAppMenu();
