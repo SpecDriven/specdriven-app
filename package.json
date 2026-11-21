@@ -1,6 +1,6 @@
 {
   "name": "specdriven",
-  "version": "0.1.291",
+  "version": "0.1.292",
   "description": "Enterprise spec-driven development workspace",
   "homepage": "https://github.com/SpecDriven/specdriven-app",
   "module": "src/index.ts",
@@ -88,6 +88,8 @@
     "mac": {
       "icon": "build/icon.icns",
       "category": "public.app-category.developer-tools",
+      "identity": "-",
+      "hardenedRuntime": false,
       "notarize": false,
       "target": [
         {
