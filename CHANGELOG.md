@@ -4,6 +4,10 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.291 — 2026-11-21
+
+- Multiple windows: the desktop app opens several folders at once, each in a window of its own ([#487](https://github.com/SpecDriven/specdriven-app/pull/487))
+
 ## v0.1.290 — 2026-11-20
 
 - Signed commits: the app signs its commits to the GitHub urls listed in Settings ([#486](https://github.com/SpecDriven/specdriven-app/pull/486))
