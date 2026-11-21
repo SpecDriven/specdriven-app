@@ -27,7 +27,7 @@ import { isDemoMode } from "./demoMode";
 import { getLogger, withSpan } from "./telemetry";
 import { RepoLocks } from "./sync/RepoLocks";
 import { tickEvery } from "./sync/SyncLoop";
-import { sync as pluginSync } from "../plugins/host/loader";
+import { pluginGateFor, sync as pluginSync } from "../plugins/host/loader";
 
 export const DEFAULT_RELOAD_SECONDS = 60;
 
@@ -152,7 +152,7 @@ async function tick(dir: string, asked: number): Promise<string> {
       // drift pass below sees the migrated tree.
       const migrated = await migrateToSpecsFolder(dir, {
         reserved: pluginSync.reserved(),
-        moved: (at, moved) => pluginSync.runMoved(at, moved),
+        moved: (at, moved) => pluginSync.runMoved(at, moved, pluginGateFor(at)),
       });
       if (migrated > 0) parts.push(`moved ${migrated} feature(s) under specs/`);
       // Documents an older app version filed under the store's per-kind
@@ -178,7 +178,9 @@ async function tick(dir: string, asked: number): Promise<string> {
       // here when their switch is on and the repo has none
       // (src/plugins/builtin/pages/host.ts), and an installed plugin's, the
       // Event Models' among them.
-      parts.push(...(await pluginSync.run(dir)));
+      // The hooks of the plugins this folder has on — not of one mounted
+      // for another open folder (specs/app/multiple-windows.feature.md).
+      parts.push(...(await pluginSync.run(dir, pluginGateFor(dir))));
       // The format marker, so an older app stops at this folder; written
       // after the passes above have brought the data up to this format.
       if (await stampDataFormat(dir)) parts.push("wrote the data format marker");

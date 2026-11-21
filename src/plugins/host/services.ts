@@ -5,6 +5,7 @@
 // registration a disposer. api.ts registers the core rows first, so core
 // routes match before a plugin's.
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { Disposer } from "../kernel";
 import type { SessionSection } from "../../server/agent";
 import type { Handler, Params } from "../../server/http";
@@ -17,10 +18,19 @@ export interface ApiMatch {
   pattern: string;
 }
 
+/**
+ * Which plugins' registrations count for a caller: with several folders
+ * open, each has its own enabled plugins while all of them are mounted
+ * (specs/app/multiple-windows.feature.md "Background work"). What the app
+ * itself registered always counts.
+ */
+export type PluginGate = (plugin: string) => boolean;
+
 export interface RouteRegistry {
   /** Pattern segments starting with `:` bind the (decoded) path segment. */
   add(method: string, pattern: string, handler: Handler): Disposer;
-  match(method: string, pathname: string): ApiMatch | null;
+  /** `allow` leaves out the routes of the plugins it refuses. */
+  match(method: string, pathname: string, allow?: PluginGate): ApiMatch | null;
 }
 
 export interface ShellPaths {
@@ -38,8 +48,8 @@ export interface SyncHooks {
    * dir; whatever string it returns joins the tick's log line.
    */
   drift(fn: (dir: string) => Promise<string | void>): Disposer;
-  /** The tick's side: every hook in registration order. */
-  run(dir: string): Promise<string[]>;
+  /** The tick's side: every hook in registration order — those `allow` lets through. */
+  run(dir: string, allow?: PluginGate): Promise<string[]>;
   /**
    * A top-level folder of the data repo the plugin owns: the specs-folder
    * migration (src/server/migrate.ts) never takes a `.feature.md` in it
@@ -53,8 +63,8 @@ export interface SyncHooks {
    * to rewrite a plugin file that names them.
    */
   moved(fn: (dir: string, moved: ReadonlyMap<string, string>) => Promise<void>): Disposer;
-  /** The migration's side: every hook in registration order. */
-  runMoved(dir: string, moved: ReadonlyMap<string, string>): Promise<void>;
+  /** The migration's side: every hook in registration order — those `allow` lets through. */
+  runMoved(dir: string, moved: ReadonlyMap<string, string>, allow?: PluginGate): Promise<void>;
 }
 
 /**
@@ -109,6 +119,22 @@ declare module "../kernel" {
   }
 }
 
+// Whose registration it is. A plugin is mounted inside `asPlugin`, so what
+// its `apply` registers — then or later, from anything it started — carries
+// its id; what the app registers itself carries none.
+const mounting = new AsyncLocalStorage<string>();
+
+/** Run a plugin's mount as that plugin: the routes and hooks it adds are its own. */
+export function asPlugin<T>(id: string, fn: () => T): T {
+  return mounting.run(id, fn);
+}
+
+function owner(): string | null {
+  return mounting.getStore() ?? null;
+}
+
+const allowed = (plugin: string | null, allow?: PluginGate) => plugin === null || !allow || allow(plugin);
+
 /** Remove one entry from a list, if it is still there. */
 function drop<T>(list: T[], item: T): void {
   const i = list.indexOf(item);
@@ -116,10 +142,10 @@ function drop<T>(list: T[], item: T): void {
 }
 
 export function createRouteRegistry(): RouteRegistry {
-  const rows: { method: string; pattern: string; handler: Handler }[] = [];
+  const rows: { method: string; pattern: string; handler: Handler; plugin: string | null }[] = [];
   return {
     add(method, pattern, handler) {
-      const row = { method, pattern, handler };
+      const row = { method, pattern, handler, plugin: owner() };
       rows.push(row);
       return () => {
         const i = rows.indexOf(row);
@@ -129,10 +155,11 @@ export function createRouteRegistry(): RouteRegistry {
     // Segments are matched before decoding, so an encoded `/` in a parameter
     // (`billing%2Fq.feature.md`) stays one segment — the params come out
     // decoded. First match wins, in registration order.
-    match(method, pathname) {
+    match(method, pathname, allow) {
       const segments = pathname.split("/");
-      for (const { method: m, pattern, handler } of rows) {
+      for (const { method: m, pattern, handler, plugin } of rows) {
         if (m !== method) continue;
+        if (!allowed(plugin, allow)) continue;
         const want = pattern.split("/");
         if (want.length !== segments.length) continue;
         const params: Params = {};
@@ -192,18 +219,23 @@ export function createShellPaths(): ShellPaths {
 }
 
 export function createSyncHooks(): SyncHooks {
-  const hooks: ((dir: string) => Promise<string | void>)[] = [];
+  const hooks: { fn: (dir: string) => Promise<string | void>; plugin: string | null }[] = [];
   const folders: string[] = [];
-  const movedHooks: ((dir: string, moved: ReadonlyMap<string, string>) => Promise<void>)[] = [];
+  const movedHooks: {
+    fn: (dir: string, moved: ReadonlyMap<string, string>) => Promise<void>;
+    plugin: string | null;
+  }[] = [];
   return {
     drift(fn) {
-      hooks.push(fn);
-      return () => drop(hooks, fn);
+      const row = { fn, plugin: owner() };
+      hooks.push(row);
+      return () => drop(hooks, row);
     },
-    async run(dir) {
+    async run(dir, allow) {
       const lines: string[] = [];
       for (const hook of [...hooks]) {
-        const line = await hook(dir);
+        if (!allowed(hook.plugin, allow)) continue;
+        const line = await hook.fn(dir);
         if (line) lines.push(line);
       }
       return lines;
@@ -216,11 +248,14 @@ export function createSyncHooks(): SyncHooks {
       return [...new Set(folders)];
     },
     moved(fn) {
-      movedHooks.push(fn);
-      return () => drop(movedHooks, fn);
+      const row = { fn, plugin: owner() };
+      movedHooks.push(row);
+      return () => drop(movedHooks, row);
     },
-    async runMoved(dir, moved) {
-      for (const hook of [...movedHooks]) await hook(dir, moved);
+    async runMoved(dir, moved, allow) {
+      for (const hook of [...movedHooks]) {
+        if (allowed(hook.plugin, allow)) await hook.fn(dir, moved);
+      }
     },
   };
 }

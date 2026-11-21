@@ -2,7 +2,7 @@
 // each platform keeps it, the Debug menu only where it is given.
 import { describe, expect, test } from "bun:test";
 import type { MenuItemConstructorOptions } from "electron";
-import { appMenuTemplate, CHECK_FOR_UPDATES } from "../src/electron/appMenu";
+import { appMenuTemplate, CHECK_FOR_UPDATES, NEW_WINDOW, OPEN_FOLDER, OPEN_RECENT } from "../src/electron/appMenu";
 
 function labels(items: MenuItemConstructorOptions[] | undefined): (string | undefined)[] {
   return (items ?? []).map((i) => (i.type === "separator" ? "separator" : (i.label ?? i.role)));
@@ -31,5 +31,39 @@ describe("Check for Updates… in the application menu", () => {
     expect(dev.map((m) => m.label ?? m.role)).toEqual(["appMenu", "fileMenu", "editMenu", "viewMenu", "windowMenu", "Debug"]);
     expect(dev.at(-1)!.submenu).toBe(debug);
     expect(appMenuTemplate({ platform: "darwin", onCheckForUpdates: () => {} }).some((m) => m.label === "Debug")).toBe(false);
+  });
+});
+
+// specs/app/multiple-windows.feature.md "Opening a window".
+describe("the File menu's window items", () => {
+  const file = (recent: string[], heard: string[]) => ({
+    onNewWindow: () => heard.push("new"),
+    onOpenFolder: () => heard.push("open"),
+    recent: recent.map((label) => ({ label, onOpen: () => heard.push(label) })),
+  });
+
+  test("File holds New Window, Open Folder… and the recent folders, each opening a window", () => {
+    const heard: string[] = [];
+    const menu = appMenuTemplate({ platform: "darwin", onCheckForUpdates: () => {}, file: file(["/specs/a", "/code/b"], heard) });
+    const items = menu[1]!.submenu as MenuItemConstructorOptions[];
+    expect(menu[1]!.label).toBe("File");
+    expect(labels(items)).toEqual([NEW_WINDOW, OPEN_FOLDER, OPEN_RECENT, "separator", "close"]);
+    const recent = items[2]!.submenu as MenuItemConstructorOptions[];
+    expect(labels(recent)).toEqual(["/specs/a", "/code/b"]);
+    (items[0]!.click as () => void)();
+    (items[1]!.click as () => void)();
+    (recent[1]!.click as () => void)();
+    expect(heard).toEqual(["new", "open", "/code/b"]);
+  });
+
+  test("with no recent folders the submenu says so, and File ends in Quit off macOS", () => {
+    const menu = appMenuTemplate({ platform: "linux", onCheckForUpdates: () => {}, file: file([], []) });
+    const items = menu[0]!.submenu as MenuItemConstructorOptions[];
+    expect(labels(items).at(-1)).toBe("quit");
+    expect(items[2]!.submenu).toEqual([{ label: "No Recent Folders", enabled: false }]);
+  });
+
+  test("without them the standard File menu stays", () => {
+    expect(appMenuTemplate({ platform: "darwin", onCheckForUpdates: () => {} })[1]).toEqual({ role: "fileMenu" });
   });
 });

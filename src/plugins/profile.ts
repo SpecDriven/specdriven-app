@@ -40,7 +40,7 @@ type State = Record<string, unknown>;
  * list of its own — where the coding agents switch themselves on — else the
  * data folder.
  */
-function profileRepo(state: State): string | null {
+export function profileRepo(state: State): string | null {
   for (const repo of [state.openCodeRepo, state.dataRepo]) {
     if (typeof repo === "string" && repo.trim() !== "") return repo.trim();
   }

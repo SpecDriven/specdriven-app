@@ -14,9 +14,16 @@ import {
   packagedBinary,
   parseArgs,
   scanLog,
+  seedTwoWindows,
   summarizeError,
+  windowsExpected,
   type RunResult,
 } from "../scripts/crash-test-desktop";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { loadWindowSession, planRestore } from "../src/electron/windowSession";
+import { SETTINGS_VERSION } from "../src/server/settingsModel";
 
 const cleanRun = (overrides: Partial<RunResult> = {}): RunResult => ({
   run: 1,
@@ -31,6 +38,8 @@ const cleanRun = (overrides: Partial<RunResult> = {}): RunResult => ({
   screen: "SpecDriven No folder is open yet. Where is your work?",
   link: null,
   entry: "app://specdriven/",
+  expectedWindows: 1,
+  windows: 1,
   findings: [],
   crashDumps: 0,
   log: "dist/crash-test/run-1.log",
@@ -201,4 +210,36 @@ test("options: a mistyped flag or a bad count stops before anything is built", (
   expect(() => parseArgs(["--runs", "0"])).toThrow(/--runs needs a number ≥ 1/);
   expect(() => parseArgs(["--runs"])).toThrow(/--runs needs a value/);
   expect(() => parseArgs(["--uptime", "soon"])).toThrow(/--uptime needs a number/);
+});
+
+// specs/app/multiple-windows.feature.md "Closing and restarting": every
+// restart of the test has two windows to bring back.
+test("the first run is a first run; every restart must render two windows", () => {
+  expect([1, 2, 3].map(windowsExpected)).toEqual([1, 2, 2]);
+  const one = cleanRun({ readyMs: null, expectedWindows: 2, windows: 1 });
+  expect(judge(one, timeouts)).toEqual(["only 1 of the 2 windows the run before left open rendered within 60s"]);
+  expect(judge(cleanRun({ expectedWindows: 2, windows: 2 }), timeouts)).toEqual([]);
+});
+
+test("the profile is left as an app with two folders open would leave it, the first run's geometry kept", () => {
+  const profile = mkdtempSync(join(tmpdir(), "specdriven-crash-seed-"));
+  try {
+    const home = join(profile, "specdriven-home");
+    const at = { x: 12, y: 34, width: 1300, height: 800, maximized: false };
+    writeFileSync(join(profile, "window-state.json"), JSON.stringify({ version: 2, windows: [], bounds: { "": at } }));
+    const folders = seedTwoWindows(profile, home, SETTINGS_VERSION);
+    expect(folders.every((dir) => existsSync(join(dir, "specs", "sample.feature.md")))).toBe(true);
+    // The app reads the file back as two windows, the second in front.
+    const session = loadWindowSession(join(profile, "window-state.json"))!;
+    expect(planRestore(session, { dataRepo: folders[0]! })).toEqual([
+      { folder: { dataRepo: folders[0]! } },
+      { folder: { dataRepo: folders[1]! }, focused: true },
+    ]);
+    expect(session.bounds[""]).toEqual(at);
+    const settings = readFileSync(join(home, "settings.yaml"), "utf8");
+    expect(settings).toContain(`settingsVersion: ${SETTINGS_VERSION}`);
+    expect(settings).toContain(`dataRepo: ${JSON.stringify(folders[0])}`);
+  } finally {
+    rmSync(profile, { recursive: true, force: true });
+  }
 });

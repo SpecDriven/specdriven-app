@@ -44,6 +44,7 @@ import {
 import { Logo } from "./Logo";
 import { SidebarSection } from "./SidebarSection";
 import {
+  AppWindow,
   Activity,
   Check,
   ChevronDown,
@@ -61,7 +62,6 @@ import {
   ExternalLink,
   FileText,
   FolderInput,
-  FolderTree,
   GitPullRequest,
   Flag,
   Home,
@@ -282,6 +282,7 @@ import {
 import {
   parseFolderVerdict,
   recentKindOf,
+  showsFirstRun,
   StartFolderField,
   startFolderStep,
   type KindQuestion,
@@ -1304,6 +1305,10 @@ export function App() {
   // with its kind, the open one first, then most recent first — what the ▾
   // beside the folder name drops down (up to 10) and the folder dialog lists.
   const [recentFolders, setRecentFolders] = useState<FolderEntry[]>([]);
+  // Those of them the app's other windows show (specs/app/multiple-windows
+  // .feature.md "The folder dialog and the windows"): the folder dialog
+  // offers each one's window in place of opening it a second time.
+  const [otherWindowFolders, setOtherWindowFolders] = useState<FolderEntry[]>([]);
   // Where each GitHub url among them is cloned on this computer — what the
   // Spec folders dialog shows under the url.
   const [recentRepoDirs, setRecentRepoDirs] = useState<Record<string, string>>({});
@@ -1339,6 +1344,7 @@ export function App() {
     codeRepoMode?: unknown;
     codeRepoDir?: unknown;
     recentFolders?: unknown;
+    otherWindowFolders?: unknown;
     canOpenCodeRepo?: unknown;
   }) => {
     // An answer that says (every /api/state one) sets the mode; a code
@@ -1349,6 +1355,7 @@ export function App() {
       setCodeRepoDir(code);
     }
     if (Array.isArray(state.recentFolders)) setRecentFolders(parseRecentFolders(state.recentFolders));
+    if (Array.isArray(state.otherWindowFolders)) setOtherWindowFolders(parseRecentFolders(state.otherWindowFolders));
     if (typeof state.canOpenCodeRepo === "boolean") setCanOpenCodeRepo(state.canOpenCodeRepo);
     const open = codeRepoRef.current ? null : (state.dataRepo ?? null);
     const recent = Array.isArray(state.recentDataRepos) ? (state.recentDataRepos as string[]) : [];
@@ -1385,6 +1392,14 @@ export function App() {
   // Whether the runtime offers a native folder chooser
   // (specs/ui/app-start.feature.md).
   const [canChooseFolder, setCanChooseFolder] = useState(false);
+  // Several windows (specs/app/multiple-windows.feature.md): whether a folder
+  // can be opened in a window of its own — the desktop app — and the folder
+  // this window was opened for, which it opens once it has booted.
+  const [canOpenWindows, setCanOpenWindows] = useState(false);
+  const [pendingFolder, setPendingFolder] = useState<{ path: string; kind?: FolderKind } | null>(null);
+  // The window is opening the folder it was opened for: until that is
+  // settled the first-run screen stays away (StartFolder.tsx showsFirstRun).
+  const [openingOwnFolder, setOpeningOwnFolder] = useState(false);
   // Demo mode: the data directory is a fixed ephemeral copy — everything that
   // changes or syncs it (✎, recents ▾, Sync, git/GitHub settings) hides.
   const [demo, setDemo] = useState(false);
@@ -2219,6 +2234,12 @@ export function App() {
         }
         setSyncServerUrl(typeof state.syncServerUrl === "string" ? state.syncServerUrl : null);
         setCanChooseFolder(Boolean(state.canChooseFolder));
+        setCanOpenWindows(Boolean(state.canOpenWindows));
+        if (typeof state.pendingFolder?.path === "string") {
+          const kind = state.pendingFolder.kind;
+          setPendingFolder({ path: state.pendingFolder.path, ...(kind === "spec" || kind === "code" ? { kind } : {}) });
+          setOpeningOwnFolder(true);
+        }
         setDemo(Boolean(state.demo));
         setReadOnly(Boolean(state.readOnly));
         setHosted(Boolean(state.hosted));
@@ -2514,6 +2535,34 @@ export function App() {
   const openSpecTrapRef = useFocusTrap(openSpecImportOpen !== null);
   const importTrapRef = useFocusTrap(importOpen !== null);
   const foldersTrapRef = useFocusTrap(foldersOpen);
+  // The folder dialog lists what is so now (specs/app/multiple-windows
+  // .feature.md "The folder dialog and the windows"): a folder another
+  // window opened since this page last asked is on the list, and every
+  // other window's folder is marked. Read as the dialog opens, and again
+  // whenever this window comes back to the front while it is up.
+  useEffect(() => {
+    if (!foldersOpen) return;
+    let gone = false;
+    const read = async () => {
+      try {
+        const res = await fetch("/api/state");
+        const state = res.ok ? await res.json() : null;
+        if (!state || gone) return;
+        if (Array.isArray(state.recentFolders)) setRecentFolders(parseRecentFolders(state.recentFolders));
+        if (Array.isArray(state.otherWindowFolders)) setOtherWindowFolders(parseRecentFolders(state.otherWindowFolders));
+        const dirs = state.recentDataRepoDirs;
+        if (dirs && typeof dirs === "object") setRecentRepoDirs(dirs as Record<string, string>);
+      } catch {
+        // The list stays as this page last heard it.
+      }
+    };
+    void read();
+    window.addEventListener("focus", read);
+    return () => {
+      gone = true;
+      window.removeEventListener("focus", read);
+    };
+  }, [foldersOpen]);
   const switchTrapRef = useFocusTrap(switching !== null);
   const conflictTrapRef = useFocusTrap(conflict !== null);
   const sessionErrorTrapRef = useFocusTrap(sessionError !== null);
@@ -2762,18 +2811,125 @@ export function App() {
     }
   };
 
-  // Open another data folder — Manage folders → "Open another folder…"
-  // (specs/ui/app-start.feature.md "changing the data repo"): pre-filled prompt; on success the view resets
-  // to home, since the current selection belonged to the old repo.
+  // A window opened for a folder (specs/app/multiple-windows.feature.md
+  // "Opening a window" — File → Open Folder…, Open Recent, "Open in new
+  // window", a link to a folder no window shows) starts with none and opens
+  // that one here, the way the first-run screen opens the folder typed into
+  // it: asked about when it is missing or its kind is not clear, and with
+  // the entry link honored. The first-run screen is not shown meanwhile: it
+  // comes up only when the folder did not open, with the reason or the
+  // question on it.
+  useEffect(() => {
+    if (!pendingFolder || !needsRepo || settingRepo) return;
+    const { path, kind } = pendingFolder;
+    setPendingFolder(null);
+    void Promise.resolve(kind === "code" ? openCodeRepo(path) : kind === "spec" ? saveRepo(path) : openStartFolder(path))
+      .catch(() => {})
+      .finally(() => setOpeningOwnFolder(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingFolder, needsRepo, settingRepo]);
+
+  /**
+   * Open a folder in a window of its own, or — with none named — a new
+   * window that asks for one. The window that already shows the folder
+   * comes forward instead (the shell's answer either way).
+   */
+  const openInNewWindow = async (folder?: FolderEntry) => {
+    try {
+      const res = await fetch("/api/windows", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(folder ? { path: folder.path, kind: folder.kind } : {}),
+      });
+      if (!res.ok) toast.error((await res.json().catch(() => null))?.error ?? "Could not open a window");
+    } catch {
+      toast.error("Could not open a window — the app did not answer");
+    }
+  };
+
+  // Open another folder — Manage folders → "Open another folder…"
+  // (specs/ui/app-start.feature.md "changing the data repo"): a prompt
+  // pre-filled with the open folder. A specification folder or a code
+  // repository, where both can be opened — told apart as the first-run
+  // screen tells them (openStartFolder above): a folder opened before opens
+  // as the kind it was, any other by what is inside, and one that does not
+  // say is asked about. On success the view resets to home, since the
+  // current selection belonged to the old folder.
   const changeRepo = async () => {
+    const both = canOpenCodeRepo && !hosted && !demo;
     const input = await prompt({
-      title: "Data directory",
-      hint: "Path or GitHub url of the spec data repo.",
-      initial: dataRepo ?? "",
-      confirmLabel: "Use this directory",
-      browse: canChooseFolder ? () => chooseFolderNative() : undefined,
+      title: "Open a folder",
+      hint: both
+        ? "The path of a specification folder or a code repository on this computer, or the GitHub url of a spec data repo."
+        : "Path or GitHub url of the spec data repo.",
+      initial: codeRepoDir ?? dataRepo ?? "",
+      confirmLabel: "Open",
+      browse: canChooseFolder ? () => chooseFolderNative(both ? "folder" : "data-repo") : undefined,
     });
-    await switchRepo(input?.trim() ?? "");
+    const typed = input?.trim() ?? "";
+    if (!typed) return;
+    if (!both) return switchRepo(typed);
+    const known = recentKindOf(recentFolders, typed);
+    if (known === "code") return void (await openCodeRepo(typed));
+    if (known === "spec") return switchRepo(typed);
+    let verdict: ReturnType<typeof parseFolderVerdict> = null;
+    setSettingRepo(true);
+    try {
+      const res = await fetch("/api/folder-kind", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: typed }),
+      });
+      const body = await res.json().catch(() => null);
+      verdict = res.ok ? parseFolderVerdict(body) : null;
+      if (!verdict) {
+        toast.error((body as { error?: string } | null)?.error ?? "Could not read this folder");
+        return;
+      }
+    } catch {
+      toast.error("Could not read this folder — the app did not answer");
+      return;
+    } finally {
+      setSettingRepo(false);
+    }
+    switch (startFolderStep(verdict)) {
+      case "spec":
+        return switchRepo(verdict.open);
+      case "code":
+        return void (await openCodeRepo(verdict.path));
+      case "refuse":
+        toast.error(`Not a folder: ${verdict.path}`);
+        return;
+      case "ask": {
+        const kind = await pick({
+          title: `Open ${verdict.name} as…`,
+          hint: "Can't tell what this folder is: it has no .specdriven and specs folders, and no build file.",
+          placeholder: "Specification folder or code repository",
+          options: [
+            {
+              value: "spec",
+              label: "A specification folder",
+              hint: "Adds a .specdriven folder and a specs folder inside it",
+            },
+            { value: "code", label: "A code repository", hint: "Left as it is" },
+          ],
+        });
+        if (kind === "code") await openCodeRepo(verdict.path);
+        else if (kind === "spec") await switchRepo(verdict.open, undefined, true);
+        return;
+      }
+      case "confirm-specs": {
+        const yes = await confirm({
+          title: "Set up a specification folder?",
+          body: `${verdict.name} is empty. Is it a specification folder? Setting it up adds a .specdriven folder and a specs folder inside ${verdict.path}.`,
+          confirmLabel: "Yes, set it up",
+          danger: false,
+        });
+        // A no leaves the folder as it was, and the open one open.
+        if (yes) await switchRepo(verdict.open, undefined, true);
+        return;
+      }
+    }
   };
 
   /**
@@ -2826,7 +2982,12 @@ export function App() {
     if (note) toast.info(note);
   };
 
-  const switchRepo = async (next: string, entryPath?: string) => {
+  const switchRepo = async (
+    next: string,
+    entryPath?: string,
+    /** The user called it a specification folder: it gets its two folders. */
+    init = false,
+  ) => {
     if (!next || next === reposRef.current.open) return;
     setSettingRepo(true);
     // The switch is modal (specs/app/spec-folders.feature.md "Switch spec
@@ -2836,8 +2997,10 @@ export function App() {
     await landEditors();
     try {
       setSwitching({ folder: next, step: "opening" });
-      const put = await putDataRepo(next, (asking) =>
-        setSwitching(asking ? null : { folder: next, step: "opening" }),
+      const put = await putDataRepo(
+        next,
+        (asking) => setSwitching(asking ? null : { folder: next, step: "opening" }),
+        init,
       );
       // Declined to create a missing folder: the current one stays open.
       if (!put) {
@@ -2886,7 +3049,9 @@ export function App() {
           await openFromLocationRef.current(entryPath, false, pullProblemOf(state));
         }
       } else {
-        toast.error(state.error ?? "Could not use this directory");
+        // A folder another window shows came forward there
+        // (specs/app/multiple-windows.feature.md); nothing failed here.
+        if (state.openElsewhere !== true) toast.error(state.error ?? "Could not use this directory");
         // The README was emptied for the switch; the folder stays, so it
         // comes back.
         await loadReadme();
@@ -2899,8 +3064,8 @@ export function App() {
 
   /**
    * Open a code repository directly (specs/app/code-repo-mode.feature.md
-   * "Open a code repository"): from the first-run screen, the folder dialog
-   * or the palette. What the editors hold lands first; then the Files tab
+   * "Open a code repository"): from the first-run screen or the folder
+   * dialog. What the editors hold lands first; then the Files tab
    * takes the place of the specs, and the app opens on the repository's
    * home. False when the server refused — the reason is shown.
    */
@@ -2930,7 +3095,8 @@ export function App() {
         const error = state.error ?? "Could not open this folder";
         if (first) setRepoError(error);
         else {
-          toast.error(error);
+          // Open in another window, which came forward: nothing failed here.
+          if (state.openElsewhere !== true) toast.error(error);
           // The README was emptied to leave; the folder stays, so it comes back.
           await loadReadme();
         }
@@ -2959,19 +3125,6 @@ export function App() {
       setSwitching(null);
       setSettingRepo(false);
     }
-  };
-
-  /** Ask for a code repository's folder (typed, or with Browse…), then open it. */
-  const openCodeRepoPrompt = async () => {
-    const input = await prompt({
-      title: "Open a code repository",
-      hint: "The folder of a code repository on this computer. The app shows its files and runs the coding agent there; git stays yours.",
-      initial: codeRepoDir ?? "",
-      placeholder: "/path/to/your/code",
-      confirmLabel: "Open",
-      browse: canChooseFolder ? () => chooseFolderNative("code-repo") : undefined,
-    });
-    if (input?.trim()) await openCodeRepo(input.trim());
   };
 
   /** Take a code repository off the folder dialog's list — the folder stays on disk. */
@@ -8699,9 +8852,6 @@ export function App() {
     ...(!demo && !readOnly
       ? [action("manage-folders", "Manage folders…", <FolderInput size={14} />, () => setFoldersOpen(true))]
       : []),
-    ...(canOpenCodeRepo
-      ? [action("open-code-repo", "Open a code repository…", <FolderTree size={14} />, () => void openCodeRepoPrompt())]
-      : []),
     shortcutAction("go-home", <Home size={14} />),
     // The plugins' tabs: the way there, and each tab's own commands —
     // "New notebook entry" among them (specs/app/engineering-notebook
@@ -9094,20 +9244,27 @@ export function App() {
     }
   };
 
-  if (loading)
+  // Also while a window opens the folder it was opened for, so that it goes
+  // from this to the folder with no first-run screen between. A question
+  // on the way — make a missing folder? — is the app's own dialog.
+  const openingFolder = needsRepo && !showsFirstRun(needsRepo, openingOwnFolder);
+  if (loading || openingFolder)
     return (
-      <main className="layout skeleton-shell" aria-busy="true" aria-label="Loading">
-        <aside>
-          <span className="skeleton" style={{ height: "1.75rem", width: "60%" }} />
-          <span className="skeleton" style={{ height: "2rem" }} />
-          {[70, 55, 65, 50, 60, 45].map((w, i) => (
-            <span key={i} className="skeleton" style={{ height: "1.1rem", width: `${w}%` }} />
-          ))}
-        </aside>
-        <section className="editor">
-          <PageSkeleton cards={3} />
-        </section>
-      </main>
+      <>
+        <main className="layout skeleton-shell" aria-busy="true" aria-label={loading ? "Loading" : "Opening the folder"}>
+          <aside>
+            <span className="skeleton" style={{ height: "1.75rem", width: "60%" }} />
+            <span className="skeleton" style={{ height: "2rem" }} />
+            {[70, 55, 65, 50, 60, 45].map((w, i) => (
+              <span key={i} className="skeleton" style={{ height: "1.1rem", width: `${w}%` }} />
+            ))}
+          </aside>
+          <section className="editor">
+            <PageSkeleton cards={3} />
+          </section>
+        </main>
+        {openingFolder && modal}
+      </>
     );
 
   // The page's first read failed (specs/ui/app-start.feature.md "the server
@@ -10971,6 +11128,19 @@ export function App() {
                       icon: <FolderInput size={13} />,
                       onSelect: () => setFoldersOpen(true),
                     },
+                    // Another window, which asks for its folder
+                    // (specs/app/multiple-windows.feature.md "Opening a
+                    // window") — the desktop app's alone.
+                    ...(canOpenWindows
+                      ? [
+                          {
+                            id: "new-window",
+                            label: "New window",
+                            icon: <AppWindow size={13} />,
+                            onSelect: () => void openInNewWindow(),
+                          } satisfies MenuItem,
+                        ]
+                      : []),
                   ]}
                 />
               </div>
@@ -13971,8 +14141,12 @@ export function App() {
                 ? { path: dataRepo, kind: "spec" }
                 : null
           }
+          elsewhere={otherWindowFolders}
           dirs={recentRepoDirs}
           busy={settingRepo}
+          // Code repositories opened directly (specs/app/code-repo-mode
+          // .feature.md "Open a code repository"), where they can be.
+          codeRepos={canOpenCodeRepo}
           trapRef={foldersTrapRef}
           onClose={() => setFoldersOpen(false)}
           onOpen={(folder) => {
@@ -13980,20 +14154,26 @@ export function App() {
             void (folder.kind === "code" ? openCodeRepo(folder.path) : switchRepo(folder.path));
           }}
           onRemove={(folder) => void (folder.kind === "code" ? forgetCodeRepo(folder.path) : forgetRepo(folder.path))}
+          // A window of its own for a folder, in the desktop app
+          // (specs/app/multiple-windows.feature.md "Opening a window").
+          {...(canOpenWindows
+            ? {
+                onOpenInNewWindow: (folder: FolderEntry) => {
+                  setFoldersOpen(false);
+                  void openInNewWindow(folder);
+                },
+                // A folder another window shows: asking for its window
+                // brings that one forward.
+                onShowWindow: (folder: FolderEntry) => {
+                  setFoldersOpen(false);
+                  void openInNewWindow(folder);
+                },
+              }
+            : {})}
           onAdd={() => {
             setFoldersOpen(false);
             void changeRepo();
           }}
-          // Code repositories opened directly (specs/app/code-repo-mode
-          // .feature.md "Open a code repository"), where they can be.
-          {...(canOpenCodeRepo
-            ? {
-                onAddCodeRepo: () => {
-                  setFoldersOpen(false);
-                  void openCodeRepoPrompt();
-                },
-              }
-            : {})}
         />
       )}
       {/* Error box (specs/agents/claude.feature.md): what the coding agent said

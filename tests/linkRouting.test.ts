@@ -9,6 +9,7 @@ import { linkEntry } from "../src/frontend/route";
 import {
   createLinkRouter,
   historyJump,
+  linkPlace,
   navigationTarget,
   windowOpenTarget,
   type LinkWindow,
@@ -46,7 +47,7 @@ describe("links that leave the app", () => {
     expect(navigationTarget("app://specdriven.evil/x", [APP])).toEqual({ kind: "drop" });
   });
 
-  test("the app never opens a second window, even onto its own pages", () => {
+  test("a page never opens a window of the app, even onto its own pages", () => {
     expect(windowOpenTarget(`${APP}/features/quotes`)).toEqual({ kind: "drop" });
   });
 
@@ -90,6 +91,25 @@ function router(win: LinkWindow | null) {
   let opened = 0;
   const r = createLinkRouter({ window: () => win, openWindow: () => opened++ });
   return { r, opened: () => opened };
+}
+
+/** Several windows, each showing a folder; `recent` are folders opened before. */
+function windows(shown: Record<string, string>, recent: string[] = []) {
+  const fakes = Object.fromEntries(Object.keys(shown).map((id) => [id, fakeWindow()]));
+  const open = Object.entries(shown).map(([id, repo]) => ({ id, repo }));
+  const front = Object.keys(shown).at(-1) ?? null;
+  const openedFor: string[] = [];
+  const r = createLinkRouter({
+    window: (path) => {
+      if (path === null) return front ? fakes[front]!.win : null;
+      const place = linkPlace(path, open, recent);
+      if (place.kind === "window") return fakes[place.id]!.win;
+      if (place.kind === "folder") return null;
+      return front ? fakes[front]!.win : null;
+    },
+    openWindow: (path) => openedFor.push(path),
+  });
+  return { r, calls: (id: string) => fakes[id]!.calls, openedFor };
 }
 
 /** Runs a history jump against a stand-in history, as the renderer would. */
@@ -200,5 +220,57 @@ describe("a second link reuses the running app", () => {
     r.follow(windowOpenTarget("specdriven://features/quotes"), browse);
     expect(browsed).toEqual([TEST_URL]);
     expect(calls).toEqual(["focus", `run ${historyJump("/features/quotes")}`]);
+  });
+});
+
+// specs/app/multiple-windows.feature.md "Opening a window": a link opens in
+// the window that shows its folder, or in a new one for a folder none shows.
+describe("a link goes to the window that shows its folder", () => {
+  const A = "/Users/me/specs-insurance";
+  const B = "https://github.com/acme/specs-billing";
+
+  test("a link names its folder first, and the window showing that folder takes it", () => {
+    expect(linkPlace("/specs-billing/features/quotes", [{ id: "w1", repo: A }, { id: "w2", repo: B }], [])).toEqual({
+      kind: "window",
+      id: "w2",
+    });
+    const { r, calls, openedFor } = windows({ w1: A, w2: B });
+    r.open("/specs-insurance/features/quotes");
+    expect(calls("w1")).toEqual(["focus", `run ${historyJump("/specs-insurance/features/quotes")}`]);
+    expect(calls("w2")).toEqual([]);
+    expect(openedFor).toEqual([]);
+  });
+
+  test("a folder opened before that no window shows gets a window of its own, on the linked page", () => {
+    expect(linkPlace("/specs-billing/features/quotes", [{ id: "w1", repo: A }], [B])).toEqual({ kind: "folder", repo: B });
+    const { r, calls, openedFor } = windows({ w1: A }, [B]);
+    r.open("/specs-billing/features/quotes");
+    expect(calls("w1")).toEqual([]);
+    expect(openedFor).toEqual(["/specs-billing/features/quotes"]);
+    expect(r.takeEntry()).toBe(linkEntry("/specs-billing/features/quotes"));
+  });
+
+  test("a link that names no folder this machine knows goes to the window used last", () => {
+    expect(linkPlace("/features/quotes", [{ id: "w1", repo: A }], [B])).toEqual({ kind: "front" });
+    expect(linkPlace("/specs-unknown/features/quotes", [{ id: "w1", repo: A }], [B])).toEqual({ kind: "front" });
+    const { r, calls } = windows({ w1: A, w2: B });
+    r.open("/features/quotes");
+    expect(calls("w2")).toEqual(["focus", `run ${historyJump("/features/quotes")}`]);
+    expect(calls("w1")).toEqual([]);
+  });
+
+  test("a folder named like a page does not take that page's links", () => {
+    const features = "/Users/me/features";
+    expect(linkPlace("/features/quotes", [{ id: "w1", repo: A }, { id: "w2", repo: features }], [])).toEqual({ kind: "front" });
+    // The folder alone, or the folder and then a page, is the folder.
+    expect(linkPlace("/features", [{ id: "w2", repo: features }], [])).toEqual({ kind: "window", id: "w2" });
+    expect(linkPlace("/features/features/quotes", [{ id: "w2", repo: features }], [])).toEqual({ kind: "window", id: "w2" });
+  });
+
+  test("a second launch without a link brings the window used last to the front", () => {
+    const { r, calls } = windows({ w1: A, w2: B });
+    r.secondLaunch(["/opt/SpecDriven/specdriven"]);
+    expect(calls("w2")).toEqual(["focus"]);
+    expect(calls("w1")).toEqual([]);
   });
 });

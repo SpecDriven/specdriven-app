@@ -4,7 +4,7 @@
 // plain views: App.tsx owns the state and the requests, so the markup here
 // can be checked on its own (tests/specFolders.test.tsx).
 
-import { BookText, CodeXml, FolderOpen, Trash2 } from "lucide-react";
+import { AppWindow, BookText, CodeXml, FolderOpen, Trash2 } from "lucide-react";
 import { backdropDismiss } from "./backdropDismiss";
 import type { KeyboardEvent, RefObject } from "react";
 import { repoDisplayName } from "./route";
@@ -143,36 +143,54 @@ const sameEntry = (a: FolderEntry | null, b: FolderEntry) => a !== null && a.kin
  * code repository"), code repositories — on one list, newest first, each
  * marked by an icon for its kind and the open one badged. A folder can be
  * opened from here, or taken off the list — the list entry only; nothing on
- * disk is deleted — and a new one picked from the file system through the
- * same prompt as the pencil beside the folder name. The open folder stays:
- * switch away from it before removing it.
+ * disk is deleted — and a new one of either kind picked from the file
+ * system with the one button under the list. The open folder stays: switch
+ * away from it before removing it.
+ *
+ * With several windows (specs/app/multiple-windows.feature.md "The folder
+ * dialog and the windows") a folder another window shows is badged too: it
+ * is open in at most one window, so its row offers that window in place of
+ * opening it, and it stays on the list until that window is closed.
  */
 export function SpecFoldersDialog({
   folders,
   current,
+  elsewhere = [],
   dirs = {},
   busy = false,
+  codeRepos = false,
   onOpen,
+  onOpenInNewWindow,
+  onShowWindow,
   onRemove,
   onAdd,
-  onAddCodeRepo,
   onClose,
   trapRef,
 }: {
   /** Most recent first, the open folder included. */
   folders: FolderEntry[];
-  /** The folder open now, or null. */
+  /** The folder open now — in this window — or null. */
   current: FolderEntry | null;
+  /** The folders the app's other windows show. */
+  elsewhere?: readonly FolderEntry[];
   /** Where each GitHub url among the spec folders is cloned on this computer. */
   dirs?: Record<string, string>;
   /** A request is in flight: the buttons wait for it. */
   busy?: boolean;
+  /** Code repositories can be opened here, so the list may hold some. */
+  codeRepos?: boolean;
   onOpen: (folder: FolderEntry) => void;
+  /**
+   * Open a folder in a window of its own, leaving this one as it is
+   * (specs/app/multiple-windows.feature.md "Opening a window"); absent where
+   * there are no windows to open — everywhere but the desktop app.
+   */
+  onOpenInNewWindow?: (folder: FolderEntry) => void;
+  /** Bring the window that shows a folder forward. */
+  onShowWindow?: (folder: FolderEntry) => void;
   onRemove: (folder: FolderEntry) => void;
-  /** Pick another folder from the file system (the Data directory prompt). */
+  /** Pick another folder — of either kind — from the file system. */
   onAdd: () => void;
-  /** Pick a code repository to open; absent where none can be opened. */
-  onAddCodeRepo?: () => void;
   onClose: () => void;
   trapRef?: RefObject<HTMLDivElement | null>;
 }) {
@@ -195,7 +213,7 @@ export function SpecFoldersDialog({
       >
         <h3>Folders</h3>
         <p className="hint">
-          {onAddCodeRepo
+          {codeRepos
             ? "The specification folders and code repositories this app has opened, most recent first. "
             : "The specification folders this app has opened, most recent first. "}
           Removing one only takes it off this list — the folder stays on disk.
@@ -207,17 +225,21 @@ export function SpecFoldersDialog({
             {folders.map((folder) => {
               const name = repoDisplayName(folder.path);
               const isCurrent = sameEntry(current, folder);
+              // Open in another window: that window is offered, and nothing
+              // that would open the folder a second time.
+              const isElsewhere = !isCurrent && elsewhere.some((other) => sameEntry(other, folder));
               const clone = folder.kind === "spec" ? dirs[folder.path] : undefined;
               return (
                 <li
                   key={`${folder.kind}:${folder.path}`}
-                  className={`spec-folder spec-folder-${folder.kind}${isCurrent ? " current" : ""}`}
+                  className={`spec-folder spec-folder-${folder.kind}${isCurrent ? " current" : ""}${isElsewhere ? " elsewhere" : ""}`}
                 >
                   <FolderKindIcon kind={folder.kind} />
                   <div className="spec-folder-text">
                     <span className="spec-folder-name">
                       {name}
                       {isCurrent && <span className="spec-folder-badge">open</span>}
+                      {isElsewhere && <span className="spec-folder-badge spec-folder-badge-elsewhere">other window</span>}
                     </span>
                     <span className="spec-folder-path" title={folder.path}>
                       {folder.path}
@@ -229,26 +251,51 @@ export function SpecFoldersDialog({
                     )}
                   </div>
                   <div className="spec-folder-actions">
-                    {!isCurrent && (
+                    {isElsewhere && onShowWindow && (
                       <button
                         type="button"
                         className="link"
                         disabled={busy}
-                        title={`Open ${folder.path}`}
+                        title={`Bring the window that shows ${folder.path} forward`}
+                        onClick={() => onShowWindow(folder)}
+                      >
+                        Show window
+                      </button>
+                    )}
+                    {!isCurrent && !isElsewhere && (
+                      <button
+                        type="button"
+                        className="link"
+                        disabled={busy}
+                        title={onOpenInNewWindow ? `Open ${folder.path} in this window` : `Open ${folder.path}`}
                         onClick={() => onOpen(folder)}
                       >
                         Open
                       </button>
                     )}
+                    {!isCurrent && !isElsewhere && onOpenInNewWindow && (
+                      <button
+                        type="button"
+                        className="icon-button spec-folder-window"
+                        disabled={busy}
+                        aria-label={`Open ${name} in a new window`}
+                        title={`Open ${folder.path} in a new window`}
+                        onClick={() => onOpenInNewWindow(folder)}
+                      >
+                        <AppWindow size={14} aria-hidden="true" />
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="icon-button spec-folder-remove"
-                      disabled={busy || isCurrent}
+                      disabled={busy || isCurrent || isElsewhere}
                       aria-label={`Remove ${name} from the list`}
                       title={
                         isCurrent
                           ? "The open folder stays on the list — switch to another folder first"
-                          : "Remove from the list — the folder itself stays on disk"
+                          : isElsewhere
+                            ? "Open in another window — close that window first"
+                            : "Remove from the list — the folder itself stays on disk"
                       }
                       onClick={() => onRemove(folder)}
                     >
@@ -264,11 +311,6 @@ export function SpecFoldersDialog({
           <button type="button" className="btn btn-secondary" disabled={busy} onClick={onAdd}>
             Open another folder…
           </button>
-          {onAddCodeRepo && (
-            <button type="button" className="btn btn-secondary" disabled={busy} onClick={onAddCodeRepo}>
-              Open a code repository…
-            </button>
-          )}
           <button type="button" className="btn btn-primary" autoFocus onClick={onClose}>
             Close
           </button>

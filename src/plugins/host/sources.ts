@@ -61,6 +61,12 @@ export function repoPluginsDir(dataDir: string): string {
 export interface DiscoveryOptions {
   /** The data repo, when one is configured, for its `.specdriven/plugins`. */
   dataDir: string | null;
+  /**
+   * Every open data repo, when several are
+   * (specs/app/multiple-windows.feature.md): each one's `.specdriven/plugins`
+   * is read, in this order. In place of `dataDir`.
+   */
+  dataDirs?: readonly string[];
   /** The profile's `sources`: explicit plugin folders. */
   paths: readonly string[];
   appVersion: string;
@@ -77,8 +83,8 @@ export async function discoverPlugins(opts: DiscoveryOptions): Promise<Discovere
     const plugin = await readPluginFolder(dir, "home", opts.appVersion);
     if (plugin) found.push(plugin);
   }
-  if (opts.dataDir) {
-    for (const dir of await subfolders(repoPluginsDir(opts.dataDir))) {
+  for (const dataDir of opts.dataDirs ?? (opts.dataDir ? [opts.dataDir] : [])) {
+    for (const dir of await subfolders(repoPluginsDir(dataDir))) {
       const plugin = await readPluginFolder(dir, "repo", opts.appVersion);
       if (plugin) found.push(plugin);
     }
