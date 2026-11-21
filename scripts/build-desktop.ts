@@ -27,28 +27,15 @@
  * electron-builder. The web build (`bun run build`) is separate and
  * untouched. Targets and architectures live under "build" in package.json.
  *
- * macOS signing: the .app is code-signed with the Developer ID Application
- * identity in the login keychain (electron-builder finds it on its own).
- * Notarization is off for now — package.json pins `build.mac.notarize` to
- * false. It carries no comments, so the future setup lives here:
- *
- *   1. package.json, under "build":
- *
- *        "mac": {
- *          "notarize": { "teamId": "<APPLE_TEAM_ID>" },
- *          "hardenedRuntime": true,
- *          "gatekeeperAssess": false
- *        },
- *        "afterSign": "scripts/notarize.ts"   // only if a custom hook is needed
- *
- *   2. Export the Apple credentials before building (Bun loads .env, which
- *      already holds APPLE_TEAM_ID):
- *
- *        APPLE_ID=<apple-id-email>
- *        APPLE_APP_SPECIFIC_PASSWORD=<app-specific-password>
- *        APPLE_TEAM_ID=<team-id>
- *
- *   3. Verify the result: `xcrun stapler validate release/mac-arm64/SpecDriven.app`
+ * macOS signing: no Apple Developer account is involved. package.json sets
+ * `build.mac.identity` to "-", so electron-builder signs the .app ad hoc —
+ * Apple Silicon refuses to run a bundle whose signature does not match it —
+ * and never picks up a Developer ID certificate from the keychain, even when
+ * one is there. Hardened runtime is off (ad-hoc signed, it would stop the
+ * app loading its own frameworks) and so is notarization, so a downloaded
+ * dmg asks for Gatekeeper approval; install.sh builds the app on the machine
+ * that runs it, which never quarantines it. Check with
+ * `codesign -dv release/mac-arm64/SpecDriven.app` ("Signature=adhoc").
  *
  * Windows signing: Windows installers are not code-signed, so SmartScreen
  * asks before running them. Azure Trusted Signing is the likely route:
