@@ -112,7 +112,8 @@ import { ErrorBoundary } from "./ErrorBoundary";
 import { createPromiseQueue } from "./promiseQueue";
 export { createPromiseQueue };
 
-import { setShareRepo, shareUrl } from "./shareLink";
+import { setShareProject, setShareRepo, shareUrl } from "./shareLink";
+import { chooseProject, parseReadOnlyProjects, setTabProject, type ReadOnlyProjectInfo } from "./readOnlyProject";
 import { SaveIndicator, Toaster, toast } from "./Toasts";
 import { missedFeatureNote, pullProblemOf, syncForLink } from "./linkSync";
 import { currentSyncProblem, pushHint, setSyncProblem, syncProblemMessage, useSyncProblem } from "./syncProblem";
@@ -1445,6 +1446,11 @@ export function App() {
   // folder switch and Sync, every create, edit, move and delete, settings,
   // agents — and opens editors as previews.
   const [readOnly, setReadOnly] = useState(false);
+  // The projects the read-only site shows, and the visitor's
+  // (src/frontend/readOnlyProject.ts): with more than one, the folder name's
+  // ▾ picks among them.
+  const [readOnlyProjects, setReadOnlyProjects] = useState<ReadOnlyProjectInfo[]>([]);
+  const [readOnlyProject, setReadOnlyProject] = useState<string | null>(null);
   // A spec folder that cannot be pushed to opens read only (src/frontend/
   // repoReadOnly.ts, git-operations.md): no remote, or a remote that turns
   // this computer down. Its specs lock like the read-only site's — every
@@ -2310,6 +2316,15 @@ export function App() {
         }
         setDemo(Boolean(state.demo));
         setReadOnly(Boolean(state.readOnly));
+        {
+          const projects = parseReadOnlyProjects(state.readOnlyProjects);
+          const project = typeof state.readOnlyProject === "string" ? state.readOnlyProject : null;
+          setReadOnlyProjects(projects);
+          setReadOnlyProject(project);
+          setTabProject(project);
+          // A link names the project only where there is a choice of them.
+          setShareProject(projects.length > 1 ? project : null);
+        }
         setHosted(Boolean(state.hosted));
         setHostedGithubApp(Boolean(state.hostedGithubApp));
         // The demo pins Vim mode off (src/frontend/vimPref.ts): any editor open
@@ -11394,6 +11409,57 @@ export function App() {
                 only — the full path is the tooltip. Picking one switches
                 to it and opens its README; the current folder is ticked,
                 and picking it just goes home to the README. */}
+            {/* The read-only site's projects (src/frontend/readOnlyProject.ts):
+                where it shows more than one, the ▾ lists them by name, the
+                repository as the tooltip, the visitor's ticked; picking one
+                opens its home. */}
+            {readOnly && readOnlyProjects.length > 1 && (
+              <div className="repo-recent">
+                <button
+                  type="button"
+                  className="ibtn repo-recent-toggle"
+                  title="Projects"
+                  aria-label="Projects"
+                  aria-haspopup="menu"
+                  aria-expanded={recentMenuOpen}
+                  onClick={() => setRecentMenuOpen((o) => !o)}
+                >
+                  <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+                    <path
+                      d="M1.5 3.5 5 7l3.5-3.5"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+                <Menu
+                  open={recentMenuOpen}
+                  onClose={() => setRecentMenuOpen(false)}
+                  label="Projects"
+                  className="repo-recent-menu"
+                  containerSelector=".repo-recent"
+                  items={readOnlyProjects.map(
+                    (project): MenuItem => ({
+                      id: `project:${project.id}`,
+                      label: project.id,
+                      icon: <FolderKindIcon kind="spec" size={13} />,
+                      title: project.repo,
+                      checked: project.id === readOnlyProject,
+                      onSelect: () => {
+                        if (project.id !== readOnlyProject) chooseProject(project.id);
+                        else {
+                          goHome();
+                          void loadReadme();
+                        }
+                      },
+                    }),
+                  )}
+                />
+              </div>
+            )}
             {(dataRepo || codeRepoDir !== null) && !demo && !readOnly && (
               <div className="repo-recent">
                 <button

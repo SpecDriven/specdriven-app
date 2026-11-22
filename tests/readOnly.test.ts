@@ -13,20 +13,40 @@ import { statePath } from "../src/server/state";
 import { readSettings } from "./helpers/settingsFile";
 import {
   DEFAULT_READ_ONLY_REPO,
+  projectFromCookie,
   READ_ONLY_PLUGINS,
   readOnlyAllows,
   readReadOnlyConfig,
 } from "../src/server/readOnlyMode";
 
 test("the site shows SpecDriven's spec repo unless told otherwise", () => {
-  expect(readReadOnlyConfig({})).toEqual({ repo: DEFAULT_READ_ONLY_REPO, branch: "main", refreshSeconds: 60 });
+  expect(readReadOnlyConfig({})).toEqual({
+    projects: [{ id: "specs-specdriven", repo: DEFAULT_READ_ONLY_REPO, branch: "main" }],
+    refreshSeconds: 60,
+  });
   expect(
     readReadOnlyConfig({
       SPECDRIVEN_READONLY_REPO: "https://github.com/acme/specs.git/",
       SPECDRIVEN_READONLY_BRANCH: "release",
       SPECDRIVEN_READONLY_REFRESH_SECONDS: "0",
     }),
-  ).toEqual({ repo: "https://github.com/acme/specs.git", branch: "release", refreshSeconds: 0 });
+  ).toEqual({ projects: [{ id: "specs", repo: "https://github.com/acme/specs.git", branch: "release" }], refreshSeconds: 0 });
+});
+
+test("several projects are listed in one variable, each named by its repo unless the entry names it", () => {
+  const config = readReadOnlyConfig({
+    SPECDRIVEN_READONLY_PROJECTS: `
+      https://github.com/SpecDriven/specs-specdriven,
+      https://github.com/acme/Shop-Specs.git#release
+      legacy=https://github.com/other/specs-specdriven
+    `,
+    SPECDRIVEN_READONLY_BRANCH: "trunk",
+  });
+  expect(config.projects).toEqual([
+    { id: "specs-specdriven", repo: "https://github.com/SpecDriven/specs-specdriven", branch: "trunk" },
+    { id: "shop-specs", repo: "https://github.com/acme/Shop-Specs.git", branch: "release" },
+    { id: "legacy", repo: "https://github.com/other/specs-specdriven", branch: "trunk" },
+  ]);
 });
 
 test("a repo that is no GitHub url, a branch git reads as an option and a bad cadence stop the start", () => {
@@ -35,6 +55,28 @@ test("a repo that is no GitHub url, a branch git reads as an option and a bad ca
   expect(() => readReadOnlyConfig({ SPECDRIVEN_READONLY_BRANCH: "--upload-pack=x" })).toThrow();
   expect(() => readReadOnlyConfig({ SPECDRIVEN_READONLY_REFRESH_SECONDS: "-1" })).toThrow();
   expect(() => readReadOnlyConfig({ SPECDRIVEN_READONLY_REFRESH_SECONDS: "soon" })).toThrow();
+});
+
+test("a project list with a bad entry, two projects of one name, or a single repo beside it stops the start", () => {
+  const list = (v: string) => () => readReadOnlyConfig({ SPECDRIVEN_READONLY_PROJECTS: v });
+  expect(list("https://github.com/a/specs, https://gitlab.com/b/specs")).toThrow("SPECDRIVEN_READONLY_PROJECTS");
+  expect(list("https://github.com/a/specs#--upload-pack=x")).toThrow();
+  expect(list("https://github.com/a/specs https://github.com/b/specs")).toThrow('two projects "specs"');
+  expect(list("Bad Name=https://github.com/a/specs")).toThrow();
+  expect(list(" , ")).toThrow("names no project");
+  expect(() =>
+    readReadOnlyConfig({
+      SPECDRIVEN_READONLY_PROJECTS: "https://github.com/a/specs",
+      SPECDRIVEN_READONLY_REPO: "https://github.com/b/specs",
+    }),
+  ).toThrow("not both");
+});
+
+test("a visitor's project is read from their cookie, and only a well-formed id counts", () => {
+  expect(projectFromCookie(null)).toBeNull();
+  expect(projectFromCookie("theme=dark; specdriven-project=shop-specs; x=1")).toBe("shop-specs");
+  expect(projectFromCookie("specdriven-project=../etc")).toBeNull();
+  expect(projectFromCookie("other-specdriven-project=shop")).toBeNull();
 });
 
 test("only the reads the site shows are allowed", () => {
@@ -67,6 +109,8 @@ test("on the hosted image the site listens publicly, keeps HOME off /root and fe
 
 const work = await mkdtemp(join(tmpdir(), "read-only-site-"));
 const origin = join(work, "origin");
+/** The site's second project, named "other" in the list. */
+const second = join(work, "second");
 const root = join(work, "root");
 let proc: ReturnType<typeof Bun.spawn> | undefined;
 let base = "";
@@ -80,25 +124,28 @@ const FEATURE = `# Checkout
 - Then: the order is placed
 `;
 
-async function commit(file: string, text: string, message: string) {
-  await mkdir(join(origin, file, ".."), { recursive: true });
-  await writeFile(join(origin, file), text);
-  await $`git -C ${origin} add -A`.quiet();
-  await $`git -C ${origin} -c user.name=t -c user.email=t@t commit -q -m ${message}`.quiet();
+async function commit(file: string, text: string, message: string, repo = origin) {
+  await mkdir(join(repo, file, ".."), { recursive: true });
+  await writeFile(join(repo, file), text);
+  await $`git -C ${repo} add -A`.quiet();
+  await $`git -C ${repo} -c user.name=t -c user.email=t@t commit -q -m ${message}`.quiet();
 }
 
 beforeAll(async () => {
-  await mkdir(origin);
-  await $`git -C ${origin} init -q -b main`.quiet();
+  for (const repo of [origin, second]) {
+    await mkdir(repo);
+    await $`git -C ${repo} init -q -b main`.quiet();
+  }
   await commit("specs/shop/checkout.feature.md", FEATURE, "checkout");
   await commit("roadmap/next.md", "# Next\n\nWhat comes next.\n", "roadmap");
+  await commit("specs/library/loans.feature.md", "# Loans\n", "loans", second);
   const port = 20000 + Math.floor(Math.random() * 20000);
   base = `http://127.0.0.1:${port}`;
   proc = Bun.spawn([process.execPath, "src/index.ts"], {
     env: {
       ...process.env,
       SPECDRIVEN_READONLY: "1",
-      SPECDRIVEN_READONLY_REPO: origin,
+      SPECDRIVEN_READONLY_PROJECTS: `${origin}, other=${second}`,
       SPECDRIVEN_READONLY_REFRESH_SECONDS: "1",
       SPECDRIVEN_ROOT: root,
       SPECDRIVEN_LOG_FILE: "0",
@@ -128,6 +175,12 @@ test("the state says read-only, names the repo and no one signed in", async () =
   const state = (await (await fetch(`${base}/api/state`)).json()) as Record<string, unknown>;
   expect(state.readOnly).toBe(true);
   expect(state.dataRepo).toBe(origin);
+  expect(state.readOnlyProject).toBe("origin");
+  expect(state.readOnlyProjects).toEqual([
+    { id: "origin", repo: origin },
+    { id: "other", repo: second },
+  ]);
+  expect(state.otherWindowFolders).toEqual([]);
   expect(state.recentDataRepoDirs).toEqual({});
   expect(state.auth).toEqual({ signedIn: false });
   expect(state.agents).toEqual([]);
@@ -154,6 +207,32 @@ test("features and the roadmap are served", async () => {
   const roadmap = (await (await fetch(`${base}/api/roadmap`)).json()) as { pages: { fileName: string }[] };
   expect(roadmap.pages.map((p) => p.fileName)).toEqual(["roadmap/next.md"]);
   expect((await fetch(`${base}/features/shop/checkout`)).status).toBe(200);
+});
+
+const listing = async (cookie?: string) => {
+  const res = await fetch(`${base}/api/features`, cookie ? { headers: { cookie } } : {});
+  return ((await res.json()) as { features: { fileName: string }[] }).features.map((f) => f.fileName);
+};
+
+test("a visitor's cookie picks the project every request is answered for; any other cookie, the first", async () => {
+  const cookie = "specdriven-project=other";
+  const state = (await (await fetch(`${base}/api/state`, { headers: { cookie } })).json()) as Record<string, unknown>;
+  expect(state.readOnlyProject).toBe("other");
+  expect(state.dataRepo).toBe(second);
+  expect(await listing(cookie)).toEqual(["specs/library/loans.feature.md"]);
+  const feature = await fetch(`${base}/api/features/${encodeURIComponent("specs/library/loans.feature.md")}`, {
+    headers: { cookie },
+  });
+  expect(feature.status).toBe(200);
+  expect(await listing()).not.toContain("specs/library/loans.feature.md");
+  expect(await listing("specdriven-project=nope")).toContain("specs/shop/checkout.feature.md");
+  // A write is refused in every project.
+  const put = await fetch(`${base}/api/state`, {
+    method: "PUT",
+    headers: { cookie, "content-type": "application/json", origin: base },
+    body: "{}",
+  });
+  expect(put.status).toBe(403);
 });
 
 test("every write and every other read is refused before it runs", async () => {
@@ -190,8 +269,19 @@ test("a change pushed to the repo shows up after the next refresh", async () => 
   let files: string[] = [];
   for (let i = 0; i < 100 && !files.includes("specs/shop/returns.feature.md"); i++) {
     await Bun.sleep(100);
-    const listing = (await (await fetch(`${base}/api/features`)).json()) as { features: { fileName: string }[] };
-    files = listing.features.map((f) => f.fileName);
+    files = await listing();
   }
   expect(files).toContain("specs/shop/returns.feature.md");
+}, 15_000);
+
+test("each project is refreshed on its own, a push to the second shows in it alone", async () => {
+  await commit("specs/library/holds.feature.md", "# Holds\n", "holds", second);
+  const cookie = "specdriven-project=other";
+  let files: string[] = [];
+  for (let i = 0; i < 100 && !files.includes("specs/library/holds.feature.md"); i++) {
+    await Bun.sleep(100);
+    files = await listing(cookie);
+  }
+  expect(files).toContain("specs/library/holds.feature.md");
+  expect(await listing()).not.toContain("specs/library/holds.feature.md");
 }, 15_000);

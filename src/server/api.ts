@@ -55,7 +55,14 @@ import { folderKind, initSpecFolder } from "./folderKind";
 import { isDemoMode, reseedDemo } from "./demo";
 import { HOSTED_REFUSAL, isHostedMode } from "./hostedMode";
 import { usesGithubApp } from "./hostedToken";
-import { isReadOnlyMode, READ_ONLY_REFUSAL, readOnlyAllows, readOnlySite } from "./readOnlyMode";
+import {
+  isReadOnlyMode,
+  READ_ONLY_REFUSAL,
+  readOnlyAllows,
+  readOnlyProjectOf,
+  readOnlySite,
+  readOnlyWorkspace,
+} from "./readOnlyMode";
 import { canChooseFolder, chooseFolder } from "./folderChooser";
 import {
   checkSigningPassphrase,
@@ -1234,21 +1241,27 @@ const getSettingsFile: Handler = async () => json(await readSettingsFileView(get
 
 /**
  * What the read-only site (src/server/readOnlyMode.ts) reports over the
- * usual state: the public repo where the folder's path would be — the
- * snapshot under /tmp is nobody's business — no sign-in, nothing to run,
- * and the refresh cadence the open page re-reads on, though the server's
- * own sync cron stays off (src/server/readOnly.ts refreshes instead).
+ * usual state: the visitor's project's public repo where the folder's path
+ * would be — the snapshot under /tmp is nobody's business — every project
+ * the site shows, to pick from, no sign-in, nothing to run, and the refresh
+ * cadence the open page re-reads on, though the server's own sync cron
+ * stays off (src/server/readOnly.ts refreshes instead).
  */
 function readOnlyFields() {
   if (!isReadOnlyMode()) return { readOnly: false };
   const site = readOnlySite();
-  const repo = site?.repo ?? null;
+  const project = readOnlyProjectOf(currentWorkspace()) ?? site?.projects[0] ?? null;
+  const repo = project?.repo ?? null;
   return {
     readOnly: true,
+    readOnlyProject: project?.id ?? null,
+    readOnlyProjects: (site?.projects ?? []).map((p) => ({ id: p.id, repo: p.repo })),
     dataRepo: repo,
     recentDataRepos: repo ? [repo] : [],
     recentCodeRepos: [],
     recentFolders: repo ? [{ path: repo, kind: "spec" }] : [],
+    // The other projects are workspaces too, but no visitor's windows.
+    otherWindowFolders: [],
     canOpenCodeRepo: false,
     recentDataRepoDirs: {},
     reloadFrequencySeconds: site?.refreshSeconds ?? 0,
@@ -5099,8 +5112,10 @@ const OUTDATED_ALLOWED = /^\/api\/(state|reload|choose-folder|folder-kind|logs|a
 /** Serve an API request, or null when the path is not an API route. */
 export function handleApi(req: Request, opts: { workspace?: Workspace } = {}): Promise<Response | null> {
   // A desktop window's request (src/server/workspace.ts) is answered for the
-  // folder open in that window.
-  return opts.workspace ? runInWorkspace(opts.workspace, () => answerApi(req)) : answerApi(req);
+  // folder open in that window; a visitor's on the read-only site, for the
+  // project their cookie names (src/server/readOnlyMode.ts).
+  const workspace = opts.workspace ?? (isReadOnlyMode() ? readOnlyWorkspace(req) : null);
+  return workspace ? runInWorkspace(workspace, () => answerApi(req)) : answerApi(req);
 }
 
 async function answerApi(req: Request): Promise<Response | null> {

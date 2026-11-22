@@ -580,9 +580,9 @@ When no variables are set:
 ## Public read-only site
 
 A third service from the same image: `SPECDRIVEN_READONLY=1` runs the app as a
-public site that shows one spec repository to anyone, with no sign-in, and lets
-nobody change anything. It serves https://specs.specdriven.app from
-[SpecDriven/specs-specdriven](https://github.com/SpecDriven/specs-specdriven).
+public site that shows one or several spec repositories to anyone, with no
+sign-in, and lets nobody change anything. It serves https://specs.specdriven.app
+from [SpecDriven/specs-specdriven](https://github.com/SpecDriven/specs-specdriven).
 
 - **What a visitor sees:** the app's own UI with the Specs tab (the feature
   tree, every feature and every scenario, rendered), the Roadmap tab, the
@@ -595,9 +595,16 @@ nobody change anything. It serves https://specs.specdriven.app from
   first of all, gets `403 This site is read-only` before its handler runs.
   Only the built-in Roadmap plugin is mounted; plugin folders, marketplace
   installs and agent plugins are off, so a file in the repo can't run code.
-- **Where the specs come from:** the repository must be **public**. At start,
-  the service makes a shallow clone with no credentials under
-  `/tmp/specdriven-readonly/mirror`, and the app serves a copy of it with
+- **Several projects:** `SPECDRIVEN_READONLY_PROJECTS` lists the
+  repositories to show. With more than one, a ▾ next to the folder name
+  lists them and the visitor picks one. The choice is kept in a
+  `specdriven-project` cookie, and every request is answered for that
+  project; without the cookie, the first project in the list is shown. A
+  link with `?project=<id>` opens a given project, and "Copy link" adds it,
+  so a shared link opens the same project.
+- **Where the specs come from:** each repository must be **public**. At start,
+  the service makes a shallow clone of each with no credentials under
+  `/tmp/specdriven-readonly/mirrors/<id>`, and the app serves a copy of it with
   `.git` left out. With no `.git`, every git operation of the app's is
   skipped, so nothing it does can commit or push. Every minute it fetches the
   branch. When the branch has moved, it makes a new copy, brings the
@@ -615,9 +622,24 @@ To deploy it:
    | Variable | Value |
    |---|---|
    | `SPECDRIVEN_READONLY` | `1` |
-   | `SPECDRIVEN_READONLY_REPO` | optional, default `https://github.com/SpecDriven/specs-specdriven` |
-   | `SPECDRIVEN_READONLY_BRANCH` | optional, default `main` |
+   | `SPECDRIVEN_READONLY_PROJECTS` | optional: the projects to show, see below |
+   | `SPECDRIVEN_READONLY_REPO` | optional, one project; default `https://github.com/SpecDriven/specs-specdriven`. Not together with `SPECDRIVEN_READONLY_PROJECTS` |
+   | `SPECDRIVEN_READONLY_BRANCH` | optional, default `main`; the branch of every project that names none |
    | `SPECDRIVEN_READONLY_REFRESH_SECONDS` | optional, default 60; `0` never refreshes |
+
+   `SPECDRIVEN_READONLY_PROJECTS` takes entries separated by commas, spaces
+   or new lines, each `[<id>=]<repo>[#<branch>]`. The id is what the menu,
+   the cookie and `?project=` call the project; it defaults to the repo's
+   name, lowercased. The first entry is the project a new visitor sees.
+
+   ```
+   https://github.com/SpecDriven/specs-specdriven,
+   https://github.com/SpecDriven/specs-cap-bookshop#main,
+   insurance=https://github.com/acme/specs-insurance#release
+   ```
+
+   A malformed entry, two projects with the same id, or both variables set
+   stops the start.
 
    The site answers any Host, like the demo; set `SPECDRIVEN_ALLOWED_HOSTS`
    to `specs.specdriven.app` to narrow that. It drops from root to the
@@ -628,8 +650,9 @@ To deploy it:
 
 | File | Role |
 |---|---|
-| `src/server/readOnlyMode.ts` | the flag, the settings and the route allowlist |
-| `src/server/readOnly.ts` | start: clone, snapshot, refresh timer |
+| `src/server/readOnlyMode.ts` | the flag, the settings, the route allowlist, a request's project |
+| `src/server/readOnly.ts` | start: clone, snapshot, a workspace per project, refresh timer |
+| `src/frontend/readOnlyProject.ts` | the visitor's project: cookie, `?project=` links, the ▾ menu's choice |
 | `src/server/api.ts` `handleApi`, `readOnlyFields` | the refusal; what `/api/state` reports |
 | `src/frontend/App.tsx` `readOnly`, `src/frontend/pages/` | what the UI hides |
 | `src/gateway/readOnly.ts` | the hosted image's hand-over to the site |
@@ -638,4 +661,10 @@ Run it locally against any repo, a local path included:
 
 ```sh
 SPECDRIVEN_READONLY=1 SPECDRIVEN_READONLY_REPO=$PWD/../specs-specdriven SPECDRIVEN_ROOT=/tmp/sd-readonly bun src/index.ts
+```
+
+or against several:
+
+```sh
+SPECDRIVEN_READONLY=1 SPECDRIVEN_READONLY_PROJECTS="$PWD/../specs-specdriven $PWD/../specs-cap-bookshop" SPECDRIVEN_ROOT=/tmp/sd-readonly bun src/index.ts
 ```
