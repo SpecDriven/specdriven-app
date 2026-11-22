@@ -85,6 +85,8 @@ let reactRoot: Root | undefined;
 let host: HTMLElement | undefined;
 /** Every request the page sent that was not a read. */
 let writes: string[] = [];
+/** What the site's /api/state adds in a test: the projects it shows. */
+let stateExtra: Record<string, unknown> = {};
 const realFetch = globalThis.fetch;
 const realRoot = process.env.SPECDRIVEN_ROOT;
 const realHome = process.env.SPECDRIVEN_HOME;
@@ -96,6 +98,7 @@ beforeEach(async () => {
   process.env.SPECDRIVEN_HOME = home;
   data = join(root, "data");
   writes = [];
+  stateExtra = {};
   await Bun.write(join(data, "specs/quotes.feature.md"), feature("Given a quote for {amount}"));
   await writeState({ dataRepo: data, reloadFrequencySeconds: 0 }, root);
   await syncDataDir(data);
@@ -108,7 +111,7 @@ beforeEach(async () => {
     // The site's state: read-only, re-read every second.
     if (url.pathname === "/api/state" && res.ok) {
       const state = await res.json();
-      return Response.json({ ...state, readOnly: true, reloadFrequencySeconds: 1 });
+      return Response.json({ ...state, readOnly: true, reloadFrequencySeconds: 1, ...stateExtra });
     }
     return res;
   }) as typeof fetch;
@@ -185,5 +188,39 @@ describe("an open scenario page on the public specs site", () => {
 
     expect(host!.querySelector('.read-only-scenario')).toBe(pane);
     expect(writes).toEqual([]);
+  }, 15_000);
+});
+
+describe("a public specs site showing several projects", () => {
+  test("lists them under the folder name's ▾, the visitor's ticked, and links name the project", async () => {
+    stateExtra = {
+      readOnlyProject: "quotes",
+      readOnlyProjects: [
+        { id: "quotes", repo: "https://github.com/acme/quotes" },
+        { id: "claims", repo: "https://github.com/acme/claims" },
+      ],
+    };
+    await openLink("/");
+    await until(() => host!.querySelector('button[aria-label="Projects"]') !== null, "the projects toggle");
+    await act(async () => (host!.querySelector('button[aria-label="Projects"]') as HTMLElement).click());
+    const items = [...document.querySelectorAll('[role="menu"] [role^="menuitem"]')];
+    expect(items.map((i) => i.textContent?.trim())).toEqual(["quotes", "claims"]);
+    expect(items.map((i) => i.getAttribute("aria-checked"))).toEqual(["true", "false"]);
+    expect(items.map((i) => i.getAttribute("title"))).toEqual([
+      "https://github.com/acme/quotes",
+      "https://github.com/acme/claims",
+    ]);
+    const { shareUrl } = await import("../src/frontend/shareLink");
+    expect(shareUrl("/features/quotes")).toBe("http://localhost/features/quotes?project=quotes");
+    expect(writes).toEqual([]);
+  }, 15_000);
+
+  test("with one project there is no ▾ and links name none", async () => {
+    stateExtra = { readOnlyProject: "quotes", readOnlyProjects: [{ id: "quotes", repo: "https://github.com/acme/quotes" }] };
+    await openLink("/");
+    await until(() => Boolean(host?.querySelector(".repo-name")), "the folder name");
+    expect(host!.querySelector('button[aria-label="Projects"]')).toBeNull();
+    const { shareUrl } = await import("../src/frontend/shareLink");
+    expect(shareUrl("/features/quotes")).toBe("http://localhost/features/quotes");
   }, 15_000);
 });

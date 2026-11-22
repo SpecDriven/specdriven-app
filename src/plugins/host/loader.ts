@@ -227,11 +227,23 @@ function visibleIn(entry: External, dataDir: string | null): boolean {
 }
 
 /**
+ * No gate anywhere: the read-only site (src/server/readOnly.ts), whose
+ * projects all show the same built-in plugins and whose new snapshot of a
+ * project is absorbed before any workspace names it.
+ */
+let ungated = false;
+
+export function ungatePlugins(): void {
+  ungated = true;
+}
+
+/**
  * The plugins a window's request may reach: its folder's. No gate for a
  * caller with no window behind it, nor for a folder not synced yet — its
  * page cannot name a plugin before /api/state, which syncs, has listed it.
  */
 export function pluginGate(): PluginGate | undefined {
+  if (ungated) return undefined;
   const workspace = currentWorkspace();
   const enabled = workspace ? profiles.get(keyOf(workspace.folder as Record<string, unknown>)) : undefined;
   return enabled ? (plugin) => enabled.includes(plugin) : undefined;
@@ -244,7 +256,7 @@ export function pluginGate(): PluginGate | undefined {
  * more, whose profile is forgotten. No gate while no window is registered.
  */
 export function pluginGateFor(dir: string): PluginGate | undefined {
-  if (workspaces().length === 0) return undefined;
+  if (ungated || workspaces().length === 0) return undefined;
   const key = [...folderDirs].find(([, d]) => d === dir)?.[0];
   const enabled = (key === undefined ? undefined : profiles.get(key)) ?? [];
   return (plugin) => enabled.includes(plugin);

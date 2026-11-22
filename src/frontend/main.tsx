@@ -7,6 +7,11 @@ import "@fontsource-variable/jetbrains-mono";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { publishSdk } from "../plugins/client/sdk";
+import { adoptProjectFromUrl } from "./readOnlyProject";
+
+// The read-only site (src/frontend/readOnlyProject.ts): a `?project=` link
+// picks the project before the page's first request.
+adoptProjectFromUrl();
 
 // One React on the page (roadmap/plugin-architecture.md): plugin bundles
 // import react through shims that read it from here, so it is published
