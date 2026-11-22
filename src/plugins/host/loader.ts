@@ -264,6 +264,14 @@ export interface SyncOptions {
   /** The data repo, for its own plugins folder; null when none is configured. */
   dataDir?: string | null;
   /**
+   * Make the folder's list from the data it holds, if that was never done
+   * (specs/app/plugins.feature.md "A folder's plugins are picked from its
+   * data the first time it opens"). Asked by the calls that open a folder
+   * for its page — the state read and the settings write — and by no sync
+   * that runs beside a request: storing the list is a settings write.
+   */
+  seed?: boolean;
+  /**
    * With several windows open: the folders they show, as the settings name
    * them — the profiles kept besides this one — and their data repos, whose
    * plugins folders are read too. Absent, the folder synced is the only one.
@@ -298,7 +306,8 @@ export function syncPlugins(
   options: SyncOptions = {},
 ): Promise<void> {
   const run = turn.then(async () => {
-    lastOptions = options;
+    // A rescan a folder change triggers is no folder being opened.
+    lastOptions = { ...options, seed: false };
     const section = profileSection(state);
     let { enabled } = readProfile(state, profileManifests);
     let changed = false;
@@ -310,7 +319,7 @@ export function syncPlugins(
     // from its data the first time it opens"): the built-ins with data go
     // on, and Specs goes off where it has none and another has some. Before
     // the folders' plugins and the self-enabling ones, which add to it.
-    if (here && isDataFolderProfile(state) && !dataChecked(state) && (await isDirectory(here))) {
+    if (options.seed && here && isDataFolderProfile(state) && !dataChecked(state) && (await isDirectory(here))) {
       const seeded = seedFromData(state, enabled, await pluginsWithData(here), builtinManifests);
       if (seeded) {
         enabled = seeded;

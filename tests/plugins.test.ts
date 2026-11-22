@@ -21,6 +21,8 @@ import {
 import { version as appVersion } from "../package.json";
 import { client, matchPluginRoute, syncClientPlugins, tabs } from "../src/plugins/client/loader";
 import { tabReachable, type TabPlugin } from "../src/plugins/client/tabs";
+import { SPECS_TAB, specsTab } from "../src/plugins/builtin/specs/client";
+import { SPECS_PLUGIN } from "../src/plugins/profile";
 import { pageSettings } from "../src/frontend/pages/pages";
 
 afterEach(async () => {
@@ -172,7 +174,11 @@ test("the profile's order is the tab order, and an id nothing provides is report
     await syncPlugins({ plugins: { format: 2, enabled: ["notebook", "specs", "tests"] } });
     await syncClientPlugins(pluginStates());
     expect(tabs.list().map((t) => t.id)).toEqual(["notebook", "specs", "tests"]);
-    expect(tabs.get("specs")).toMatchObject({ title: "Specs", shortcut: "g s", opensOnSelect: false });
+    // The tab registered is the plugin's own, under the plugin's id — what
+    // the profile lists is what App looks the tab up by.
+    expect(tabs.get(SPECS_TAB)).toBe(specsTab as TabPlugin);
+    expect(SPECS_TAB).toBe(SPECS_PLUGIN);
+    expect(specsTab).toMatchObject({ id: "specs", title: "Specs", shortcut: "g s", opensOnSelect: false });
     // The tab owns no url: a feature's is the app's own.
     expect(matchPluginRoute("/billing/quote")).toBeNull();
   } finally {

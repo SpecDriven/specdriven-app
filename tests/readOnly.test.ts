@@ -129,7 +129,7 @@ test("the state says read-only, names the repo and no one signed in", async () =
   expect(state.agents).toEqual([]);
   expect((state.user as { name: string }).name).toBe("Visitor");
   const enabled = (state.plugins as { id: string; enabled: boolean }[]).filter((p) => p.enabled).map((p) => p.id);
-  expect(enabled).toEqual(["roadmap"]);
+  expect(enabled).toEqual(["specs", "roadmap"]);
 });
 
 test("features and the roadmap are served", async () => {

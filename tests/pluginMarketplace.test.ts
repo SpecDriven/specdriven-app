@@ -375,7 +375,7 @@ test("a subdirectory plugin is staged and described first, and installed only on
   const record = JSON.parse(await readFile(join(pluginsHome(), "hello", INSTALL_RECORD_FILE), "utf8"));
   expect(record).toMatchObject({ marketplace: "local", name: "hello", source: "./plugins/hello", version: "1.0.0" });
   expect(record.commit).toMatch(/^[0-9a-f]{40}$/);
-  expect((await profile()).enabled).toEqual(["hello"]);
+  expect((await profile()).enabled).toEqual(["specs", "hello"]);
   expect(await (await api("GET", "/api/hello"))!.json()).toEqual({ version: "1.0.0" });
 
   // Installing again names what it replaces, and a confirmation that does
@@ -420,7 +420,7 @@ test("a plugin is reinstalled from a marketplace that was removed and added back
   const record = JSON.parse(await readFile(join(pluginsHome(), "hello", INSTALL_RECORD_FILE), "utf8"));
   expect(record).toMatchObject({ marketplace: "plugins", name: "hello", version: "1.1.0" });
   expect(record.commit).not.toBe(first.commit);
-  expect((await profile()).enabled).toEqual(["hello"]);
+  expect((await profile()).enabled).toEqual(["specs", "hello"]);
   expect(await (await api("GET", "/api/hello"))!.json()).toEqual({ version: "1.1.0" });
 });
 
@@ -479,7 +479,7 @@ for (const engine of ["cli", "js"] as GitEngine[]) {
     expect(await (await api("GET", "/api/remote"))!.json()).toEqual({ version: "1.0.0" });
     const v1 = (await git(repo, "rev-parse", "v1.0.0")).stdout.toString().trim();
     expect(done.body.plugin.install.commit).toBe(v1);
-    expect((await profile()).enabled).toEqual(["remote"]);
+    expect((await profile()).enabled).toEqual(["specs", "remote"]);
 
     // Upstream moves on and the index names the new ref: Update fetches it and remounts.
     await pluginRepo(repo, "remote", "1.1.0");
@@ -506,7 +506,7 @@ for (const engine of ["cli", "js"] as GitEngine[]) {
     expect(await installedFolders()).toEqual([]);
     expect(matchApi("GET", "/api/remote")).toBeNull();
     expect(row("remote")).toBeUndefined();
-    expect((await profile()).enabled).toEqual([]);
+    expect((await profile()).enabled).toEqual(["specs"]);
     expect((await profile()).seen ?? []).toEqual([]);
   });
 }

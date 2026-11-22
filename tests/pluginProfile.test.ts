@@ -15,7 +15,8 @@ import { join } from "node:path";
 import { applyStartupState, handleApi, matchApi, reloader, syncedOnStart } from "../src/server/api";
 import { syncPlugins } from "../src/plugins/host/loader";
 import { profileManifests } from "../src/plugins/builtin/manifests";
-import { readProfile, seedFromData } from "../src/plugins/profile";
+import { dataChecked, readProfile, seedFromData } from "../src/plugins/profile";
+import { hasSpecs } from "../src/plugins/builtin/specs/host";
 import { SETTINGS_VERSION, statePath, writeState } from "../src/server/state";
 import { readSettings } from "./helpers/settingsFile";
 
@@ -164,13 +165,15 @@ test("an older device-wide list carries over to the folder that is open", async 
   await applyStartupState();
   // The list is from before Specs was a plugin, when every folder had it:
   // it goes first, and the file says its lists name it from here on.
+  expect((await settingsFile()).plugins).toEqual({ format: 2, repos: { [a]: { enabled: ["specs", "roadmap"] } } });
+  expect(
+    (await state()).plugins.filter((p) => p.enabled).map((p) => p.id),
+  ).toEqual(["specs", "roadmap"]);
+  // The page asking for its state is the folder being opened: looked at, once.
   expect((await settingsFile()).plugins).toEqual({
     format: 2,
     repos: { [a]: { enabled: ["specs", "roadmap"], checked: true } },
   });
-  expect(
-    (await state()).plugins.filter((p) => p.enabled).map((p) => p.id),
-  ).toEqual(["specs", "roadmap"]);
 });
 
 // An app from before per-folder lists showed the manifests' defaults — the
@@ -183,7 +186,7 @@ test("an older file with a folder but no plugin list keeps the Notebook on in th
   await applyStartupState();
   expect((await settingsFile()).plugins).toEqual({
     format: 2,
-    repos: { [a]: { enabled: ["specs", "notebook", "self-fix"], checked: true } },
+    repos: { [a]: { enabled: ["specs", "notebook", "self-fix"] } },
   });
   expect(
     (await state()).plugins.filter((p) => p.enabled).map((p) => p.id),
@@ -306,10 +309,31 @@ test("the list is made from the data once, what has data goes on and Specs goes 
     format: 2,
     repos: { "/a": { enabled: ["notebook"], checked: true } },
   });
+  // The mark is what stops a second look.
+  const once: Record<string, unknown> = { dataRepo: "/a", plugins: { format: 2, repos: {} } };
+  expect(dataChecked(once)).toBe(false);
+  expect(seedFromData(once, ["specs"], ["notebook"], profileManifests)).toEqual(["notebook"]);
+  expect(dataChecked(once)).toBe(true);
+  expect(seedFromData(once, ["notebook"], ["specs"], profileManifests)).toBeNull();
   // Looked at before: left alone, whatever the data says now.
   expect(seed(["notebook"], ["specs"], { enabled: ["notebook"], checked: true }).list).toBeNull();
   // No folder open: nothing to make a list for.
   expect(seedFromData({}, ["specs"], ["notebook"], profileManifests)).toBeNull();
+});
+
+test("a folder has Specs data once a feature file lies under its specs folder", async () => {
+  const dir = join(root, "repo-a");
+  await mkdir(join(dir, "specs", "billing"), { recursive: true });
+  // The folder the app makes for every data folder is no data, nor is a
+  // feature file left outside it.
+  expect(await hasSpecs(dir)).toBe(false);
+  await writeFile(join(dir, "stray.feature.md"), "# Stray\n");
+  await writeFile(join(dir, "specs", "notes.md"), "# Notes\n");
+  expect(await hasSpecs(dir)).toBe(false);
+  await writeFile(join(dir, "specs", "billing", "quote.feature.md"), "# Quote\n");
+  expect(await hasSpecs(dir)).toBe(true);
+  // A folder that is not there yet has none.
+  expect(await hasSpecs(join(root, "missing"))).toBe(false);
 });
 
 test("a folder of notebook entries opens on the Notebook alone, and one with specs too shows both", async () => {

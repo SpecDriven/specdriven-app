@@ -948,7 +948,7 @@ function checkedAgentModels(lists: AgentModels): AgentModels {
  * ephemeral, so the data folder's plugins are not read there, and neither
  * are the profile's explicit folders — its host is shared.
  */
-async function syncHostPlugins(state: SpecDrivenState): Promise<void> {
+async function syncHostPlugins(state: SpecDrivenState, opts: { seed?: boolean } = {}): Promise<void> {
   const raw = state as Record<string, unknown>;
   // With several windows (specs/app/multiple-windows.feature.md): `state`
   // is one window's reading, and the other open folders keep their plugins.
@@ -958,6 +958,8 @@ async function syncHostPlugins(state: SpecDrivenState): Promise<void> {
   // So does the read-only site, which runs no code but the app's: its data
   // folder is whatever the public repo holds.
   return syncPlugins(raw, {
+    // The folder's first look at its data, for the calls that open it.
+    seed: opts.seed === true,
     sources: !isHostedMode() && !isReadOnlyMode(),
     paths: !isDemoMode() && !isReadOnlyMode(),
     dataDir: isDemoMode() || isReadOnlyMode() ? null : await currentDataDir(),
@@ -1199,8 +1201,9 @@ const getState: Handler = async (req) => {
   maybeCheckDaily();
   const state = await readState(getAppRoot());
   // A demo reseed above rewrote the switches; the plugins follow them, and a
-  // plugin folder that appeared meanwhile is picked up.
-  await syncHostPlugins(state);
+  // plugin folder that appeared meanwhile is picked up. The page is opening
+  // the folder: its plugins are picked from its data, the first time.
+  await syncHostPlugins(state, { seed: true });
   // The folder this window was opened for and has yet to open
   // (src/server/workspace.ts PendingFolder), told to its page once, as it
   // boots: the page opens it as a folder picked by hand is opened.
@@ -1972,8 +1975,9 @@ const putState: Handler = async (req) => {
   await writeState(state, getAppRoot());
   reloader.set(normalizeReloadSeconds(state.reloadFrequencySeconds));
   // The profile mounts and unmounts its plugins on the spot: a module turned
-  // off answers 404 from here on, one turned on has its routes.
-  await syncHostPlugins(state);
+  // off answers 404 from here on, one turned on has its routes. A folder
+  // just picked has its plugins picked from its data, the first time.
+  await syncHostPlugins(state, { seed: true });
   setProjectionOptions({
     publishExternalLinks: normalizePublishExternalLinks(state.publishExternalLinks),
   });
