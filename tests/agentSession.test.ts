@@ -122,9 +122,9 @@ test("a desktop session saves the prompt beside the settings and opens Claude.ap
 });
 
 // The code repo (src/server/members.ts `code-repo`): the data repo's
-// project-settings.json names where the code lives, and the session opens
+// project-settings.yaml names where the code lives, and the session opens
 // there — Claude then edits the code, not the specs.
-test("a code repo named in project-settings.json is where the desktop session opens", async () => {
+test("a code repo named in project-settings.yaml is where the desktop session opens", async () => {
   const code = join(root, "code");
   await mkdir(code);
   await writeFile(join(data, PROJECT_SETTINGS_FILE), JSON.stringify({ "code-repo": "../code" }));

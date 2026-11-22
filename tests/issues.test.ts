@@ -105,13 +105,13 @@ describe("which repository", () => {
     const data = join(root, "specs");
     await mkdir(data, { recursive: true });
     await fakeRepo(join(root, "app"), "https://github.com/acme/app.git");
-    await writeFile(join(data, "project-settings.json"), JSON.stringify({ members: [], "code-repo": "../app" }));
+    await writeFile(join(data, "project-settings.yaml"), JSON.stringify({ members: [], "code-repo": "../app" }));
     expect(await readIssuesRepo(data)).toEqual({ url: "https://github.com/acme/app", host: "github.com", owner: "acme", name: "app" });
     // No code repo named: nothing to track.
-    await writeFile(join(data, "project-settings.json"), JSON.stringify({ members: ["Ada"] }));
+    await writeFile(join(data, "project-settings.yaml"), JSON.stringify({ members: ["Ada"] }));
     expect(await readIssuesRepo(data)).toBeNull();
     // No settings file at all.
-    await rm(join(data, "project-settings.json"));
+    await rm(join(data, "project-settings.yaml"));
     expect(await readIssuesRepo(data)).toBeNull();
   });
 });
@@ -427,7 +427,7 @@ describe("the GitHub API", () => {
       const data = join(root, "specs");
       await mkdir(data, { recursive: true });
       await writeFile(join(data, "README.md"), "# Specs\n");
-      await writeFile(join(data, "project-settings.json"), JSON.stringify(codeRepo ? { "code-repo": codeRepo } : {}));
+      await writeFile(join(data, "project-settings.yaml"), JSON.stringify(codeRepo ? { "code-repo": codeRepo } : {}));
       await writeState({ dataRepo: data, reloadFrequencySeconds: 0, issues: true }, appRoot);
       // The module is a plugin (specs/app/plugins.feature.md): the server
       // mounts it from the settings at startup and on every settings write;

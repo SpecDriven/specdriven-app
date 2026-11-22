@@ -144,8 +144,11 @@ async function tick(dir: string, asked: number): Promise<string> {
       // "The settings file is created for every data folder"): made empty
       // here when the folder has none, so the Project settings page always
       // has a file to edit; committed and pushed below like any saved
-      // change. Not in the demo, whose dataset ships its own.
-      if (!isDemoMode() && (await ensureProjectSettings(dir))) parts.push("created project-settings.json");
+      // change. A project-settings.yaml from before YAML is converted to
+      // project-settings.yaml here instead. Not in the demo, whose dataset
+      // ships its own.
+      const settingsFile = isDemoMode() ? null : await ensureProjectSettings(dir);
+      if (settingsFile) parts.push(`${settingsFile} project-settings.yaml`);
       // A repo written before the spec tree had its own folder is moved into
       // it once, here — features and their documents, with the plugins told
       // where each went (an Event Model's slice links name them) — so the

@@ -15,7 +15,7 @@ the files must be written so that the app reads them as intended.
 | `specs/**/<slug>.feature.md` | Feature files, in folders of any depth. Only files ending in `.feature.md` are features. |
 | `roadmap/**.md`, `tasks/**.md` | Plain markdown pages. A `##` heading there is never a scenario. |
 | `.images/` | Images referenced from specs. Only reference files that exist here. |
-| `project-settings.json` | Project members, the names an `**Assigned:**` line may use. |
+| `project-settings.yaml` | Project members, the names an `**Assigned:**` line may use. |
 | `.specdriven/` | The app's own documents and settings. Never edit anything under it. |
 
 ## A feature file
@@ -102,7 +102,7 @@ order, a feature or a scenario may carry:
 | `[Jira:ABC-123](https://…)` | feature, scenario | The ticket tracking it. The program name is anything without `:`; `GitHub`, `Jira` and `Linear` are known to the app. |
 | `[Confluence:99999](https://…)` | feature | The Confluence page the feature was published to. The app writes it; do not invent one. |
 | `[negative]` | scenario | The scenario guards a failure or an edge case. Absent means positive. |
-| `**Assigned:** Ada Lovelace` | feature | A member named in `project-settings.json`. |
+| `**Assigned:** Ada Lovelace` | feature | A member named in `project-settings.yaml`. |
 | `[ff:new-checkout:on] [ff:card-v2:off]` | feature, scenario | Feature flags gating it. |
 | `[br:young-driver-surcharge:on]` | feature, scenario | Custom attributes, `[<key>:<name>:<value>]`, keys defined in `custom-attributes.txt`. |
 

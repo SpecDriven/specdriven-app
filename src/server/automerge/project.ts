@@ -20,7 +20,7 @@
 // Authorship (specs/app/specs-authorship.feature.md) is the same kind of
 // exception, decided per data repo instead of per user: who created and last
 // updated the feature and each spec is in the document always, and in the
-// projection only while the repo's project-settings.json turns
+// projection only while the repo's project-settings.yaml turns
 // `authors-in-markdown` on (src/server/members.ts). A file in either form is
 // a faithful projection, for the same reason as the links.
 //
@@ -69,7 +69,7 @@ export function projectionOptions(): ProjectionOptions {
 /**
  * The options a projection into this data repo follows: the device's
  * settings, plus whether the repo asks for authorship in its markdown
- * (project-settings.json `authors-in-markdown`). Every write of a
+ * (project-settings.yaml `authors-in-markdown`). Every write of a
  * `.feature.md` projects through this, so each repo gets its own form.
  */
 export async function projectionFor(dataDir: string): Promise<ProjectionOptions> {

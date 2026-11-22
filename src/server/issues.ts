@@ -1,5 +1,5 @@
 // GitHub issue tracking (specs/app/github-issues.feature.md): the issues of
-// the code repo the data repo's project-settings.json names (`code-repo`,
+// the code repo the data repo's project-settings.yaml names (`code-repo`,
 // src/server/members.ts), read and written through the GitHub REST API.
 // Nothing is stored locally — GitHub is the source of truth, and the app is
 // one more client of it: list, open one with its comments, create, edit,
@@ -120,7 +120,7 @@ export async function repoOfFolder(dir: string, enterpriseHost?: string): Promis
 
 /**
  * The repository whose issues the app tracks for a data repo: the one its
- * project-settings.json `code-repo` pushes to. Null when the file names no
+ * project-settings.yaml `code-repo` pushes to. Null when the file names no
  * code repo, or the code repo is not a GitHub one — then there is no Issues
  * tab. A GitHub Enterprise code repo counts when the app's sign-in was made
  * on its host: that is how the app knows the host is a GitHub at all.

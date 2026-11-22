@@ -9,7 +9,7 @@
 //   ln -s "/Applications/IntelliJ IDEA.app/Contents/MacOS/idea" /usr/local/bin/idea
 //
 // The absolute path is the url's path under the project's code repo
-// (project-settings.json `code-repo`, src/server/members.ts) — the local
+// (project-settings.yaml `code-repo`, src/server/members.ts) — the local
 // checkout of the repository the url names. Node APIs only: this module
 // also runs under Electron (src/server/run.ts).
 

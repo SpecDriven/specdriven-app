@@ -2,12 +2,13 @@
 // feature and each atomic spec (scenario), and who last updated it — the
 // identity the app works as, which may be an agent given its own GitHub
 // token. A setting of the specs repo (`authors-in-markdown` in its
-// project-settings.json) decides whether the `.feature.md` files carry it.
+// project-settings.yaml) decides whether the `.feature.md` files carry it.
 
 import { test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { parse as parseYaml } from "yaml";
 import {
   formatCreatedBy,
   formatUpdatedBy,
@@ -228,20 +229,20 @@ test("turning the setting on keeps the file's other keys", async () => {
   const path = join(root, PROJECT_SETTINGS_FILE);
   await writeFile(path, JSON.stringify({ members: ["Ada"], "code-repo": "../app" }));
   expect(await writeAuthorsInMarkdown(root, true)).toBe(true);
-  expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
+  expect(parseYaml(await readFile(path, "utf8"))).toEqual({
     members: ["Ada"],
     "code-repo": "../app",
     [AUTHORS_IN_MARKDOWN_KEY]: true,
   });
   expect(await writeAuthorsInMarkdown(root, true)).toBe(false);
   expect(await writeAuthorsInMarkdown(root, false)).toBe(true);
-  expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ members: ["Ada"], "code-repo": "../app" });
+  expect(parseYaml(await readFile(path, "utf8"))).toEqual({ members: ["Ada"], "code-repo": "../app" });
 });
 
-test("a settings file that is not JSON is refused, not overwritten", async () => {
+test("a settings file that is not YAML is refused, not overwritten", async () => {
   const path = join(root, PROJECT_SETTINGS_FILE);
   await writeFile(path, "{ members: oops");
-  await expect(writeAuthorsInMarkdown(root, true)).rejects.toThrow("not valid JSON");
+  await expect(writeAuthorsInMarkdown(root, true)).rejects.toThrow("not valid YAML");
   expect(await readFile(path, "utf8")).toBe("{ members: oops");
 });
 

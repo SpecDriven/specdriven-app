@@ -4,6 +4,10 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.296 — 2026-11-21
+
+- Project settings and the data format marker are YAML; old JSON files are converted on sync ([#496](https://github.com/SpecDriven/specdriven-app/pull/496))
+
 ## v0.1.295 — 2026-11-21
 
 - An Unpublish survives a file edit the app has not absorbed yet ([#495](https://github.com/SpecDriven/specdriven-app/pull/495))

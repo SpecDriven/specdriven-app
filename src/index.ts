@@ -79,7 +79,7 @@ const shellRoutes = () => ({
   // Settings", "open Plugins") take the editor pane at their own urls.
   "/settings": index,
   // Project settings (src/frontend/ProjectSettingsPage.tsx): the data
-  // repo's project-settings.json.
+  // repo's project-settings.yaml.
   "/project-settings": index,
   "/plugins": index,
   // Observability (src/frontend/ObservabilityPage.tsx): the app's own logs.
