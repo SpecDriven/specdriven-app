@@ -12477,3 +12477,243 @@ aside.rail .rail-btn.pomodoro-chip.flash {
 .git-access + .settings-row {
   border-top: 1px solid var(--border);
 }
+
+/* Resources (src/frontend/ResourcesPanel.tsx): the Observability page's
+   memory and disk tab — totals, a stacked bar per section, and rows with
+   sizes right-aligned in tabular figures. */
+
+.settings-group.res-panel {
+  padding: 0 0 0.4rem;
+  overflow: hidden;
+}
+
+.res-pad {
+  padding: 0.75rem;
+}
+
+.res-total,
+.res-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.75rem 0.75rem 0.5rem;
+}
+
+.res-toolbar {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.6rem;
+}
+
+.res-total strong,
+.res-toolbar strong {
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.res-refresh {
+  margin-left: auto;
+}
+
+.res-toolbar .spin {
+  animation: sync-spin 0.9s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .res-toolbar .spin {
+    animation: none;
+  }
+}
+
+.res-num {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.res-meta {
+  font-size: 0.75rem;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.res-bar {
+  display: flex;
+  gap: 2px;
+  height: 0.5rem;
+  margin: 0.5rem 0.75rem 0;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--meter-free);
+}
+
+.res-bar span {
+  display: block;
+  height: 100%;
+}
+
+.res-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  list-style: none;
+  margin: 0;
+  padding: 0.5rem 0.75rem 0.25rem;
+  font-size: 0.75rem;
+  color: var(--text-2);
+}
+
+.res-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.res-swatch {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 2px;
+}
+
+.res-group {
+  padding: 0.5rem 0 0;
+}
+
+.res-group-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.35rem 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.res-group-head h3 {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.res-group-head .res-num {
+  font-size: 0.75rem;
+  color: var(--text-2);
+}
+
+.res-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.res-sub .res-row {
+  padding-left: 2rem;
+}
+
+.res-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 1.9rem;
+  padding: 0 0.75rem;
+  font-size: 0.8125rem;
+}
+
+.res-row:hover {
+  background: var(--hover);
+}
+
+.res-row-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.btn.res-caret-btn {
+  height: 1.5rem;
+  padding: 0 0.35rem 0 0.15rem;
+  margin-left: -0.2rem;
+  color: var(--text-1);
+  font-weight: 400;
+  min-width: 0;
+}
+
+.res-caret {
+  flex: none;
+  color: var(--text-3);
+  transition: transform 120ms ease;
+}
+
+.res-caret.open {
+  transform: rotate(90deg);
+}
+
+.res-tag {
+  flex: none;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 0.6875rem;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.res-tag.warn {
+  border-color: var(--danger-border);
+  color: var(--danger-fg);
+}
+
+.res-path {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  color: var(--text-3);
+}
+
+.res-row > .res-num {
+  margin-left: auto;
+  min-width: 4.5rem;
+  text-align: right;
+}
+
+.res-action {
+  flex: none;
+  width: 7.5rem;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.res-action .btn {
+  height: 1.5rem;
+  padding: 0 0.55rem;
+  font-size: 0.75rem;
+}
+
+@container (max-width: 44rem) {
+  .res-path {
+    display: none;
+  }
+
+  /* A name keeps its width; tags and the size wrap below it when narrow. */
+  .res-row {
+    flex-wrap: wrap;
+    padding-block: 0.25rem;
+  }
+
+  .res-row-label,
+  .btn.res-caret-btn {
+    flex-shrink: 0;
+    max-width: 100%;
+  }
+
+  .res-action {
+    width: auto;
+    margin-left: auto;
+  }
+}

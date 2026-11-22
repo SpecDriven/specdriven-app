@@ -1,14 +1,17 @@
 // Observability: its own page in the editor pane, opened from the user menu
-// like Settings and Plugins, with two tabs. Logs: the app's own log, newest
+// like Settings and Plugins, with three tabs. Logs: the app's own log, newest
 // first — searched as text or a regular expression, narrowed to a level and
 // a component, and followed live. Verbosity: what gets written — a default
 // level and per-component overrides, applied at once and kept in the
-// settings file (src/server/logs.ts).
+// settings file (src/server/logs.ts). Resources: the memory and disk the
+// app uses, and cleanups that free space (src/frontend/ResourcesPanel.tsx).
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Check, ChevronRight, Copy, RefreshCw, Search } from "lucide-react";
 import { AppPageLayout, PageSection } from "./AppPage";
+import type { ConfirmOptions } from "./ModalPrompts";
+import { MEMORY_SECTION as RESOURCES_TAB, ResourcesPanel } from "./ResourcesPanel";
 import {
   DEFAULT_FILTER,
   LOG_LEVELS,
@@ -30,7 +33,7 @@ import {
 
 const LOGS_TAB = "observability-logs";
 const VERBOSITY_TAB = "observability-verbosity";
-type ObservabilityTab = typeof LOGS_TAB | typeof VERBOSITY_TAB;
+type ObservabilityTab = typeof LOGS_TAB | typeof VERBOSITY_TAB | typeof RESOURCES_TAB;
 
 /** How often the list refreshes while following. */
 const FOLLOW_MS = 3000;
@@ -258,9 +261,13 @@ export interface ObservabilityPageProps {
   copyText?: (text: string) => Promise<boolean>;
   /** The component the Logs tab starts narrowed to — "confluence" from a failed publish. */
   initialComponent?: string;
+  /** Asks before a Resources cleanup deletes anything; without it, nothing is offered to delete. */
+  confirm?(opts: ConfirmOptions): Promise<boolean>;
+  /** How often the Resources tab measures memory again; tests shorten it. */
+  resourcesPollMs?: number;
 }
 
-export function ObservabilityPage({ onClose, fetcher, copyText, initialComponent }: ObservabilityPageProps) {
+export function ObservabilityPage({ onClose, fetcher, copyText, initialComponent, confirm, resourcesPollMs }: ObservabilityPageProps) {
   const doFetch: Fetcher = fetcher ?? ((url, init) => fetch(url, init));
   const fetchRef = useRef(doFetch);
   fetchRef.current = doFetch;
@@ -390,6 +397,7 @@ export function ObservabilityPage({ onClose, fetcher, copyText, initialComponent
       sections={[
         { id: LOGS_TAB, title: "Logs" },
         { id: VERBOSITY_TAB, title: "Verbosity" },
+        { id: RESOURCES_TAB, title: "Resources" },
       ]}
       tabs={{ active: tab, onSelect: (id) => setTab(id as ObservabilityTab) }}
       onClose={onClose}
@@ -476,6 +484,8 @@ export function ObservabilityPage({ onClose, fetcher, copyText, initialComponent
             </button>
           )}
         </PageSection>
+      ) : tab === RESOURCES_TAB ? (
+        <ResourcesPanel confirm={confirm ?? (async () => false)} fetcher={fetcher} pollMs={resourcesPollMs} />
       ) : (
         <PageSection
           id={VERBOSITY_TAB}

@@ -162,12 +162,13 @@ test("Specs alone, and every other optional setting on except IntelliJ IDEA", as
   // visitor's own machine, which a hosted demo cannot and should not do.
   expect(state.openTestsInIdea).toBe(false);
   // The profile behind the module switches (specs/app/plugins.feature.md
-  // "Each data folder keeps its own plugins"): every built-in listed, none
-  // on — the visitor's Settings → Plugins offers them. The agent is the
-  // simulation, no plugin (src/server/demoAgent.ts).
+  // "Each data folder keeps its own plugins"): every built-in listed, Specs
+  // alone on — the visitor's Settings → Plugins offers the rest. The agent
+  // is the simulation, no plugin (src/server/demoAgent.ts).
   expect(
     (state.plugins as { id: string; enabled: boolean; active: boolean }[]).map((p) => [p.id, p.enabled, p.active]),
   ).toEqual([
+    ["specs", true, true],
     ["roadmap", false, false],
     ["tasks", false, false],
     ["notebook", false, false],

@@ -7,9 +7,11 @@ import type { PluginManifest } from "../manifest";
 import { manifest as issues } from "./issues/manifest";
 import { notebookManifest, roadmapManifest, tasksManifest } from "./pages/manifest";
 import { manifest as selfFix } from "./self-fix/manifest";
+import { manifest as specs } from "./specs/manifest";
 import { manifest as tests } from "./tests/manifest";
 
 export const builtinManifests: readonly PluginManifest[] = [
+  specs,
   roadmapManifest,
   tasksManifest,
   notebookManifest,

@@ -24,8 +24,8 @@ export const DEFAULT_READ_ONLY_REPO = "https://github.com/SpecDriven/specs-specd
 export const DEFAULT_READ_ONLY_BRANCH = "main";
 export const DEFAULT_READ_ONLY_REFRESH_SECONDS = 60;
 
-/** The plugins the site shows beside Specs, in tab order. */
-export const READ_ONLY_PLUGINS: readonly string[] = ["roadmap"];
+/** The plugins the site shows, in tab order: Specs and the roadmap. */
+export const READ_ONLY_PLUGINS: readonly string[] = ["specs", "roadmap"];
 
 /**
  * The visitor every page names: a public site has no account behind it, and

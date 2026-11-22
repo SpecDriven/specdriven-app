@@ -314,6 +314,7 @@ import {
 import { setProjectionOptions } from "./automerge/project";
 import type { NetSync } from "./automerge/netsync";
 import { errorAttributes, getLogger, setLogVerbosity } from "./telemetry";
+import { getResourceDisk, getResourceMemory, postResourceCleanup } from "./resources";
 import { getLogSettings, getLogs, putLogSettings, savedVerbosity } from "./logs";
 import { getDataDoc, getDataDocAt, getDataDocHistory, getDataTable, getDataTables } from "./dataViewer";
 import { version as appVersion } from "../../package.json";
@@ -953,7 +954,7 @@ function checkedAgentModels(lists: AgentModels): AgentModels {
  * ephemeral, so the data folder's plugins are not read there, and neither
  * are the profile's explicit folders — its host is shared.
  */
-async function syncHostPlugins(state: SpecDrivenState): Promise<void> {
+async function syncHostPlugins(state: SpecDrivenState, opts: { seed?: boolean } = {}): Promise<void> {
   const raw = state as Record<string, unknown>;
   // With several windows (specs/app/multiple-windows.feature.md): `state`
   // is one window's reading, and the other open folders keep their plugins.
@@ -963,6 +964,8 @@ async function syncHostPlugins(state: SpecDrivenState): Promise<void> {
   // So does the read-only site, which runs no code but the app's: its data
   // folder is whatever the public repo holds.
   return syncPlugins(raw, {
+    // The folder's first look at its data, for the calls that open it.
+    seed: opts.seed === true,
     sources: !isHostedMode() && !isReadOnlyMode(),
     paths: !isDemoMode() && !isReadOnlyMode(),
     dataDir: isDemoMode() || isReadOnlyMode() ? null : await currentDataDir(),
@@ -977,13 +980,38 @@ async function syncHostPlugins(state: SpecDrivenState): Promise<void> {
       : {}),
     // Only the profile section goes to disk, onto the file as it is now: a
     // sync runs beside other writers (a demo reseed, a Settings change),
-    // and the state it was handed may be behind them.
-    persist: async (s) => {
-      const fresh = (await readState(getAppRoot())) as Record<string, unknown>;
-      await writeState({ ...fresh, [PROFILE_KEY]: s[PROFILE_KEY] } as SpecDrivenState, getAppRoot());
-    },
+    // and the state it was handed may be behind them. As nobody's write: a
+    // window's would name its folder as the one a run without windows
+    // opens (state.ts writeState), and a sync is no folder switch — every
+    // folder's first one stores its list ("A folder's plugins are picked
+    // from its data the first time it opens").
+    persist: (s) =>
+      detached(async () => {
+        const fresh = (await readState(getAppRoot())) as Record<string, unknown>;
+        await writeState(
+          { ...fresh, [PROFILE_KEY]: profileOnto(fresh[PROFILE_KEY], s) } as SpecDrivenState,
+          getAppRoot(),
+        );
+      }),
     readState: async () => (await readState(getAppRoot())) as Record<string, unknown>,
   });
+}
+
+/**
+ * The profile section a sync stores: its own, with the other folders' lists
+ * as the file has them now — another window's sync may have stored its
+ * folder's since this one read the settings. Its own whole when the file's
+ * lists are in another format (profile.ts PROFILE_FORMAT): they are not to
+ * be read under this one's mark.
+ */
+function profileOnto(stored: unknown, synced: Record<string, unknown>): unknown {
+  const mine = synced[PROFILE_KEY] as { repos?: Record<string, unknown>; format?: unknown } | undefined;
+  const theirs = stored as { repos?: Record<string, unknown>; format?: unknown } | undefined;
+  const repo = profileRepo(synced);
+  if (!mine?.repos || !theirs?.repos || typeof theirs.repos !== "object" || mine.format !== theirs.format) return mine;
+  const repos = { ...mine.repos, ...theirs.repos };
+  if (repo && mine.repos[repo] !== undefined) repos[repo] = mine.repos[repo];
+  return { ...mine, repos };
 }
 
 /** The plugins of every open folder, each synced from its own window's reading of the settings. */
@@ -1179,8 +1207,9 @@ const getState: Handler = async (req) => {
   maybeCheckDaily();
   const state = await readState(getAppRoot());
   // A demo reseed above rewrote the switches; the plugins follow them, and a
-  // plugin folder that appeared meanwhile is picked up.
-  await syncHostPlugins(state);
+  // plugin folder that appeared meanwhile is picked up. The page is opening
+  // the folder: its plugins are picked from its data, the first time.
+  await syncHostPlugins(state, { seed: true });
   // The folder this window was opened for and has yet to open
   // (src/server/workspace.ts PendingFolder), told to its page once, as it
   // boots: the page opens it as a folder picked by hand is opened.
@@ -1952,8 +1981,9 @@ const putState: Handler = async (req) => {
   await writeState(state, getAppRoot());
   reloader.set(normalizeReloadSeconds(state.reloadFrequencySeconds));
   // The profile mounts and unmounts its plugins on the spot: a module turned
-  // off answers 404 from here on, one turned on has its routes.
-  await syncHostPlugins(state);
+  // off answers 404 from here on, one turned on has its routes. A folder
+  // just picked has its plugins picked from its data, the first time.
+  await syncHostPlugins(state, { seed: true });
   setProjectionOptions({
     publishExternalLinks: normalizePublishExternalLinks(state.publishExternalLinks),
   });
@@ -4936,6 +4966,10 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/logs", getLogs],
   ["GET", "/api/logs/settings", getLogSettings],
   ["PUT", "/api/logs/settings", putLogSettings],
+  // Resources (src/server/resources.ts): memory and disk the app uses, and cleanups.
+  ["GET", "/api/resources/memory", getResourceMemory],
+  ["GET", "/api/resources/disk", getResourceDisk],
+  ["POST", "/api/resources/cleanup", postResourceCleanup],
   // Data viewer (src/server/dataViewer.ts): the Automerge store browsed
   // read-only as tables, documents and their history.
   ["GET", "/api/data/tables", withDataDir(getDataTables)],

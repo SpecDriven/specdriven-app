@@ -226,17 +226,19 @@ describe("the page", () => {
     expect(messages()).toEqual(["fetched"]);
     expect(container.querySelector(".log-message mark")?.textContent).toBe("fetched");
 
-    // Logs and Verbosity are tabs: one shows at a time.
+    // Logs, Verbosity and Resources are tabs: one shows at a time.
     const tabs = () => [...container.querySelectorAll('[role="tab"]')].map((t) => [t.textContent, t.getAttribute("aria-selected")]);
     expect(tabs()).toEqual([
       ["Logs", "true"],
       ["Verbosity", "false"],
+      ["Resources", "false"],
     ]);
     expect(container.querySelector('select[aria-label="Default level"]')).toBeNull();
     await act(async () => click(container.querySelector("#observability-verbosity-tab")!));
     expect(tabs()).toEqual([
       ["Logs", "false"],
       ["Verbosity", "true"],
+      ["Resources", "false"],
     ]);
     expect(container.querySelector('[role="tabpanel"]')!.id).toBe("observability-verbosity");
     expect(container.querySelector(".log-list")).toBeNull();

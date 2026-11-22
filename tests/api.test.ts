@@ -254,4 +254,13 @@ describe("matchApi", () => {
   test("malformed percent-encoding does not match", () => {
     expect(matchApi("GET", "/api/features/%ZZ")).toBeNull();
   });
+
+  // Resources (specs/app/resource-usage.feature.md): memory, disk and the cleanups.
+  test("resource routes match by method", () => {
+    expect(matchApi("GET", "/api/resources/memory")).not.toBeNull();
+    expect(matchApi("GET", "/api/resources/disk")).not.toBeNull();
+    expect(matchApi("POST", "/api/resources/cleanup")).not.toBeNull();
+    expect(matchApi("POST", "/api/resources/memory")).toBeNull();
+    expect(matchApi("GET", "/api/resources/cleanup")).toBeNull();
+  });
 });

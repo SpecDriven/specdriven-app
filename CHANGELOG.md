@@ -4,6 +4,11 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.297 — 2026-11-21
+
+- Observability gets a Resources tab: RAM and disk SpecDriven uses, with cleanups ([#498](https://github.com/SpecDriven/specdriven-app/pull/498))
+- Specs is a built-in plugin; a folder's plugins are picked from its data the first time it opens ([#497](https://github.com/SpecDriven/specdriven-app/pull/497))
+
 ## v0.1.296 — 2026-11-21
 
 - Project settings and the data format marker are YAML; old JSON files are converted on sync ([#496](https://github.com/SpecDriven/specdriven-app/pull/496))
