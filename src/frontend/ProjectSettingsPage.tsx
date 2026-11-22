@@ -1,5 +1,5 @@
 // The Project settings page (specs/app/project-settings.feature.md): the data
-// repo's project-settings.json, edited in the editor pane like Settings.
+// repo's project-settings.yaml, edited in the editor pane like Settings.
 // The code repositories — each with whether its folder is there, whether
 // its `specs` symlink points at this data repo (made and removed here), and
 // which is the default — the members, and the authorship switch. Every

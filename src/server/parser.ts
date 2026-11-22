@@ -50,7 +50,7 @@
 // scenario heading the line is ordinary content. Publishing writes it.
 //
 // A feature may also carry the project member it is assigned to
-// (project-settings.json in the data repo): one `**Assigned:** <name>` line
+// (project-settings.yaml in the data repo): one `**Assigned:** <name>` line
 // under the `#` heading, beside the link line. The parser lifts it into
 // `assigned`; the projection always writes it.
 //
@@ -58,7 +58,7 @@
 // them (specs/app/specs-authorship.feature.md): `**Created by:** <user>` and
 // `**Updated by:** <user>` lines under the heading, beside the link line. The
 // Automerge document holds them always; the projection writes them only when
-// the data repo's project-settings.json turns `authors-in-markdown` on.
+// the data repo's project-settings.yaml turns `authors-in-markdown` on.
 //
 // A feature and each scenario may name the feature flags that gate them
 // (specs/app/feature-flags.feature.md): `[ff:<name>:on|off]` tokens on a
@@ -319,7 +319,7 @@ export interface Feature {
   figma?: ResourceLink[];
   /**
    * Name of the project member the feature is assigned to, if any — one of
-   * the members listed in the data repo's `project-settings.json`
+   * the members listed in the data repo's `project-settings.yaml`
    * (src/server/members.ts). Absent when nobody is assigned.
    */
   assigned?: string;
@@ -836,7 +836,7 @@ export function addAttributes(into: SpecAttribute[], more: readonly SpecAttribut
  * written as one line under the feature's `# <name>` heading —
  * `**Assigned:** Ada Lovelace` — beside the external-link line, in either
  * order. Plain markdown, so GitHub renders it as bold text rather than
- * front-matter noise. The name is a member's name as `project-settings.json`
+ * front-matter noise. The name is a member's name as `project-settings.yaml`
  * spells it; a name that is not in that file still parses and is kept, so a
  * hand edit or a member removed from the project loses nothing.
  */
@@ -858,7 +858,7 @@ export function parseAssignedLine(line: string): string | null {
  * Authorship (specs/app/specs-authorship.feature.md) is written as two lines
  * under a feature's or a scenario's heading — `**Created by:** ada` and
  * `**Updated by:** grace` — beside the ticket link, in any order. Written
- * only while the data repo's project-settings.json asks for it
+ * only while the data repo's project-settings.yaml asks for it
  * (`authors-in-markdown`); the Automerge document records them either way.
  */
 const CREATED_BY_RE = /^\s{0,3}\*\*Created by:\*\*\s*(.+?)\s*$/i;

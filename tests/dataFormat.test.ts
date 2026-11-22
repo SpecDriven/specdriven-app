@@ -12,6 +12,7 @@ import {
   DATA_FORMAT,
   DATA_FORMAT_FILE,
   DATA_TOO_NEW_HEADER,
+  LEGACY_DATA_FORMAT_FILE,
   DataTooNewError,
   checkDataFormat,
   incompatibility,
@@ -39,9 +40,11 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-async function writeMarker(content: string): Promise<void> {
-  await Bun.write(join(dir, DATA_FORMAT_FILE), content);
+async function writeMarker(content: string, file = DATA_FORMAT_FILE): Promise<void> {
+  await Bun.write(join(dir, file), content);
 }
+
+const markerText = (file: string) => Bun.file(join(dir, file)).text();
 
 // The rule at the top of src/server/dataFormat.ts: a schema bump an older
 // release would misread raises the data format with it. When this fails,
@@ -53,7 +56,7 @@ test("the data format is pinned to the schema versions", () => {
     PAGE_SCHEMA_VERSION,
     TESTING_SCHEMA_VERSION,
   }).toEqual({
-    DATA_FORMAT: 3,
+    DATA_FORMAT: 4,
     SCHEMA_VERSION: 3,
     PAGE_SCHEMA_VERSION: 1,
     TESTING_SCHEMA_VERSION: 1,
@@ -71,13 +74,35 @@ test("a folder with no marker is in the first format", async () => {
 });
 
 test("a folder in the first format is raised to this app's", async () => {
-  // Format 3 names a stored image by its path in the repo (imageRefs.ts), which
-  // an earlier app reads as an edit: the marker is written on the first tick.
-  expect(DATA_FORMAT).toBe(3);
+  // Format 4 keeps the project settings in project-settings.yaml, which an
+  // earlier app cannot see: the marker is written on the first tick.
+  expect(DATA_FORMAT).toBe(4);
   expect(await stampDataFormat(dir)).toBe(true);
-  expect(await readDataFormat(dir)).toEqual({ format: 3, minAppVersion: appVersion });
+  expect(await readDataFormat(dir)).toEqual({ format: 4, minAppVersion: appVersion });
+  expect(await markerText(DATA_FORMAT_FILE)).toBe(`format: 4\nminAppVersion: "${appVersion}"\n`);
   // Once there, it is left alone.
   expect(await stampDataFormat(dir)).toBe(false);
+});
+
+// Releases before format 4 read only data-format.json: it stays beside the
+// YAML marker, saying the same, so they stop instead of writing.
+test("the JSON marker of a folder from before YAML is converted, and stays as a tripwire", async () => {
+  await writeMarker(JSON.stringify({ format: 3, minAppVersion: "0.1.288" }, null, 2), LEGACY_DATA_FORMAT_FILE);
+  expect(await readDataFormat(dir)).toEqual({ format: 3, minAppVersion: "0.1.288" });
+  expect(await checkDataFormat(dir)).toBeNull();
+  expect(await stampDataFormat(dir)).toBe(true);
+  expect(await readDataFormat(dir)).toEqual({ format: DATA_FORMAT, minAppVersion: appVersion });
+  expect(JSON.parse(await markerText(LEGACY_DATA_FORMAT_FILE))).toEqual({ format: DATA_FORMAT, minAppVersion: appVersion });
+  expect(await stampDataFormat(dir)).toBe(false);
+});
+
+test("whichever marker names the higher format is the folder's", async () => {
+  await writeMarker(`format: ${DATA_FORMAT}\nminAppVersion: "${appVersion}"\n`);
+  await writeMarker(JSON.stringify({ format: DATA_FORMAT + 1, minAppVersion: "9.9.9" }), LEGACY_DATA_FORMAT_FILE);
+  expect(await checkDataFormat(dir)).toMatchObject({ minAppVersion: "9.9.9", source: "marker" });
+  await writeMarker(JSON.stringify({ format: 3, minAppVersion: "0.1.288" }), LEGACY_DATA_FORMAT_FILE);
+  expect(await readDataFormat(dir)).toEqual({ format: DATA_FORMAT, minAppVersion: appVersion });
+  expect(await checkDataFormat(dir)).toBeNull();
 });
 
 test("the format marker is written on first sync", async () => {
@@ -112,6 +137,21 @@ test("a folder rolled back to this format is unblocked", async () => {
   await writeMarker(JSON.stringify({ format: DATA_FORMAT, minAppVersion: appVersion }));
   expect(await checkDataFormat(dir)).toBeNull();
   expect(incompatibility(dir)).toBeNull();
+});
+
+test("a YAML marker git left conflict markers in reads as its highest format", async () => {
+  await writeMarker(
+    [
+      "<<<<<<< HEAD",
+      "format: 4",
+      'minAppVersion: "0.1.296"',
+      "=======",
+      "format: 5",
+      'minAppVersion: "0.1.320"',
+      ">>>>>>> origin/main",
+    ].join("\n"),
+  );
+  expect(await readDataFormat(dir)).toEqual({ format: 5, minAppVersion: "0.1.320" });
 });
 
 test("a marker git left conflict markers in reads as its highest format", async () => {

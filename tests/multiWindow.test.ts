@@ -124,7 +124,7 @@ async function listed(workspace: Workspace | null): Promise<string[]> {
 }
 
 /** What a sync tick leaves in every specifications folder it visits. */
-const synced = (dir: string) => existsSync(join(dir, "project-settings.json"));
+const synced = (dir: string) => existsSync(join(dir, "project-settings.yaml"));
 
 /** Let the work a window's change started in the background come to rest. */
 async function settled(done: () => boolean): Promise<void> {

@@ -148,17 +148,35 @@ describe("pages and folders", () => {
   // for a folder that had none is housekeeping — named alone, out of the
   // title beside anything else, in the body either way. Editing it is a
   // change of its own.
-  test("project-settings.json is named alone and stays out of a shared title", () => {
-    const made = { path: "project-settings.json", before: null, after: '{ "members": [] }' };
+  test("project-settings.yaml is named alone and stays out of a shared title", () => {
+    const made = { path: "project-settings.yaml", before: null, after: "members: []\n" };
     expect(summarizeSavedChanges([made]).title).toBe("Add project settings");
     const both = summarizeSavedChanges([
       made,
       { path: "specs/seed.feature.md", before: "# Seed\n", after: "# Seed\n\n## One @v1 [proposed]\n\nbody\n" },
     ]);
     expect(both.title).toBe("Add scenario to Seed: One");
-    expect(both.body).toContain("- Add project settings: project-settings.json");
-    const edited = summarizeSavedChanges([{ path: "project-settings.json", before: "{}", after: '{ "members": [] }' }]);
+    expect(both.body).toContain("- Add project settings: project-settings.yaml");
+    const edited = summarizeSavedChanges([{ path: "project-settings.yaml", before: "{}", after: "members: []\n" }]);
     expect(edited.title).toBe("Edit project settings");
+  });
+
+  // The tick converting a project-settings.json from before YAML: one
+  // entry, never a delete that reads as the settings removed.
+  test("project-settings.json converted to project-settings.yaml is one housekeeping entry", () => {
+    const converted = [
+      { path: "project-settings.json", before: '{ "members": [] }', after: null },
+      { path: "project-settings.yaml", before: null, after: "members: []\n" },
+    ];
+    const alone = summarizeSavedChanges(converted);
+    expect(alone.title).toBe("Convert project settings to YAML");
+    expect(alone.body).not.toContain("Delete");
+    const both = summarizeSavedChanges([
+      ...converted,
+      { path: "specs/seed.feature.md", before: "# Seed\n", after: "# Seed\n\n## One @v1 [proposed]\n\nbody\n" },
+    ]);
+    expect(both.title).toBe("Add scenario to Seed: One");
+    expect(both.body).toContain("- Convert project settings: project-settings.yaml");
   });
 
   test("a markdown file outside the special folders is saved by path", () => {

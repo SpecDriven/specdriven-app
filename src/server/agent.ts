@@ -43,7 +43,7 @@ export interface SessionSection {
 
 /**
  * Where a session runs (src/server/members.ts `code-repo`): the code repo
- * when the data repo's project-settings.json names one, else the data repo
+ * when the data repo's project-settings.yaml names one, else the data repo
  * itself. The prompt tells Claude where the specs are when they are not in
  * the working directory.
  */

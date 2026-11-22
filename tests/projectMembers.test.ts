@@ -1,5 +1,5 @@
 // Project members and feature assignment (src/server/members.ts): the data
-// repo's `project-settings.json` lists who works on the project, and a
+// repo's `project-settings.yaml` lists who works on the project, and a
 // feature names the member it is assigned to on an `**Assigned:**` line
 // under its heading — parsed into `Feature.assigned`, held in the Automerge
 // document, and written back by the projection.
@@ -92,7 +92,7 @@ describe("the Assignments setting", () => {
   });
 });
 
-describe("project-settings.json", () => {
+describe("project-settings.yaml", () => {
   test("members are read from the data repo", async () => {
     await writeFile(
       join(root, PROJECT_SETTINGS_FILE),
@@ -205,7 +205,7 @@ describe("the assigned line", () => {
     expect(splitFeatureMeta("").assigned).toBeUndefined();
   });
 
-  // A name no longer in project-settings.json still parses: the file is the
+  // A name no longer in project-settings.yaml still parses: the file is the
   // record of who it was assigned to, whatever the member list says today.
   test("a name that is not a project member is kept", () => {
     expect(parseFeature(`# F\n\n**Assigned:** Somebody Else\n`).assigned).toBe("Somebody Else");

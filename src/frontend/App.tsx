@@ -1480,7 +1480,7 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [features, setFeatures] = useState<FeatureListing[]>([]);
   // Project members (src/server/members.ts): the data repo's
-  // project-settings.json, as the feature's "Assigned" dropdown offers them.
+  // project-settings.yaml, as the feature's "Assigned" dropdown offers them.
   const [members, setMembers] = useState<ProjectMember[]>([]);
   // Code repo (src/server/members.ts `code-repo`): where a code gen session
   // runs, from the same file; null means the data repo.
@@ -3395,7 +3395,7 @@ export function App() {
     setAppPage(page);
   };
   const openSettings = () => openAppPage("settings");
-  /** Project settings (src/frontend/ProjectSettingsPage.tsx): the data repo's project-settings.json. */
+  /** Project settings (src/frontend/ProjectSettingsPage.tsx): the data repo's project-settings.yaml. */
   const openProjectSettings = () => openAppPage("project-settings");
   // Bumped to make an open Project settings page read the file afresh — a
   // clone started from outside it shows on its row.
@@ -4055,7 +4055,7 @@ export function App() {
   } => {
     const files = sessionFiles();
     const bundle = sessionBundle();
-    // With a code repo named in project-settings.json the session runs
+    // With a code repo named in project-settings.yaml the session runs
     // there, and the dialog says so — the folder is the session's whole
     // context, so it must not come as a surprise.
     const where = codeRepo ? ` in ${codeRepo}` : "";
@@ -5918,7 +5918,7 @@ export function App() {
 
   // Authorship in the markdown (specs/app/specs-authorship.feature.md): a
   // setting of the data repo, not of this device — written into its
-  // project-settings.json, and every feature file rewritten on the spot.
+  // project-settings.yaml, and every feature file rewritten on the spot.
   const toggleAuthorsInMarkdown = async (on: boolean) => {
     setSettingsError(null);
     const before = authorsInMarkdown;
@@ -6370,7 +6370,7 @@ export function App() {
 
   /**
    * The project members the "Assigned" dropdown offers: the data repo's
-   * project-settings.json (src/server/members.ts), plus whoever the feature
+   * project-settings.yaml (src/server/members.ts), plus whoever the feature
    * is assigned to when that name is no longer on the list — a member who
    * left the project must still show, or opening the feature would silently
    * look unassigned.
@@ -10635,7 +10635,7 @@ export function App() {
         </label>
         )}
         {/* Authorship (specs/app/specs-authorship.feature.md): a setting
-            of the open data folder, kept in its project-settings.json —
+            of the open data folder, kept in its project-settings.yaml —
             the app records who created and last updated every feature and
             scenario either way; this decides whether the markdown says so. */}
         {authorsInMarkdown !== null && (
@@ -10644,7 +10644,7 @@ export function App() {
             Write authors into feature files
             <span className="settings-row-hint">
               {authorsInMarkdown
-                ? "Each feature and scenario in this data folder carries “Created by” and “Updated by” lines (authors-in-markdown in its project-settings.json)."
+                ? "Each feature and scenario in this data folder carries “Created by” and “Updated by” lines (authors-in-markdown in its project-settings.yaml)."
                 : "Who created and last updated each feature and scenario is recorded and shown here, but not written into this data folder's markdown."}
             </span>
           </span>
@@ -10667,7 +10667,7 @@ export function App() {
             Assign features to project members
             <span className="settings-row-hint">
               {settingsAssignmentsDraft
-                ? "The feature page offers an “Assigned” dropdown of the members listed in the data folder's project-settings.json."
+                ? "The feature page offers an “Assigned” dropdown of the members listed in the data folder's project-settings.yaml."
                 : "Features are not assigned to anyone; any assignment already in a feature file stays there."}
             </span>
           </span>
@@ -11876,7 +11876,7 @@ export function App() {
           renderSettingsPage()
         ) : appPageShown === "project-settings" ? (
           /* Project settings (specs/app/project-settings.feature.md): the
-             data repo's project-settings.json — code repos with their specs
+             data repo's project-settings.yaml — code repos with their specs
              symlinks, the default, the members, the authorship switch. */
           <ProjectSettingsPage
             key={projectSettingsKey}
@@ -12924,7 +12924,7 @@ export function App() {
             </header>
             {/* Properties as chips (specs/ui/ui.feature.md "Design system"):
                 the publish rollup; the assignee (src/server/members.ts —
-                the data repo's project-settings.json, saved on the spot,
+                the data repo's project-settings.yaml, saved on the spot,
                 off unless Settings turns assignments on); the ticket
                 (specs/external-links/project-management-jira-linear-etc
                 .feature.md "Add link to feature"), edited in a popover. */}

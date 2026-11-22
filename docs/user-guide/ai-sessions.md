@@ -56,16 +56,17 @@ Two settings shape sessions:
   selection checkboxes and the Start AI Session button, clears any
   selection, and makes the server refuse sessions even from outside the UI.
   The switch is saved in `.specdriven/settings.yaml`.
-- **`code-repo`** in the data folder's `project-settings.json`. This is the
+- **`code-repo`** in the data folder's `project-settings.yaml`. This is the
   directory the agent works in, the repository whose code implements the
   specs. Without it the session runs in the data folder itself, which is
   fine for a project that keeps specs and code together.
 
-```json
-{
-  "members": ["ada", "grace"],
-  "code-repo": "../acme-app"
-}
+```yaml
+members:
+  - ada
+  - grace
+code-repos:
+  - ../acme-app
 ```
 
 A relative path is resolved from the data folder.
@@ -339,7 +340,7 @@ button; errors inside a session show in the pane's transcript.
 | `Claude Code Desktop not found — install Claude.app` | Install the Claude app on macOS, or pick the coding agent pane instead. |
 | `Could not open Claude Code Desktop: …` | The operating system could not open the `claude://` link; the rest of the message is its reason. |
 | `Code generation is switched off in Settings` | Turn the **Code generation** switch on. |
-| `Code repo not found: <path> (code-repo in project-settings.json)` | Fix or remove `code-repo` in the data folder's `project-settings.json`. |
+| `Code repo not found: <path> (code-repo in project-settings.yaml)` | Fix or remove `code-repo` in the data folder's `project-settings.yaml`. |
 | `The Claude CLI is not signed in on this machine: run claude auth login in a terminal, then start a new session.` | Do that; the running session cannot recover. |
 | `The Codex CLI is not signed in on this machine: run codex login in a terminal, then start a new session.` | Same. |
 | `Pi has no credentials for this model here: run pi in a terminal and /login, then start a new session.` | Same. |

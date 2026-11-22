@@ -13,7 +13,7 @@ import { parseFeature, parsePage, titleFromFileName } from "../parser";
 import type { Feature, Scenario } from "../parser";
 import { PAGE_FOLDERS, isPageFile } from "../pageFolders";
 import { isFeatureFile, isFeatureOrderFile, isFolderDisplayNameFile, isFolderOrderFile } from "../walk";
-import { PROJECT_SETTINGS_FILE } from "../members";
+import { LEGACY_PROJECT_SETTINGS_FILE, PROJECT_SETTINGS_FILE, isProjectSettingsPath } from "../members";
 
 /** One file the working tree holds differently from HEAD. */
 export interface ChangedFile {
@@ -44,7 +44,7 @@ export const FALLBACK_TITLE = "Auto-save scenarios";
 /** The title when only the app's own documents changed — a drifted file absorbed, say. */
 export const DOCUMENTS_TITLE = "Update app documents";
 
-type Verb = "Add" | "Edit" | "Delete" | "Move" | "Rename" | "Describe" | "Reorder" | "Save";
+type Verb = "Add" | "Edit" | "Delete" | "Move" | "Rename" | "Describe" | "Reorder" | "Save" | "Convert";
 
 type ScenarioChange = "add" | "edit" | "remove" | "publish";
 
@@ -68,27 +68,41 @@ interface Entry {
  * left out: they are how the change is stored, not what changed.
  */
 export function summarizeSavedChanges(files: ChangedFile[]): SaveSummary {
-  const entries = mergeMoves(
-    files
-      .filter((f) => f.path !== STATE_DIR && !f.path.startsWith(`${STATE_DIR}/`))
-      .map(entryFor),
+  const entries = mergeSettingsConversion(
+    mergeMoves(
+      files
+        .filter((f) => f.path !== STATE_DIR && !f.path.startsWith(`${STATE_DIR}/`))
+        .map(entryFor),
+    ),
   );
   if (entries.length === 0) {
     return { title: files.length ? DOCUMENTS_TITLE : FALLBACK_TITLE, body: AUTO_SAVE_TRAILER };
   }
-  // The project settings file the tick makes for a folder that had none
-  // (specs/app/project-settings.feature.md) rides along with whatever else
-  // the tick commits: housekeeping, so it stays out of the title when there
-  // is something else to name, and keeps its body line.
-  const named = entries.filter((e) => !(e.noun === PROJECT_SETTINGS_NOUN && e.verb === "Add")) ;
+  // The project settings file the tick makes for a folder that had none, or
+  // converts from JSON (specs/app/project-settings.feature.md), rides along
+  // with whatever else the tick commits: housekeeping, so it stays out of
+  // the title when there is something else to name, and keeps its body line.
+  const named = entries.filter((e) => !(e.noun === PROJECT_SETTINGS_NOUN && (e.verb === "Add" || e.verb === "Convert")));
   const titled = named.length > 0 ? named : entries;
   const title = fit(titled.length === 1 ? singleTitle(titled[0]!) : batchTitle(titled));
   const body = [...entries.map(bodyLine), "", AUTO_SAVE_TRAILER].join("\n");
   return { title, body };
 }
 
-/** The noun for the data repo's project-settings.json. */
+/** The noun for the data repo's project settings file. */
 const PROJECT_SETTINGS_NOUN = "project settings";
+
+/**
+ * project-settings.json gone and project-settings.yaml added in one commit
+ * is the tick converting the file: one entry, "Convert project settings to
+ * YAML", rather than a delete that reads as the settings removed.
+ */
+function mergeSettingsConversion(entries: Entry[]): Entry[] {
+  const json = entries.find((e) => e.name === LEGACY_PROJECT_SETTINGS_FILE && e.verb === "Delete");
+  const yaml = entries.find((e) => e.name === PROJECT_SETTINGS_FILE && e.verb === "Add");
+  if (!json || !yaml) return entries;
+  return entries.filter((e) => e !== json).map((e) => (e === yaml ? { ...e, verb: "Convert" as const } : e));
+}
 
 function entryFor(file: ChangedFile): Entry {
   const { path, before, after } = file;
@@ -96,7 +110,7 @@ function entryFor(file: ChangedFile): Entry {
   const blank: Entry = { verb: "Save", noun: "file", name: path, scenarios: [], descriptionChanged: false };
   if (before === undefined || after === undefined) return blank;
   const verb: Verb = before === null ? "Add" : after === null ? "Delete" : "Edit";
-  if (path === PROJECT_SETTINGS_FILE) return { ...blank, verb, noun: PROJECT_SETTINGS_NOUN, name: path };
+  if (isProjectSettingsPath(path)) return { ...blank, verb, noun: PROJECT_SETTINGS_NOUN, name: path };
   if (isFeatureFile(base)) {
     try {
       return featureEntry(path, verb, before, after);
@@ -197,7 +211,7 @@ function singleTitle(e: Entry): string {
   if (e.verb === "Describe") return `Describe folder: ${e.name}`;
   if (e.verb === "Reorder") return `${reorderLine(e)}: ${e.name}`;
   if (e.verb === "Save") return `Save ${e.name}`;
-  if (e.noun === PROJECT_SETTINGS_NOUN) return `${e.verb} ${e.noun}`;
+  if (e.noun === PROJECT_SETTINGS_NOUN) return e.verb === "Convert" ? `Convert ${e.noun} to YAML` : `${e.verb} ${e.noun}`;
   return `${e.verb} ${e.noun}: ${e.name}`;
 }
 

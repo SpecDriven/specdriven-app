@@ -99,7 +99,7 @@ function change(el: Element, checked: boolean) {
 }
 
 const initial = (): ProjectSettingsData => ({
-  file: "/w/acme-specs/project-settings.json",
+  file: "/w/acme-specs/project-settings.yaml",
   members: [{ name: "Ada", email: "ada@acme.example" }],
   codeRepos: [
     { path: "../acme-app", dir: "/w/acme-app", isDefault: true, exists: true, specsLink: { state: "missing" } },
@@ -239,7 +239,7 @@ describe("the page", () => {
     await act(async () => change(container.querySelector('input[aria-label="Authors in the markdown"]')!, true));
     await flush();
     expect(calls.at(-1)!.body).toEqual({ authorsInMarkdown: true });
-    expect(container.textContent).toContain("/w/acme-specs/project-settings.json");
+    expect(container.textContent).toContain("/w/acme-specs/project-settings.yaml");
 
     await act(async () => root.unmount());
     container.remove();
@@ -247,7 +247,7 @@ describe("the page", () => {
 
   test("a refusal shows as the error line and leaves the page as it was", async () => {
     globalThis.fetch = (async () =>
-      new Response(JSON.stringify({ error: "project-settings.json is not valid JSON — fix it by hand first" }), {
+      new Response(JSON.stringify({ error: "project-settings.yaml is not valid YAML — fix it by hand first" }), {
         status: 400,
       })) as unknown as typeof fetch;
     const container = document.createElement("div");
@@ -260,7 +260,7 @@ describe("the page", () => {
     );
     await act(async () => click(container.querySelector('button[aria-label="Create the specs symlink in ../acme-app"]')!));
     await flush();
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain("not valid JSON");
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("not valid YAML");
     expect(container.querySelectorAll('[data-testid="code-repo-row"]')[0]!.textContent).toContain("no specs symlink");
     await act(async () => root.unmount());
     container.remove();
