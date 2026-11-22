@@ -199,13 +199,28 @@ function firstTag(xml: string, tag: string): string {
 }
 
 /**
+ * XML text without its comments. Comments are taken out again until none
+ * is left — taking one out can join the text around it into another, as
+ * `<!<!-- x -->--` does — and one left open runs to the end.
+ */
+export function stripXmlComments(text: string): string {
+  let out = text;
+  for (let before = ""; out !== before; ) {
+    before = out;
+    out = out.replace(/<!--[\s\S]*?-->/g, "");
+  }
+  const open = out.indexOf("<!--");
+  return open === -1 ? out : out.slice(0, open);
+}
+
+/**
  * A pom.xml's own coordinates and its modules. The blocks that carry other
  * projects' coordinates — the parent, the dependencies, the build's plugins
  * — are set aside before the artifact id and name are looked for, so the
  * first one found is the project's own.
  */
 export function readPom(text: string): PomInfo {
-  const xml = text.replace(/<!--[\s\S]*?-->/g, "");
+  const xml = stripXmlComments(text);
   const modules = [...xml.matchAll(/<module>\s*([^<]+?)\s*<\/module>/g)].map((m) => xmlText(m[1]!)).filter(Boolean);
   let own = xml;
   for (const block of ["parent", "dependencyManagement", "dependencies", "build", "profiles", "reporting", "modules"]) {
