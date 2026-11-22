@@ -2,7 +2,7 @@
 // each platform keeps it, the Debug menu only where it is given.
 import { describe, expect, test } from "bun:test";
 import type { MenuItemConstructorOptions } from "electron";
-import { appMenuTemplate, CHECK_FOR_UPDATES, NEW_WINDOW, OPEN_FOLDER, OPEN_RECENT } from "../src/electron/appMenu";
+import { appMenuTemplate, CHECK_FOR_UPDATES, EXTRACT_SPECS, NEW_WINDOW, OPEN_FOLDER, OPEN_RECENT } from "../src/electron/appMenu";
 
 function labels(items: MenuItemConstructorOptions[] | undefined): (string | undefined)[] {
   return (items ?? []).map((i) => (i.type === "separator" ? "separator" : (i.label ?? i.role)));
@@ -61,6 +61,20 @@ describe("the File menu's window items", () => {
     const items = menu[0]!.submenu as MenuItemConstructorOptions[];
     expect(labels(items).at(-1)).toBe("quit");
     expect(items[2]!.submenu).toEqual([{ label: "No Recent Folders", enabled: false }]);
+  });
+
+  // specs/app/extract-specs-from-code.feature.md "From the desktop app's File menu".
+  test("File offers Extract Specs from Code Project… where the shell can start it", () => {
+    const heard: string[] = [];
+    const menu = appMenuTemplate({
+      platform: "darwin",
+      onCheckForUpdates: () => {},
+      file: { ...file(["/specs/a"], heard), onExtractSpecs: () => heard.push("extract") },
+    });
+    const items = menu[1]!.submenu as MenuItemConstructorOptions[];
+    expect(labels(items)).toEqual([NEW_WINDOW, OPEN_FOLDER, OPEN_RECENT, "separator", EXTRACT_SPECS, "separator", "close"]);
+    (items[4]!.click as () => void)();
+    expect(heard).toEqual(["extract"]);
   });
 
   test("without them the standard File menu stays", () => {

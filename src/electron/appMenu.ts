@@ -2,9 +2,10 @@
 // specs/app/app-updates.feature.md "Check for Updates…"): Electron's
 // standard roles, plus Check for Updates… where each platform keeps it — the
 // app menu on macOS, Help elsewhere — the File menu's New Window, Open
-// Folder… and Open Recent (specs/app/multiple-windows.feature.md) and, in a
-// development run, the Debug menu (src/electron/debugger.ts). A template, so
-// it tests without Electron.
+// Folder… and Open Recent (specs/app/multiple-windows.feature.md), its
+// Extract Specs from Code Project… (specs/app/extract-specs-from-code.
+// feature.md) and, in a development run, the Debug menu
+// (src/electron/debugger.ts). A template, so it tests without Electron.
 
 import type { MenuItemConstructorOptions } from "electron";
 
@@ -26,11 +27,17 @@ export interface FileMenuInput {
   onOpenFolder: () => void;
   /** The recent folders, most recent first. */
   recent: RecentItem[];
+  /**
+   * Start "Extract specs from a code project" in the window in front
+   * (specs/app/extract-specs-from-code.feature.md); absent, no such item.
+   */
+  onExtractSpecs?: () => void;
 }
 
 export const NEW_WINDOW = "New Window";
 export const OPEN_FOLDER = "Open Folder…";
 export const OPEN_RECENT = "Open Recent";
+export const EXTRACT_SPECS = "Extract Specs from Code Project…";
 
 function fileMenu(input: FileMenuInput, mac: boolean): MenuItemConstructorOptions {
   return {
@@ -46,6 +53,12 @@ function fileMenu(input: FileMenuInput, mac: boolean): MenuItemConstructorOption
             ? input.recent.map((r) => ({ label: r.label, click: r.onOpen }))
             : [{ label: "No Recent Folders", enabled: false }],
       },
+      ...(input.onExtractSpecs
+        ? [
+            { type: "separator" as const },
+            { id: "extract-specs", label: EXTRACT_SPECS, click: input.onExtractSpecs },
+          ]
+        : []),
       { type: "separator" },
       // What the standard File menu holds: Close Window on macOS, Quit elsewhere.
       mac ? { role: "close" } : { role: "quit" },

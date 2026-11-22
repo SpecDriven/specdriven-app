@@ -310,6 +310,9 @@ import { WikiQtestPublishDialog } from "./WikiQtestPublishDialog";
 import { AhaTokens, fetchAhaTokens, type AhaSite } from "./AhaToken";
 import { AhaImportDialog } from "./AhaImportDialog";
 import { importSummary, OpenSpecImportDialog } from "./OpenSpecImportDialog";
+import { ExtractSpecsDialog, type ExtractCreated } from "./ExtractSpecsDialog";
+import { ExtractionProgress, PublishSpecsDialog, useExtraction } from "./ExtractionProgress";
+import { EXTRACT_SPECS_EVENT } from "../server/intentNames";
 import { HostedStartNav, hostedCloneHint, type HostedAccount } from "./HostedStartNav";
 import type { ScenarioRef } from "./route";
 import { copyText, copyWhenReady } from "./clipboard";
@@ -1406,7 +1409,7 @@ export function App() {
   // First-run screen (specs/ui/app-start.feature.md): open a folder on this
   // computer, or clone a GitHub repository with a personal access token.
   // Or open a code repository directly (specs/app/code-repo-mode.feature.md).
-  const [startChoice, setStartChoice] = useState<"folder" | "clone">("folder");
+  const [startChoice, setStartChoice] = useState<"folder" | "clone" | "extract">("folder");
   // The first-run field's folder is neither kind by its contents
   // (src/server/folderKind.ts): the question the screen asks about it.
   const [kindQuestion, setKindQuestion] = useState<KindQuestion | null>(null);
@@ -1860,6 +1863,13 @@ export function App() {
       in the demo or the hosted app, which have no code repo on disk. */
   const [openSpecImportOpen, setOpenSpecImportOpen] = useState<{ folder: string | null } | null>(null);
   const openSpecImport = !demo && !hosted;
+  /** Extract specs from a code project (specs/app/extract-specs-from-code
+      .feature.md): the project the dialog starts on — the open code
+      repository — or null to ask for one; null while the dialog is closed.
+      Offered wherever a code repository can be opened: the user's own
+      machine, never the demo, the hosted app or the read-only site. */
+  const [extractOpen, setExtractOpen] = useState<{ codeDir: string | null } | null>(null);
+  const extractSpecs = canOpenCodeRepo && !demo && !hosted;
   /** Import from Jira/Wiki (specs/external-links/jira-wiki-import
       .feature.md): the Jira sites this device holds a token for, and the
       folder an open import lands in (null for the top level) — or null
@@ -2577,6 +2587,29 @@ export function App() {
   const wikiQtestTrapRef = useFocusTrap(wikiQtestPublishOpen);
   const ahaTrapRef = useFocusTrap(ahaImportOpen !== null);
   const openSpecTrapRef = useFocusTrap(openSpecImportOpen !== null);
+  const extractTrapRef = useFocusTrap(extractOpen !== null);
+  // The drafting of the open folder's specs from its code, as it goes: asked
+  // of the server when the folder opens and while a run is at work; each
+  // feature it writes shows in the sidebar as it lands.
+  const [extractKick, setExtractKick] = useState(0);
+  const extraction = useExtraction(
+    extractSpecs && !needsRepo && codeRepoDir === null ? dataDir : null,
+    extractKick,
+    () => void loadFeatures(),
+  );
+  const [publishOpen, setPublishOpen] = useState(false);
+  // The desktop app's File → Extract Specs from Code Project… (src/electron/
+  // main.ts) asks the window in front: with a folder open the dialog opens
+  // on it, and on the first-run screen its choice is picked.
+  useEffect(() => {
+    if (!extractSpecs) return;
+    const onMenu = () => {
+      if (needsRepo) setStartChoice("extract");
+      else setExtractOpen({ codeDir: codeRepoRef.current });
+    };
+    window.addEventListener(EXTRACT_SPECS_EVENT, onMenu);
+    return () => window.removeEventListener(EXTRACT_SPECS_EVENT, onMenu);
+  }, [extractSpecs, needsRepo]);
   const importTrapRef = useFocusTrap(importOpen !== null);
   const foldersTrapRef = useFocusTrap(foldersOpen);
   // The folder dialog lists what is so now (specs/app/multiple-windows
@@ -2777,7 +2810,7 @@ export function App() {
 
   // First-run form (specs/ui/app-start.feature.md): the picker fills the path
   // field; the user still confirms with the submit button.
-  const browseIntoRepoInput = async (purpose: "data-repo" | "folder" = "data-repo") => {
+  const browseIntoRepoInput = async (purpose: "data-repo" | "folder" | "code-repo" = "data-repo") => {
     const picked = await chooseFolderNative(purpose);
     if (picked && repoInputRef.current) {
       repoInputRef.current.value = picked;
@@ -3169,6 +3202,63 @@ export function App() {
       setSwitching(null);
       setSettingRepo(false);
     }
+  };
+
+  /**
+   * The first-run screen's "Extract specs from code"
+   * (specs/app/extract-specs-from-code.feature.md): the project opens as a
+   * code repository — so its agents are at hand — and the dialog starts on it.
+   */
+  const startExtract = async (input: string) => {
+    const dir = input.trim();
+    if (!dir) return;
+    if (await openCodeRepo(dir)) setExtractOpen({ codeDir: codeRepoRef.current ?? dir });
+  };
+
+  /**
+   * The specification folder was made: it opens in this window, in place of
+   * the code repository or folder that was open, and what could not be done
+   * on the way — the repository on GitHub, the project's specs link — is said.
+   */
+  const afterExtract = async ({ created, codeDir, folders, agent, model }: ExtractCreated) => {
+    setExtractOpen(null);
+    setFoldersOpen(false);
+    // A repository that was cloned opens by its url, as it would from the folder field.
+    const open = created.open ?? created.dir;
+    if (needsRepo) await saveRepo(open);
+    else if (created.dir === dataDir && codeRepoDir === null) await loadFeatures();
+    else await switchRepo(open);
+    const count = `${created.folders.length} folder${created.folders.length === 1 ? "" : "s"}`;
+    const made = created.existing
+      ? `${count} added to ${repoDisplayName(created.dir)}`
+      : `${repoDisplayName(created.dir)} is made, with ${count}`;
+    toast.success(created.github ? `${made}, and published at ${created.github}` : made);
+    if (created.githubProblem) toast.error(`Not published to GitHub: ${created.githubProblem}`);
+    if (created.linkProblem) toast.error(created.linkProblem);
+    // The folder is open: its specs are drafted from here on, in the
+    // background, and the pill in the sidebar's corner says how far it is.
+    if (!folders.some((f) => f.draft)) return;
+    try {
+      const res = await fetch("/api/extract/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // The project is named: a folder that was there may describe others too.
+        body: JSON.stringify({
+          folders,
+          codeDir,
+          specsDir: created.dir,
+          ...(agent ? { agent } : {}),
+          ...(model ? { model } : {}),
+        }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        toast.error(`The specs are not being drafted: ${data.error ?? `HTTP ${res.status}`}`);
+      }
+    } catch {
+      toast.error("The specs are not being drafted: could not reach the server");
+    }
+    setExtractKick((k) => k + 1);
   };
 
   /** Take a code repository off the folder dialog's list — the folder stays on disk. */
@@ -8259,6 +8349,8 @@ export function App() {
     settingsFileOpen ||
     importOpen !== null ||
     openSpecImportOpen !== null ||
+    extractOpen !== null ||
+    publishOpen ||
     tokenSignInOpen ||
     foldersOpen ||
     switching !== null ||
@@ -8399,6 +8491,8 @@ export function App() {
     if (wikiQtestPublishOpen) return setWikiQtestPublishOpen(false);
     if (ahaImportOpen !== null) return setAhaImportOpen(null);
     if (openSpecImportOpen !== null) return setOpenSpecImportOpen(null);
+    if (extractOpen !== null) return setExtractOpen(null);
+    if (publishOpen) return setPublishOpen(false);
     if (importOpen !== null) return setImportOpen(null);
     if (featureLinkOpen) return setFeatureTicketsOpen(false);
     if (featureQtestOpen) return setFeatureQtestDraft(null);
@@ -8698,6 +8792,24 @@ export function App() {
       run: () => setOpenSpecImportOpen({ folder: selectedFolder }),
     },
     {
+      id: "extract-specs",
+      keys: [],
+      label: codeRepoDir !== null ? "Extract specs from this project…" : "Extract specs from a code project…",
+      group: "Create",
+      when: () => !quiet && extractSpecs && editing === null,
+      palette: () => !quietBehindPalette && extractSpecs && editing === null,
+      run: () => setExtractOpen({ codeDir: codeRepoDir }),
+    },
+    {
+      id: "publish-folder",
+      keys: [],
+      label: "Publish this folder to GitHub…",
+      group: "Create",
+      when: () => !quiet && extraction.status?.published === false && editing === null,
+      palette: () => !quietBehindPalette && extraction.status?.published === false && editing === null,
+      run: () => setPublishOpen(true),
+    },
+    {
       id: "pomodoro",
       keys: "p",
       label: "Start a pomodoro",
@@ -8897,6 +9009,11 @@ export function App() {
     // Only while Import from Aha! is switched on in Settings
     // (specs/external-links/aha-import.feature.md).
     shortcutAction("import-aha", <Import size={14} />),
+    // A specification folder for a code project, drafted from its code
+    // (specs/app/extract-specs-from-code.feature.md); and, for a folder made
+    // on this computer only, its repository on GitHub.
+    shortcutAction("extract-specs", <Sparkles size={14} />),
+    shortcutAction("publish-folder", <Import size={14} />),
     ...(selectedFolder
       ? [
           action("rename-folder", `Rename folder “${selectedFolder.split("/").pop()}”`, <Pencil size={14} />, () =>
@@ -9504,6 +9621,10 @@ export function App() {
             e.preventDefault();
             const input = new FormData(e.currentTarget).get("repo") as string;
             if (!input?.trim()) return;
+            // A code project to extract specs from opens as a code
+            // repository first, and the dialog then starts on it
+            // (specs/app/extract-specs-from-code.feature.md).
+            if (startChoice === "extract") return void startExtract(input);
             // One field for both kinds of folder: what is inside says which
             // (specs/ui/app-start.feature.md).
             void openStartFolder(input);
@@ -9516,7 +9637,7 @@ export function App() {
             <>
               <p>No folder is open yet. Where is your work?</p>
               <div className="issue-filter start-choice" role="radiogroup" aria-label="Where the folder is">
-                {(["folder", "clone"] as const).map((choice) => (
+                {(canOpenCodeRepo ? (["folder", "clone", "extract"] as const) : (["folder", "clone"] as const)).map((choice) => (
                   <button
                     key={choice}
                     type="button"
@@ -9529,7 +9650,11 @@ export function App() {
                       setKindQuestion(null);
                     }}
                   >
-                    {choice === "folder" ? "Open a folder on this computer" : "Clone from GitHub"}
+                    {choice === "folder"
+                      ? "Open a folder on this computer"
+                      : choice === "clone"
+                        ? "Clone from GitHub"
+                        : "Extract specs from code"}
                   </button>
                 ))}
               </div>
@@ -9559,6 +9684,32 @@ export function App() {
                 ) : (
                   folderForm
                 )
+              ) : startChoice === "extract" ? (
+                <>
+                  <p>
+                    Enter the path to a code project. Its modules are proposed as folders for its specifications,
+                    which get a new folder beside the project.
+                  </p>
+                  <div className="input-row">
+                    <input
+                      ref={repoInputRef}
+                      name="repo"
+                      placeholder="/path/to/project"
+                      aria-label="Code project folder"
+                      autoFocus
+                    />
+                    {canChooseFolder && (
+                      <button type="button" className="browse" onClick={() => void browseIntoRepoInput("code-repo")}>
+                        Browse…
+                      </button>
+                    )}
+                  </div>
+                  <button type="submit" className="btn btn-primary" disabled={settingRepo}>
+                    {settingRepo ? "Opening…" : "Analyse this project"}
+                  </button>
+                  <p className="hint">Java, JavaScript, TypeScript and Python projects are read. Nothing is written into the project.</p>
+                  {repoError && <p className="error">{repoError}</p>}
+                </>
               ) : (
                 <CloneFromGitHub
                   auth={auth}
@@ -11772,6 +11923,15 @@ export function App() {
               navigate={navigateIn(tab.id)}
             />
           ))}
+        {/* specs/app/extract-specs-from-code.feature.md: while the open
+            folder's specs are drafted from its code — and until the run is
+            dismissed — a pill says how far it is. */}
+        <ExtractionProgress
+          extraction={extraction}
+          onOpenFeature={(file) => void openFeature(file, { push: true })}
+          onPublish={() => setPublishOpen(true)}
+          onError={(message) => toast.error(message)}
+        />
         {/* specs/user-info-settings.feature.md: the lower left corner shows the
             current user; its menu holds User info, Settings and Plugins. */}
         <div className="user-corner">
@@ -14157,6 +14317,30 @@ export function App() {
           }}
         />
       )}
+      {publishOpen && (
+        <PublishSpecsDialog
+          onClose={() => setPublishOpen(false)}
+          onPublished={(url) => {
+            setPublishOpen(false);
+            extraction.published();
+            toast.success(`Published at ${url}`);
+          }}
+        />
+      )}
+      {extractOpen !== null && (
+        <ExtractSpecsDialog
+          codeDir={extractOpen.codeDir}
+          agents={agents}
+          agentModels={agentModels}
+          browse={canChooseFolder ? () => chooseFolderNative("code-repo") : undefined}
+          browseSpecs={canChooseFolder ? () => chooseFolderNative("data-repo") : undefined}
+          // The folder that is open is the likeliest one to add to.
+          openSpecFolder={codeRepoDir === null && !needsRepo ? dataRepo : null}
+          trapRef={extractTrapRef}
+          onClose={() => setExtractOpen(null)}
+          onCreated={(result) => void afterExtract(result)}
+        />
+      )}
       {openSpecImportOpen !== null && (
         <OpenSpecImportDialog
           folder={openSpecImportOpen.folder}
@@ -14305,6 +14489,14 @@ export function App() {
           // .feature.md "Open a code repository"), where they can be.
           codeRepos={canOpenCodeRepo}
           trapRef={foldersTrapRef}
+          {...(extractSpecs
+            ? {
+                onExtract: () => {
+                  setFoldersOpen(false);
+                  setExtractOpen({ codeDir: codeRepoDir });
+                },
+              }
+            : {})}
           onClose={() => setFoldersOpen(false)}
           onOpen={(folder) => {
             setFoldersOpen(false);

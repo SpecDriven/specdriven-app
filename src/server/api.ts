@@ -264,6 +264,8 @@ import { normalizeAhaBase, parseAhaRecordUrl, parseAhaRef } from "./ahaUrl";
 import { ahaToken, clearAhaToken, listAhaTokens, saveAhaToken } from "./ahaTokens";
 import { isAhaImportScope, planAhaImport } from "./ahaImport";
 import { findOpenSpecSpecs, OPENSPEC_SPECS_DIR, parseOpenSpec, planOpenSpecImport, scenarioCount } from "./openspecImport";
+import { extractRoutes } from "./intentApi";
+import { interruptExtractions } from "./intentExtraction";
 import { JiraError, validateJiraToken } from "./jira";
 import { normalizeJiraBase } from "./jiraUrl";
 import { clearJiraToken, listJiraTokens, saveJiraToken } from "./jiraTokens";
@@ -650,6 +652,9 @@ export function netSyncFolders(): string[] {
  * locks wait for it (src/server/sync/RepoLocks.ts `close`).
  */
 export async function stopBackgroundWork(): Promise<void> {
+  // A run drafting specs stops where it is, to be resumed by hand
+  // (src/server/intentExtraction.ts).
+  await interruptExtractions();
   reloader.stop();
   stopWatching();
   netSyncTurn = netSyncTurn.then(async () => {
@@ -5034,6 +5039,8 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/agent/source", unlessHosted(getAgentSource)],
   ["POST", "/api/agent/source/refresh", unlessHosted(postAgentSourceRefresh)],
   // "/active" before "/:id": the table is first-match.
+  // Extract specs from a code project (src/server/intentApi.ts).
+  ...extractRoutes({ unlessHosted, withDataDir }),
 ];
 for (const [method, pattern, handler] of coreRoutes) routeRegistry.add(method, pattern, handler);
 // Plugins reach the data dir through the kernel (src/plugins/host/services.ts).
