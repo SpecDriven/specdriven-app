@@ -49,7 +49,7 @@ afterAll(async () => {
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { ExtractionJob } from "../src/server/intentExtraction";
-import { useExtraction, type Extraction } from "../src/frontend/ExtractionProgress";
+import { ExtractionProgress, useExtraction, type Extraction } from "../src/frontend/ExtractionProgress";
 
 const job = (state: ExtractionJob["state"], done: number): ExtractionJob => ({
   id: "j1",
@@ -207,5 +207,64 @@ describe("useExtraction", () => {
     expect(latest!.status!.published).toBe(false);
     await act(async () => latest!.published());
     expect(latest!.status!.published).toBe(true);
+  });
+});
+
+describe("linking tests from the pill", () => {
+  const over = (j: ExtractionJob): Extraction => ({
+    status: { job: j, published: true },
+    cancel: async () => {},
+    retry: async () => null,
+    dismiss: async () => {},
+    published: () => {},
+  });
+  const show = async (j: ExtractionJob, onLinkTests?: () => void) => {
+    await act(async () => {
+      root!.render(<ExtractionProgress extraction={over(j)} onOpenFeature={() => {}} onLinkTests={onLinkTests} onError={() => {}} />);
+    });
+    await act(async () => {
+      host!.querySelector<HTMLButtonElement>(".extract-pill")!.click();
+    });
+    return [...host!.querySelectorAll("button")].find((b) => b.textContent === "Link tests…") ?? null;
+  };
+
+  test("a run that drafted without linking offers to link the tests once it is over", async () => {
+    let opened = 0;
+    const button = await show(job("done", 2), () => opened++);
+    expect(button).not.toBeNull();
+    await act(async () => button!.click());
+    expect(opened).toBe(1);
+    // The popover closes behind the dialog it opened.
+    expect(host!.querySelector(".extract-pill")!.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  test("a run still at work or one that linked its tests does not offer it", async () => {
+    expect(await show(job("running", 1), () => {})).toBeNull();
+    const linked = { ...job("done", 2), tests: { base: "https://github.com/acme/shop/blob/main/", repo: "acme/shop" } };
+    expect(await show(linked, () => {})).toBeNull();
+    // Nor a run that wrote no feature to link, nor a page with no dialog to open.
+    expect(await show(job("done", 0), () => {})).toBeNull();
+    expect(await show(job("done", 2))).toBeNull();
+  });
+
+  test("a run whose project has nowhere for links to point says why in place of the offer", async () => {
+    const button = await show({ ...job("done", 2), testsProblem: "Test links point at files on github.com" }, () => {});
+    expect(button).toBeNull();
+    expect(host!.textContent).toContain("The tests are not linked: Test links point at files on github.com.");
+  });
+
+  test("a feature given its links is told to the page like a feature written", async () => {
+    await render("/work/specs-shop");
+    const withLink = (state: "pending" | "done") => {
+      const j = job("done", 2);
+      (j.folders[0] as { links?: unknown }).links = [{ fileName: "specs/f0/x.feature.md", title: "X", state, ...(state === "done" ? { linked: 2 } : {}) }];
+      return j;
+    };
+    answer.body = { job: withLink("pending"), published: false };
+    await render("/work/specs-shop", 1);
+    expect(features).toBe(1);
+    answer.body = { job: withLink("done"), published: false };
+    await render("/work/specs-shop", 2);
+    expect(features).toBe(2);
   });
 });

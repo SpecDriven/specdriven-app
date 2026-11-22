@@ -313,6 +313,7 @@ import { AhaImportDialog } from "./AhaImportDialog";
 import { importSummary, OpenSpecImportDialog } from "./OpenSpecImportDialog";
 import { ExtractSpecsDialog, type ExtractCreated } from "./ExtractSpecsDialog";
 import { ExtractionProgress, PublishSpecsDialog, useExtraction } from "./ExtractionProgress";
+import { LinkTestsDialog } from "./LinkTestsDialog";
 import { EXTRACT_SPECS_EVENT } from "../server/intentNames";
 import { HostedStartNav, hostedCloneHint, type HostedAccount } from "./HostedStartNav";
 import type { ScenarioRef } from "./route";
@@ -2611,6 +2612,12 @@ export function App() {
     () => void loadFeatures(),
   );
   const [publishOpen, setPublishOpen] = useState(false);
+  /** "Link tests to specs" (specs/app/extract-specs-from-code.feature.md
+      "Tests are linked later, on their own"): offered on a specification
+      folder that is open, where specs can be extracted at all. */
+  const [linkTestsOpen, setLinkTestsOpen] = useState(false);
+  const linkTestsTrapRef = useFocusTrap(linkTestsOpen);
+  const canLinkTests = extractSpecs && !needsRepo && codeRepoDir === null;
   // The desktop app's File → Extract Specs from Code Project… (src/electron/
   // main.ts) asks the window in front: with a folder open the dialog opens
   // on it, and on the first-run screen its choice is picked.
@@ -3233,7 +3240,7 @@ export function App() {
    * the code repository or folder that was open, and what could not be done
    * on the way — the repository on GitHub, the project's specs link — is said.
    */
-  const afterExtract = async ({ created, codeDir, folders, agent, model }: ExtractCreated) => {
+  const afterExtract = async ({ created, codeDir, folders, agent, model, linkTests }: ExtractCreated) => {
     setExtractOpen(null);
     setFoldersOpen(false);
     // A repository that was cloned opens by its url, as it would from the folder field.
@@ -3262,6 +3269,8 @@ export function App() {
           specsDir: created.dir,
           ...(agent ? { agent } : {}),
           ...(model ? { model } : {}),
+          // And the project's tests linked to the scenarios, once they are drafted.
+          ...(linkTests ? { tests: true } : {}),
         }),
       });
       if (!res.ok) {
@@ -8372,6 +8381,7 @@ export function App() {
     openSpecImportOpen !== null ||
     extractOpen !== null ||
     publishOpen ||
+    linkTestsOpen ||
     tokenSignInOpen ||
     foldersOpen ||
     switching !== null ||
@@ -8514,6 +8524,7 @@ export function App() {
     if (openSpecImportOpen !== null) return setOpenSpecImportOpen(null);
     if (extractOpen !== null) return setExtractOpen(null);
     if (publishOpen) return setPublishOpen(false);
+    if (linkTestsOpen) return setLinkTestsOpen(false);
     if (importOpen !== null) return setImportOpen(null);
     if (featureLinkOpen) return setFeatureTicketsOpen(false);
     if (featureQtestOpen) return setFeatureQtestDraft(null);
@@ -8826,6 +8837,15 @@ export function App() {
       run: () => setExtractOpen({ codeDir: codeRepoDir }),
     },
     {
+      id: "link-tests",
+      keys: [],
+      label: "Link tests to specs…",
+      group: "Create",
+      when: () => !quiet && canLinkTests && editing === null,
+      palette: () => !quietBehindPalette && canLinkTests && editing === null,
+      run: () => setLinkTestsOpen(true),
+    },
+    {
       id: "publish-folder",
       keys: [],
       label: "Publish this folder to GitHub…",
@@ -9038,6 +9058,7 @@ export function App() {
     // (specs/app/extract-specs-from-code.feature.md); and, for a folder made
     // on this computer only, its repository on GitHub.
     shortcutAction("extract-specs", <Sparkles size={14} />),
+    shortcutAction("link-tests", <Sparkles size={14} />),
     shortcutAction("publish-folder", <Import size={14} />),
     ...(selectedFolder
       ? [
@@ -11957,6 +11978,7 @@ export function App() {
           extraction={extraction}
           onOpenFeature={(file) => void openFeature(file, { push: true })}
           onPublish={() => setPublishOpen(true)}
+          onLinkTests={() => setLinkTestsOpen(true)}
           onError={(message) => toast.error(message)}
         />
         {/* specs/user-info-settings.feature.md: the lower left corner shows the
@@ -14355,6 +14377,20 @@ export function App() {
           }}
         />
       )}
+      {linkTestsOpen && (
+        <LinkTestsDialog
+          agents={agents}
+          agentModels={agentModels}
+          folder={selectedFolder}
+          trapRef={linkTestsTrapRef}
+          onClose={() => setLinkTestsOpen(false)}
+          onStarted={() => {
+            setLinkTestsOpen(false);
+            setExtractKick((k) => k + 1);
+            toast.success("The tests are being linked in the background");
+          }}
+        />
+      )}
       {extractOpen !== null && (
         <ExtractSpecsDialog
           codeDir={extractOpen.codeDir}
@@ -14522,6 +14558,14 @@ export function App() {
                 onExtract: () => {
                   setFoldersOpen(false);
                   setExtractOpen({ codeDir: codeRepoDir });
+                },
+              }
+            : {})}
+          {...(canLinkTests
+            ? {
+                onLinkTests: () => {
+                  setFoldersOpen(false);
+                  setLinkTestsOpen(true);
                 },
               }
             : {})}

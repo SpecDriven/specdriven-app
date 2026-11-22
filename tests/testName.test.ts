@@ -13,6 +13,7 @@ import { handleApi } from "../src/server/api";
 import { signOut } from "../src/server/auth";
 import {
   declaredTest,
+  declaredTests,
   fetchTestSource,
   jsTestAliases,
   languageOf,
@@ -344,6 +345,75 @@ function stubGitHub(): string {
   });
   return `http://127.0.0.1:${server.port}`;
 }
+
+describe("every test a file declares", () => {
+  const names = (source: string, language: Parameters<typeof declaredTests>[1]) =>
+    declaredTests(source, language).map((t) => [t.name, t.line]);
+
+  test("a TypeScript file lists its test and it calls with the line each starts on", () => {
+    const source = [
+      'import { test, it, describe } from "bun:test";',
+      "const gated = test.skipIf(process.platform === 'win32');",
+      "function helper() {}",
+      'describe("a group", () => {',
+      '  test("adds two numbers", () => {});',
+      "  test(",
+      '    "a title wrapped onto its own line",',
+      "    () => {},",
+      "  );",
+      '  it.each([1, 2])("handles %d", () => {});',
+      '  gated("runs where it can", () => {});',
+      '  test.describe("a nested group", () => {});',
+      "});",
+    ].join("\n");
+    expect(names(source, "javascript")).toEqual([
+      ["adds two numbers", 5],
+      ["a title wrapped onto its own line", 6],
+      ["handles %d", 10],
+      ["runs where it can", 11],
+    ]);
+  });
+
+  test("a Java file lists the methods under a test annotation and none of its helpers", () => {
+    const source = [
+      "class QuoteTest {",
+      "  @BeforeEach",
+      "  void setUp() {}",
+      "",
+      "  @Test",
+      '  @DisplayName("quotes")',
+      "  void quotesAPolicy() {}",
+      "",
+      "  @Test void onOneLine() {}",
+      "  private Quote helper() { return null; }",
+      "  @ParameterizedTest",
+      "  @ValueSource(ints = {1, 2})",
+      "  public void manyValues(int n) {}",
+      "  public void testOldStyle() {}",
+      "}",
+    ].join("\n");
+    expect(names(source, "java")).toEqual([
+      ["quotesAPolicy", 7],
+      ["onOneLine", 9],
+      ["manyValues", 13],
+      ["testOldStyle", 14],
+    ]);
+  });
+
+  test("Kotlin, Python and Go files list their tests by the language's own mark", () => {
+    expect(names("class A {\n  @Test\n  fun `adds two`() {}\n  fun helper() {}\n}", "kotlin")).toEqual([["adds two", 3]]);
+    expect(names("def helper():\n    pass\n\nasync def test_async():\n    pass\n\nclass T:\n    def test_method(self):\n        pass\n", "python")).toEqual([
+      ["test_async", 4],
+      ["test_method", 8],
+    ]);
+    expect(names("func helper() {}\n\nfunc TestQuote(t *testing.T) {}\n", "go")).toEqual([["TestQuote", 3]]);
+  });
+
+  test("the line a test is listed at names that same test", () => {
+    const source = 'test(\n  "wrapped",\n  () => {},\n);\n\nit("plain", () => {});\n';
+    for (const t of declaredTests(source, "javascript")) expect(testNameAt(source, t.line, "javascript")).toBe(t.name);
+  });
+});
 
 describe("reading the test's source from GitHub", () => {
   beforeEach(async () => {

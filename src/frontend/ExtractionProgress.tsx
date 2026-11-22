@@ -6,8 +6,9 @@ import type { JobFolder } from "../server/intentExtraction";
 import type { ExtractGithub } from "./ExtractSpecsDialog";
 import {
   drafting,
-  featuresWritten,
+  featuresTouched,
   folderLine,
+  linking,
   progressLabel,
   resumable,
   type ExtractionStatus,
@@ -20,6 +21,11 @@ import {
 // is still waiting — with Cancel while it runs, Retry for a folder that
 // failed, Resume for a run that stopped, and Dismiss once it is over. A
 // folder that is only on this computer is published to GitHub from here.
+//
+// The same pill follows the linking of the project's tests to the scenarios
+// ("Tests are linked in a pass of their own") — the pass a run goes on to
+// after drafting, or a run of its own — and a run that drafted without
+// linking offers "Link tests…" once it is over.
 
 /** How often the page asks how a run stands while it is at work. */
 const POLL_MS = 2000;
@@ -39,7 +45,8 @@ export interface Extraction {
  * folder opens — a run from an earlier start may be waiting to be resumed —
  * again whenever `kick` changes (a run was just started), and every two
  * seconds while a run is at work. `onFeature` is called each
- * time a run has written another feature, for the sidebar to show it.
+ * time a run has written another feature, or given one its test links, for
+ * the page to show it.
  */
 export function useExtraction(folder: string | null, kick: number, onFeature: () => void): Extraction {
   const [status, setStatus] = useState<ExtractionStatus | null>(null);
@@ -49,7 +56,7 @@ export function useExtraction(folder: string | null, kick: number, onFeature: ()
 
   const apply = useCallback((next: ExtractionStatus | null) => {
     setStatus(next);
-    const count = featuresWritten(next?.job);
+    const count = featuresTouched(next?.job);
     if (count > written.current) onFeatureRef.current();
     written.current = count;
   }, []);
@@ -137,6 +144,22 @@ export function ExtractionFolders({
                 {b.title}
               </button>
             ))}
+          {/* A run that only links tests has no batches: its features are the links'. */}
+          {f.batches.length === 0 &&
+            (f.links ?? [])
+              .filter((l) => l.state === "done" || l.state === "failed")
+              .map((l) => (
+                <button
+                  key={l.fileName}
+                  type="button"
+                  className="extract-feature"
+                  title={l.error}
+                  onClick={() => onOpenFeature(l.fileName)}
+                >
+                  {l.title}
+                  {l.state === "done" ? ` — ${l.linked} test${l.linked === 1 ? "" : "s"}` : " — failed"}
+                </button>
+              ))}
         </li>
       ))}
     </ul>
@@ -239,19 +262,30 @@ export function ExtractionProgress({
   extraction,
   onOpenFeature,
   onPublish,
+  onLinkTests,
   onError,
 }: {
   extraction: Extraction;
   onOpenFeature: (fileName: string) => void;
   /** Open "Publish to GitHub…", where the folder is only on this computer. */
   onPublish?: () => void;
+  /** Open "Link tests to specs", for a run that drafted without linking. */
+  onLinkTests?: () => void;
   onError: (message: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const job = extraction.status?.job;
   if (!job) return null;
   const busy = drafting(job);
-  const failed = job.folders.some((f) => f.state === "failed");
+  const failed = job.folders.some((f) => f.state === "failed" || f.links?.some((l) => l.state === "failed"));
+  const onlyLinks = job.kind === "link";
+  const title = onlyLinks ? "Tests linked to the specs" : "Specs drafted from the code";
+  const idle = onlyLinks
+    ? `Each scenario lists the tests of ${job.tests?.repo ?? job.project} that check it, under Automated tests. Read them as you read the scenarios: a link is the agent's reading of the test.`
+    : "Every scenario is proposed: read them, correct them, and publish the ones that say what the code is meant to do.";
+  const atWork = linking(job)
+    ? `${job.agentLabel ?? "An agent"} reads each feature's scenarios and the tests of its code, and links the tests that check them, one feature at a time.`
+    : `${job.agentLabel ?? "An agent"} reads each folder's code and writes proposed scenarios, one folder at a time.`;
   const retry = async (folder?: string) => {
     const problem = await extraction.retry(folder);
     if (problem) onError(problem);
@@ -263,20 +297,16 @@ export function ExtractionProgress({
         className={`extract-pill${failed || job.state === "interrupted" ? " needs-attention" : ""}`}
         aria-haspopup="dialog"
         aria-expanded={open}
-        title="Specs drafted from the code"
+        title={title}
         onClick={() => setOpen((o) => !o)}
       >
         {busy ? <LoaderCircle size={13} className="extract-spin" aria-hidden="true" /> : <Sparkles size={13} aria-hidden="true" />}
         <span>{progressLabel(job)}</span>
       </button>
-      <Popover open={open} onClose={() => setOpen(false)} label="Specs drafted from the code" className="extract-popover" containerSelector=".extract-progress">
-        <h4>Specs drafted from {job.project}</h4>
-        <p className={job.problem ? "error" : "hint"}>
-          {job.problem ??
-            (busy
-              ? `${job.agentLabel ?? "An agent"} reads each folder's code and writes proposed scenarios, one folder at a time.`
-              : "Every scenario is proposed: read them, correct them, and publish the ones that say what the code is meant to do.")}
-        </p>
+      <Popover open={open} onClose={() => setOpen(false)} label={title} className="extract-popover" containerSelector=".extract-progress">
+        <h4>{onlyLinks ? `Tests of ${job.project} linked to its specs` : `Specs drafted from ${job.project}`}</h4>
+        <p className={job.problem ? "error" : "hint"}>{job.problem ?? (busy ? atWork : idle)}</p>
+        {job.testsProblem && <p className="hint">The tests are not linked: {job.testsProblem}.</p>}
         <ExtractionFolders
           folders={job.folders}
           busy={busy}
@@ -297,6 +327,19 @@ export function ExtractionProgress({
               }}
             >
               Publish to GitHub…
+            </button>
+          )}
+          {onLinkTests && !busy && !onlyLinks && !job.tests && !job.testsProblem && job.folders.some((f) => f.batches.some((b) => b.fileName)) && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              title="Have an agent link the project's tests to the scenarios drafted from it"
+              onClick={() => {
+                setOpen(false);
+                onLinkTests();
+              }}
+            >
+              Link tests…
             </button>
           )}
           {busy ? (

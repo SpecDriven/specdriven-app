@@ -4,6 +4,7 @@ import type { AgentDescriptor } from "../server/agentTypes";
 import type { ModuleProposal } from "../server/intentModules";
 import type { RefineJob } from "../server/intentRefine";
 import type { ChosenFolder, CreatedSpecs, TargetState } from "../server/intentRepo";
+import type { TestLinking } from "../server/intentTestUrl";
 import { LANGUAGE_LABEL, repoNameProblem } from "../server/intentNames";
 import { ModelSelect, chosenModel, type AgentModels, type ModelRow } from "./AgentModels";
 import { useAgentChoices } from "./agentChat";
@@ -31,7 +32,9 @@ import {
 // beside the project with a repository on GitHub, or one that already
 // exists, which they are added to. Create (or Add) does it, opens the
 // folder in this window, and starts an agent drafting proposed specs for
-// each folder in the background.
+// each folder in the background — and, when asked, linking the project's
+// tests to the scenarios once they are drafted ("Tests are linked in a pass
+// of their own").
 
 /** GitHub as POST /api/extract/analyse describes it for the project. */
 export interface ExtractGithub {
@@ -59,6 +62,8 @@ export interface ExtractAnalysis {
   /** What sits at the project's `specs` now. */
   specsLink: "missing" | "linked" | "elsewhere" | "folder";
   github?: ExtractGithub;
+  /** Whether the project's tests could be linked to the specs drafted from it. */
+  tests?: TestLinking;
 }
 
 /** What the dialog hands back once the specification folder is made. */
@@ -69,12 +74,14 @@ export interface ExtractCreated {
   folders: ChosenFolder[];
   agent?: string;
   model?: string;
+  /** Go on, once the specs are drafted, to link the project's tests to them. */
+  linkTests?: boolean;
 }
 
 const AGENT_KEY = "specdriven.importAgent";
 const NO_SERVER = "Could not reach the server — is it running?";
 
-function lastAgent(choices: AgentDescriptor[]): string {
+export function lastAgent(choices: AgentDescriptor[]): string {
   try {
     const kept = localStorage.getItem(AGENT_KEY);
     if (kept && choices.some((a) => a.id === kept)) return kept;
@@ -221,6 +228,8 @@ export function ExtractSpecsDialog({
   const [isPrivate, setIsPrivate] = useState(true);
   const [agent, setAgent] = useState(() => lastAgent(choices));
   const [model, setModel] = useState("");
+  /** Whether the project's tests are linked to the scenarios once they are drafted. */
+  const [linkTests, setLinkTests] = useState(true);
   const [busy, setBusy] = useState<"analyse" | "create" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [existing, setExisting] = useState<string | null>(null);
@@ -346,6 +355,9 @@ export function ExtractSpecsDialog({
   const github = analysis?.github;
   const canPublish = Boolean(github && github.owners.length > 0 && !github.problem);
   const drafted = picked.filter((f) => f.draft).length;
+  const tests = analysis?.tests;
+  /** Linking needs specs to link to, an agent to match them, tests, and somewhere on github.com for the links to point. */
+  const canLink = Boolean(tests && !tests.problem && chosenAgent && drafted > 0);
 
   /** Whether the folders were changed by hand since they were proposed. */
   const edited =
@@ -437,6 +449,7 @@ export function ExtractSpecsDialog({
         folders: picked,
         ...(chosenAgent ? { agent: chosenAgent.id } : {}),
         ...(sentModel ? { model: sentModel } : {}),
+        ...(canLink && linkTests ? { linkTests: true } : {}),
       });
     } catch {
       setError(NO_SERVER);
@@ -812,6 +825,24 @@ export function ExtractSpecsDialog({
               </label>
             )}
             {badModel && <p className="hint">{badModel}</p>}
+            {chosenAgent && drafted > 0 && tests && (
+              <label className="choice">
+                <input
+                  type="checkbox"
+                  checked={canLink && linkTests}
+                  disabled={!canLink}
+                  onChange={(e) => setLinkTests(e.target.checked)}
+                />
+                <span className="choice-label">
+                  <span>Link the project’s tests to the scenarios</span>
+                  <span className="hint">
+                    {tests.problem
+                      ? `${tests.problem}.`
+                      : `Once the specs are drafted, ${chosenAgent.label} matches each feature’s scenarios to the project’s tests (${tests.files} test file${tests.files === 1 ? "" : "s"}) and links them to ${tests.repo} on GitHub — one more turn for each feature. Left unticked, it can be done later with “Link tests to specs…”.`}
+                  </span>
+                </span>
+              </label>
+            )}
             {error && (
               <p className="error">
                 {error}{" "}

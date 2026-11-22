@@ -516,9 +516,11 @@ describe("the routes", () => {
       "POST /api/extract/draft",
       "GET /api/extract/draft",
       "DELETE /api/extract/draft",
+      "GET /api/extract/tests",
+      "POST /api/extract/tests",
     ]);
     expect(hosted).toHaveLength(routes.length);
-    expect(onFolder).toHaveLength(7);
+    expect(onFolder).toHaveLength(9);
   });
 
   test("the desktop app's menu and the page agree on the event that starts the dialog", () => {

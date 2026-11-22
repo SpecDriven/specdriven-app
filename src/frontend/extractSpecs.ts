@@ -5,7 +5,7 @@
 // without a page; the dialog (ExtractSpecsDialog.tsx) only renders this.
 
 import type { Language, ModuleProposal, ModuleSource, ProposedFolder } from "../server/intentModules";
-import type { ExtractionJob, JobFolder } from "../server/intentExtraction";
+import type { ExtractionJob, JobFolder, JobLink } from "../server/intentExtraction";
 import type { ChosenFolder } from "../server/intentRepo";
 import { slugify } from "../server/parser";
 
@@ -195,19 +195,59 @@ export function drafting(job: ExtractionJob | null | undefined): boolean {
 
 const SETTLED = new Set<JobFolder["state"]>(["done", "empty", "failed"]);
 
-/** How many features a run has written so far: what the page reloads its list on. */
+/** Every feature of a run's test-linking pass. */
+function linksOf(job: ExtractionJob | null | undefined): JobLink[] {
+  return job ? job.folders.flatMap((f) => f.links ?? []) : [];
+}
+
+/** How many test links a run has added to scenarios so far. */
+export function testsLinked(job: ExtractionJob | null | undefined): number {
+  return linksOf(job).reduce((n, l) => n + (l.linked ?? 0), 0);
+}
+
+/**
+ * Whether a run is in its test-linking pass: a run that only links, or one
+ * whose drafting is through and whose features are being linked — or still
+ * wait to be.
+ */
+export function linking(job: ExtractionJob | null | undefined): boolean {
+  if (!job) return false;
+  if (job.kind === "link") return true;
+  if (!job.tests || job.folders.some((f) => !SETTLED.has(f.state))) return false;
+  return linksOf(job).some((l) => l.state === "pending" || l.state === "running");
+}
+
+/** How many features a run has written so far. */
 export function featuresWritten(job: ExtractionJob | null | undefined): number {
   return job ? job.folders.reduce((n, f) => n + f.batches.filter((b) => b.state === "done").length, 0) : 0;
+}
+
+/** How many times a run has changed the folder's features — one written, one given its links: what the page reloads its list on. */
+export function featuresTouched(job: ExtractionJob | null | undefined): number {
+  return featuresWritten(job) + linksOf(job).filter((l) => l.state === "done").length;
 }
 
 /** Whether anything is left that a retry would take up. */
 export function resumable(job: ExtractionJob | null | undefined): boolean {
   if (!job || drafting(job)) return false;
-  return job.folders.some((f) => f.state === "failed" || f.state === "cancelled" || f.state === "pending");
+  if (job.folders.some((f) => f.state === "failed" || f.state === "cancelled" || f.state === "pending")) return true;
+  return Boolean(job.tests) && linksOf(job).some((l) => l.state === "failed" || l.state === "pending");
 }
 
 /** The pill's words: how the run stands, in a line. */
 export function progressLabel(job: ExtractionJob): string {
+  if (linking(job) || job.kind === "link") {
+    const links = linksOf(job);
+    const through = links.filter((l) => l.state !== "pending" && l.state !== "running").length;
+    const of = `${through} of ${plural(links.length, "feature")}`;
+    const failed = links.filter((l) => l.state === "failed").length;
+    if (job.state === "running") return `Linking tests — ${of}`;
+    if (job.state === "cancelling") return "Stopping the linking…";
+    if (job.state === "interrupted") return `Linking paused — ${of}`;
+    if (job.state === "cancelled") return `Linking stopped — ${of}`;
+    if (failed > 0) return `Tests linked — ${plural(failed, "feature")} failed`;
+    return `Tests linked — ${plural(testsLinked(job), "link")}`;
+  }
   const total = job.folders.length;
   const settled = job.folders.filter((f) => SETTLED.has(f.state)).length;
   const failed = job.folders.filter((f) => f.state === "failed").length;
@@ -216,11 +256,42 @@ export function progressLabel(job: ExtractionJob): string {
   if (job.state === "interrupted") return `Drafting paused — ${settled} of ${plural(total, "folder")}`;
   if (job.state === "cancelled") return `Drafting stopped — ${settled} of ${plural(total, "folder")}`;
   if (failed > 0) return `Specs drafted — ${plural(failed, "folder")} failed`;
-  return `Specs drafted — ${plural(featuresWritten(job), "feature")}`;
+  const linkFailed = linksOf(job).filter((l) => l.state === "failed").length;
+  if (linkFailed > 0) return `Specs drafted — linking failed for ${plural(linkFailed, "feature")}`;
+  const linked = job.tests ? `, ${plural(testsLinked(job), "test")} linked` : "";
+  return `Specs drafted — ${plural(featuresWritten(job), "feature")}${linked}`;
+}
+
+/** What a folder's test-linking pass has come to, as words to add to its line; "" when it has none. */
+function linksLine(folder: JobFolder): string {
+  const links = folder.links ?? [];
+  if (links.length === 0) return "";
+  if (links.some((l) => l.state === "running")) return "linking tests…";
+  const failed = links.find((l) => l.state === "failed");
+  if (failed) return `linking failed: ${failed.error ?? "the turn failed"}`;
+  if (links.some((l) => l.state === "pending")) return "tests still to link";
+  const linked = links.reduce((n, l) => n + (l.linked ?? 0), 0);
+  return linked > 0 ? `${plural(linked, "test")} linked` : (links.find((l) => l.note)?.note ?? "no tests to link");
 }
 
 /** One folder's line in the popover: what came of it. */
 export function folderLine(folder: JobFolder): string {
+  // A folder of a run that only links tests: its features, not its batches.
+  if (folder.batches.length === 0 && folder.links) {
+    const through = folder.links.filter((l) => l.state === "done" || l.state === "empty").length;
+    switch (folder.state) {
+      case "pending":
+        return "waiting";
+      case "running":
+        return `linking tests — ${through} of ${plural(folder.links.length, "feature")}…`;
+      case "failed":
+        return folder.error ?? "failed";
+      case "cancelled":
+        return through > 0 ? `stopped after ${plural(through, "feature")}` : "not linked";
+      default:
+        return `${plural(folder.links.length, "feature")} · ${linksLine(folder)}`;
+    }
+  }
   const done = folder.batches.filter((b) => b.state === "done");
   const scenarios = done.reduce((n, b) => n + (b.scenarios ?? 0), 0);
   const unread = folder.notRead > 0 ? ` · ${plural(folder.notRead, "file")} not read` : "";
@@ -231,8 +302,10 @@ export function folderLine(folder: JobFolder): string {
       const at = folder.batches.findIndex((b) => b.state === "running");
       return folder.batches.length > 1 ? `drafting part ${at + 1} of ${folder.batches.length}…` : "drafting…";
     }
-    case "done":
-      return `${plural(done.length, "feature")}, ${plural(scenarios, "scenario")}${unread}`;
+    case "done": {
+      const links = linksLine(folder);
+      return `${plural(done.length, "feature")}, ${plural(scenarios, "scenario")}${unread}${links ? ` · ${links}` : ""}`;
+    }
     case "empty":
       return folder.batches.find((b) => b.note)?.note ?? "nothing to specify";
     case "failed":

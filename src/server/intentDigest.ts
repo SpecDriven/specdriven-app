@@ -157,7 +157,7 @@ function pack(files: readonly DigestFile[], dir: string, room: number): DigestFi
 }
 
 /** What a test's file name says it tests, as in the module analysis: `billing` for `test_billing.py`. */
-function testedStem(path: string): string {
+export function testedStem(path: string): string {
   return stemOf(path)
     .replace(/\.(test|spec|e2e|cy)$/i, "")
     .replace(/^test_/i, "")

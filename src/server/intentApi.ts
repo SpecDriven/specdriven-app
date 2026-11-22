@@ -8,7 +8,10 @@
 //   POST /api/extract/repo      make its specification folder, with the chosen folders —
 //                               or add them to one that already exists
 //   POST /api/extract/publish   give the open folder its repository on GitHub, later
-//   POST /api/extract/draft     start drafting specs for the chosen folders
+//   POST /api/extract/draft     start drafting specs for the chosen folders — and, with
+//                               `tests`, linking the project's tests to them afterwards
+//   GET  /api/extract/tests     what of the open folder could have tests linked
+//   POST /api/extract/tests     start linking tests to the features extracted before
 //   GET  /api/extract/draft     how the drafting stands
 //   POST /api/extract/draft/cancel, /retry    stop it; take up what is not done
 //   DELETE /api/extract/draft   forget a run that is over
@@ -39,7 +42,12 @@ import {
   extractionOf,
   retryExtraction,
   startExtraction,
+  startLinking,
 } from "./intentExtraction";
+import { extractedRoots } from "./intentDraft";
+import { isTestPath } from "./intentModules";
+import { testLinkBase, type TestLinking } from "./intentTestUrl";
+import { listFeatures, readFeature } from "./features";
 import {
   addToSpecsFolder,
   chosenFolders,
@@ -89,7 +97,8 @@ const bodyOf = async (req: Request): Promise<Record<string, unknown>> =>
 const postAnalyse: Handler = async (req) => {
   const body = await bodyOf(req);
   const codeDir = await resolveCodeProject(body.codeDir);
-  const proposal = analyseModules(await scanProject(codeDir));
+  const snapshot = await scanProject(codeDir);
+  const proposal = analyseModules(snapshot);
   const name = suggestedSpecsName(codeDir);
   const target = await specsTarget(codeDir, name);
   return json({
@@ -103,8 +112,16 @@ const postAnalyse: Handler = async (req) => {
     existing: await existingSpecsFor(codeDir),
     specsLink: (await specsLinkStatus(codeDir, target.dir)).state,
     github: await repoOwners(codeDir),
+    // Whether the project's tests could be linked to the specs drafted from it.
+    tests: await linkable(codeDir, snapshot.files.filter((f) => isTestPath(f.path)).length),
   });
 };
+
+async function linkable(codeDir: string, files: number): Promise<TestLinking> {
+  const target = await testLinkBase(codeDir);
+  if (target.base === null) return { files, repo: null, problem: target.problem };
+  return { files, repo: target.repo, ...(files === 0 ? { problem: "No tests were found in this project" } : {}) };
+}
 
 // POST /api/extract/refine { codeDir, agent?, model? }: start an agent
 // regrouping the project's proposed folders by business area. The answer is
@@ -211,7 +228,50 @@ const postDraft = (dir: string): Handler => async (req) => {
   const folders = chosenFolders(body.folders, known);
   const agent = typeof body.agent === "string" && body.agent.trim() ? body.agent.trim() : undefined;
   const model = modelOf(body.model);
-  await startExtraction({ dataDir: dir, codeDir, folders, ...(agent ? { agent } : {}), ...(model ? { model } : {}) });
+  await startExtraction({
+    dataDir: dir,
+    codeDir,
+    folders,
+    ...(agent ? { agent } : {}),
+    ...(model ? { model } : {}),
+    ...(body.tests === true ? { linkTests: true } : {}),
+  });
+  return json(await status(dir), 202);
+};
+
+// GET /api/extract/tests: the open folder's code repositories, each with
+// whether its tests can be linked, and the spec folders holding features
+// that were extracted from code — the only ones a linking run takes up.
+const getTests = (dir: string): Handler => async () => {
+  const { codeRepos } = await readProjectSettings(dir);
+  const repos = await Promise.all(
+    codeRepos.map(async (repo) => {
+      const files = (await scanProject(repo.dir).catch(() => null))?.files.filter((f) => isTestPath(f.path)).length ?? 0;
+      return { dir: repo.dir, default: repo.isDefault, ...(await linkable(repo.dir, files)) };
+    }),
+  );
+  const folders = new Map<string, number>();
+  for (const feature of await listFeatures(dir)) {
+    const text = await readFeature(dir, feature.fileName);
+    if (text === null || extractedRoots(text) === null) continue;
+    const folder = feature.fileName.split("/").slice(1, -1).join("/");
+    folders.set(folder, (folders.get(folder) ?? 0) + 1);
+  }
+  return json({
+    repos,
+    folders: [...folders].map(([folder, features]) => ({ folder, features })).sort((a, b) => a.folder.localeCompare(b.folder)),
+  });
+};
+
+// POST /api/extract/tests { codeDir?, folder?, agent?, model? }: start linking
+// the project's tests to the features extracted from it before.
+const postTests = (dir: string): Handler => async (req) => {
+  const body = await bodyOf(req);
+  const codeDir = await codeProjectOf(dir, body.codeDir);
+  const agent = typeof body.agent === "string" && body.agent.trim() ? body.agent.trim() : undefined;
+  const model = modelOf(body.model);
+  const folder = typeof body.folder === "string" && body.folder.trim() ? body.folder.trim() : undefined;
+  await startLinking({ dataDir: dir, codeDir, ...(folder ? { folder } : {}), ...(agent ? { agent } : {}), ...(model ? { model } : {}) });
   return json(await status(dir), 202);
 };
 
@@ -262,5 +322,7 @@ export function extractRoutes(wrap: RouteWrappers): Route[] {
     ["POST", "/api/extract/draft", onFolder(postDraft)],
     ["GET", "/api/extract/draft", onFolder(getDraft)],
     ["DELETE", "/api/extract/draft", onFolder(deleteDraft)],
+    ["GET", "/api/extract/tests", onFolder(getTests)],
+    ["POST", "/api/extract/tests", onFolder(postTests)],
   ];
 }

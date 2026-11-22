@@ -14,8 +14,9 @@ already have — and has an agent draft the first features from the code. Specif
 3. [Reviewing the folders](#3-reviewing-the-folders)
 4. [The specification folder and GitHub](#4-the-specification-folder-and-github)
 5. [Drafting](#5-drafting)
-6. [What you get, and what to do with it](#6-what-you-get-and-what-to-do-with-it)
-7. [Limits](#7-limits)
+6. [Linking your tests](#6-linking-your-tests)
+7. [What you get, and what to do with it](#7-what-you-get-and-what-to-do-with-it)
+8. [Limits](#8-limits)
 
 ## 1. When to use it
 
@@ -125,7 +126,52 @@ your name in the sidebar shows progress, for example
 
 A run never resumes by itself.
 
-## 6. What you get, and what to do with it
+## 6. Linking your tests
+
+A project that already has tests can have them linked to the drafted
+scenarios, so each scenario lists the tests that check it under
+**Automated tests**. An agent does the matching; the app finds the tests
+and writes the links.
+
+### With the import
+
+The last step of the dialog has **Link the project's tests to the
+scenarios**, ticked when the project has tests and a repository on
+github.com. Once every folder is drafted, the same background run links
+the tests, one agent request for each feature. The pill changes from
+"Drafting specs" to "Linking tests — 3 of 12 features".
+
+### Later
+
+Leave the box unticked, or come back after the project has gained tests,
+and use **Link tests to specs…**:
+
+- in the drafting pill's list, as **Link tests…**, once a run is over
+- under **Manage folders…**
+- in the command palette (⌘K)
+
+The dialog asks which code repository (when the folder has several),
+which features (all extracted ones, or one folder's) and which agent and
+model. **Link tests** starts the run; Cancel, Retry, Resume and Dismiss
+work as they do for drafting.
+
+### What gets linked
+
+- Only features that were extracted from code, the ones whose first line
+  reads "Extracted from …". The app takes tests from those directories.
+  A feature you wrote yourself is left alone.
+- Tests are recognised by the language's own mark: `test(…)` and `it(…)`
+  in JavaScript and TypeScript, `@Test` methods in Java and Kotlin,
+  `def test…` in Python, `func Test…` in Go.
+- A scenario gets at most six tests per run. A scenario no test checks
+  gets none.
+- Links are only added. A scenario keeps the links it has, and running
+  the linking again adds no duplicates.
+
+A link is the agent's reading of the test. Check it as you check the
+scenario.
+
+## 7. What you get, and what to do with it
 
 Each folder gets one feature, or several for a large folder. Every
 scenario is `[proposed]` and ends with the source files it was drafted
@@ -136,11 +182,18 @@ meant to do.
 A drafted scenario describes what the code does today. Whether that is
 what it should do is your call.
 
-## 7. Limits
+## 8. Limits
 
 - Each file is read up to 12,000 characters. A folder too large for one
   request is split by subfolder; past six requests the rest is left unread,
   and the list says how many files that was.
 - At most 60 folders are ticked for a very large project.
-- Scenarios are not linked to your existing tests.
+- Tests are linked only for a project whose `origin` is a repository on
+  github.com. A project on GitHub Enterprise, or with no remote, cannot
+  have its tests linked.
+- Test links point at the repository's default branch, with the line
+  numbers of your checkout. A test you have not pushed yet gives a link
+  that works once you push it.
+- For one feature the agent reads test files up to the same request size
+  as drafting. Tests past that are offered to it by file and name only.
 - Other languages are counted and reported, not read.
