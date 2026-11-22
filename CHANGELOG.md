@@ -4,6 +4,13 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.295 — 2026-11-21
+
+- An Unpublish survives a file edit the app has not absorbed yet ([#495](https://github.com/SpecDriven/specdriven-app/pull/495))
+- Add issue image: image-28f64875.png
+- Add issue image: image-c506ff5f.png
+- Update screen says "Update to latest version"; its buttons get the .btn look ([#493](https://github.com/SpecDriven/specdriven-app/pull/493))
+
 ## v0.1.294 — 2026-11-21
 
 - qTest settings: one token, with url, token and Save ([#492](https://github.com/SpecDriven/specdriven-app/pull/492))
