@@ -4,6 +4,10 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.294 — 2026-11-21
+
+- qTest settings: one token, with url, token and Save ([#492](https://github.com/SpecDriven/specdriven-app/pull/492))
+
 ## v0.1.293 — 2026-11-21
 
 - A spec folder that cannot be pushed to opens read only ([#491](https://github.com/SpecDriven/specdriven-app/pull/491))
