@@ -441,3 +441,67 @@ export async function resolveTestName(url: string): Promise<TestNameResult> {
   if (!name) return { name: null, reason: `No test declared at or around line ${target.line} of ${file}.` };
   return { name };
 }
+
+// --- Every test a file declares ---------------------------------------------------------
+
+/** A test a file declares: its name, and the line (1-based) a link to it anchors at. */
+export interface DeclaredTest {
+  name: string;
+  line: number;
+}
+
+/** The annotations a Java or Kotlin test method stands under. */
+const TEST_ANNOTATION = /^\s*@(?:[\w.]+\.)?(?:Test|ParameterizedTest|RepeatedTest|TestFactory|TestTemplate|Property)\b/;
+/** Annotations in front of a declaration on its own line: `@Test void adds() {`. */
+const LEADING_ANNOTATIONS = /^\s*(?:@[\w.]+(?:\([^)]*\))?\s+)+/;
+
+/**
+ * Every test `source` declares, in file order — stricter than testNameAt,
+ * which names whatever function an anchor sits in: here only what a test
+ * runner would run counts, so a helper or a set-up method is never offered
+ * as a test (specs/app/extract-specs-from-code.feature.md "The app finds
+ * the tests; the agent only matches them").
+ * - JavaScript/TypeScript: `test(…)` / `it(…)` calls with a title, through
+ *   modifier chains and the file's aliases; a title wrapped onto the next
+ *   line counts, a `test.describe(…)` group does not.
+ * - Java, Kotlin: a method under `@Test` or one of its kin; in Java also a
+ *   `public void test…()` of the older style.
+ * - Python: `def test…(`. Go: `func Test…(`.
+ */
+export function declaredTests(source: string, language: TestLanguage): DeclaredTest[] {
+  const lines = source.split("\n");
+  const found: DeclaredTest[] = [];
+  if (language === "javascript") {
+    const aliases = jsTestAliases(source);
+    lines.forEach((line, i) => {
+      if (testFunctionAt(line, aliases) < 0 || /^\s*[\w$.\s]*\.\s*describe\b/.test(line)) return;
+      const call = jsTestTitle(lines.slice(i, i + HEAD_SPAN).join("\n"), aliases);
+      if (call) found.push({ name: call.title, line: i + 1 });
+    });
+    return found;
+  }
+  if (language === "python" || language === "go") {
+    const isTest = language === "python" ? /^test/ : /^Test/;
+    lines.forEach((line, i) => {
+      const name = declaredTest(line, language);
+      if (name && isTest.test(name)) found.push({ name, line: i + 1 });
+    });
+    return found;
+  }
+  // Java and Kotlin: the annotation says which methods are tests.
+  let annotated = false;
+  lines.forEach((raw, i) => {
+    if (TEST_ANNOTATION.test(raw)) annotated = true;
+    const line = raw.replace(LEADING_ANNOTATIONS, "");
+    const name = declaredTest(line, language);
+    if (name) {
+      const oldStyle = language === "java" && /^\s*public\s+void\s+test\w*\s*\(/.test(line);
+      if (annotated || oldStyle) found.push({ name, line: i + 1 });
+      annotated = false;
+    } else if (line.trim() !== "" && !precedesDeclaration(raw)) {
+      // Something else stands between the annotation and a method: it was not a test's.
+      annotated = false;
+    }
+  });
+  return found;
+}

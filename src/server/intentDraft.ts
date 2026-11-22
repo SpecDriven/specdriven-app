@@ -187,6 +187,28 @@ function sourceLine(files: readonly string[]): string {
   return `_Source: ${named}${more > 0 ? ` and ${more} more` : ""}._`;
 }
 
+/** The paths a line names as inline code. */
+const codeSpans = (line: string): string[] => [...line.matchAll(/`([^`]+)`/g)].map((m) => m[1]!);
+
+/**
+ * The directories a feature says it was extracted from — the line
+ * planExtractedFeature writes under its title, read back; "" is the
+ * project's top — or null for a feature that carries no such line: one a
+ * person wrote, or imported from elsewhere.
+ */
+export function extractedRoots(text: string): string[] | null {
+  const head = text.split(/^## /m)[0]!;
+  const line = head.match(/^_Extracted from (.+)\._\s*$/m);
+  if (!line) return null;
+  return codeSpans(line[1]!).map((root) => (root === "." ? "" : root.replace(/\/+$/, "")));
+}
+
+/** The files a scenario's body names on its `_Source: …_` line, as sourceLine wrote them. */
+export function sourceFiles(body: string): string[] {
+  const line = body.match(/^_Source: (.+)\._\s*$/m);
+  return line ? codeSpans(line[1]!) : [];
+}
+
 /** Text the feature parser leaves alone, with a code fence left open closed. */
 function safe(text: string): string {
   const out = safeMarkdown(text.replace(/\r\n?/g, "\n").trim());

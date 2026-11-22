@@ -165,6 +165,7 @@ export function SpecFoldersDialog({
   onRemove,
   onAdd,
   onExtract,
+  onLinkTests,
   onClose,
   trapRef,
 }: {
@@ -198,6 +199,12 @@ export function SpecFoldersDialog({
    * repositories cannot be opened.
    */
   onExtract?: () => void;
+  /**
+   * Link the open specification folder's code project's tests to the specs
+   * extracted from it ("Tests are linked later, on their own"); absent
+   * where no specification folder is open.
+   */
+  onLinkTests?: () => void;
   onClose: () => void;
   trapRef?: RefObject<HTMLDivElement | null>;
 }) {
@@ -327,6 +334,17 @@ export function SpecFoldersDialog({
               onClick={onExtract}
             >
               Extract specs from code…
+            </button>
+          )}
+          {onLinkTests && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={busy}
+              title="Have an agent link the code project's tests to the specs extracted from it"
+              onClick={onLinkTests}
+            >
+              Link tests to specs…
             </button>
           )}
           <button type="button" className="btn btn-primary" autoFocus onClick={onClose}>
