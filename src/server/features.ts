@@ -1881,7 +1881,7 @@ async function absorbIntoDoc(
     const disk = drift ? await readTextFile(`${dataDir}/${fileName}`) : null;
     if (disk !== null && !isProjectionOf(disk, doc)) {
       span.setAttribute("automerge.drift_folded", true);
-      ({ doc, feature } = foldDrift(fileName, doc, disk, feature));
+      ({ doc, feature } = foldDrift(fileName, doc, disk, feature, force));
     }
     const next = reconcile(doc, feature, { force, scenario, author });
     // Checked before the document is saved: a projection that would not read
@@ -1903,6 +1903,10 @@ async function absorbIntoDoc(
  * that already carries the drift (foldDiskEdit ran, or it was read from the
  * drifted file) merges to itself.
  *
+ * `forced` is absorbIntoDoc's `force`: a published scenario this write moved
+ * back to [proposed] (unpublishScenario) stays moved, though the drifted file
+ * still calls it published — a status otherwise only moves forward in a merge.
+ *
  * Markdown that does not parse as a feature cannot be absorbed; rather than
  * overwrite it the write is refused, so whoever is mid-edit on disk can finish.
  */
@@ -1911,6 +1915,7 @@ function foldDrift(
   doc: A.Doc<FeatureDoc>,
   disk: string,
   edit: Feature,
+  forced = false,
 ): { doc: A.Doc<FeatureDoc>; feature: Feature } {
   const problem = featureTextError(disk);
   if (problem) {
@@ -1923,7 +1928,7 @@ function foldDrift(
     log.warn(`refused drift on ${fileName}; repaired from its document`, errorAttributes(absorbed.refused));
     return { doc, feature: edit };
   }
-  const merged = threeWayFeatureStrict(docToFeature(doc), edit, docToFeature(absorbed.doc));
+  const merged = threeWayFeatureStrict(docToFeature(doc), edit, docToFeature(absorbed.doc), { forced });
   if (!merged.ok) {
     throw new Error(
       `${fileName} was edited on disk and here at the same time (${merged.conflict}) — ` +
