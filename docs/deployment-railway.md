@@ -600,8 +600,10 @@ from [SpecDriven/specs-specdriven](https://github.com/SpecDriven/specs-specdrive
   lists them and the visitor picks one. The choice is kept in a
   `specdriven-project` cookie, and every request is answered for that
   project; without the cookie, the first project in the list is shown. A
-  link with `?project=<id>` opens a given project, and "Copy link" adds it,
-  so a shared link opens the same project.
+  link with `?project=<id>` opens a given project. The address bar always
+  names the project shown (`https://specs.specdriven.app/?project=specs-specdriven`),
+  picking another changes it, and "Copy link" adds it too, so a shared link
+  opens the same project.
 - **Where the specs come from:** each repository must be **public**. At start,
   the service makes a shallow clone of each with no credentials under
   `/tmp/specdriven-readonly/mirrors/<id>`, and the app serves a copy of it with

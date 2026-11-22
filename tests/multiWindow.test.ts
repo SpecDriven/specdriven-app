@@ -495,10 +495,20 @@ test("signing out in one window closes the others", async () => {
   }
 });
 
-test("a GitHub url and the folder it is cloned into are the same folder to the windows", () => {
+test("a GitHub url and the folder it is cloned into are the same folder to the windows", async () => {
   const repos = join(root, "clones");
-  const before = process.env.SPECDRIVEN_REPOS_DIR;
-  process.env.SPECDRIVEN_REPOS_DIR = repos;
+  // The window's folder is cloned as it opens: github.com is pointed at a
+  // folder that is not there, so the clone fails at once instead of waiting
+  // on the network — past the hooks' timeout when GitHub is slow to answer.
+  const offline = {
+    SPECDRIVEN_REPOS_DIR: repos,
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: `url.file://${join(root, "no-github")}/.insteadOf`,
+    GIT_CONFIG_VALUE_0: "https://github.com/",
+  };
+  const before = Object.fromEntries(Object.keys(offline).map((name) => [name, process.env[name]]));
+  Object.assign(process.env, offline);
+  setGitEngine("cli");
   try {
     const url = "https://github.com/acme/specs-insurance";
     const one = openWorkspace("1", { dataRepo: url });
@@ -516,9 +526,13 @@ test("a GitHub url and the folder it is cloned into are the same folder to the w
     expect(windowShowing({ path: gamma, kind: "spec" })).toBeNull();
     expect([syncedDir(one.folder), syncedDir(two.folder), syncedDir(three.folder)]).toEqual([join(repos, "specs-insurance"), null, null]);
     expect(openProjects()).toEqual([join(repos, "specs-insurance"), code]);
+    // The failed clone is over before the offline git config goes.
+    await runInWorkspace(one, () => syncedOnStart());
   } finally {
-    if (before === undefined) delete process.env.SPECDRIVEN_REPOS_DIR;
-    else process.env.SPECDRIVEN_REPOS_DIR = before;
+    for (const [name, value] of Object.entries(before)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
   }
 });
 
