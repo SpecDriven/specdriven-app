@@ -76,11 +76,13 @@ import {
   parseRepoScope,
   passphraseRefusal,
   pushProblem,
+  readOnlyReason,
   saveSigningPassphrase,
   setAppSignIn,
   setGitEngine,
   setSignedCommitRepos,
   signingPassphrase,
+  writeAccessOf,
 } from "./git";
 import {
   getAuth,
@@ -2936,8 +2938,21 @@ const getFeatures = withDataDir(async (dir) => {
     // again") — with the listing because the page reads it on every tick,
     // which is how often the answer can change.
     syncProblem: pushProblem(dir),
+    // Why the folder is read only, while it is (git-operations.md "a spec
+    // folder that cannot be pushed to opens read only"): the answer last
+    // given, asked again in the background once it is old — so access
+    // granted, or a remote added, reaches the page on a later tick.
+    readOnlyRepo: readOnlyReason(await writeAccessOf(dir)),
   });
 });
+
+// A spec folder that cannot be pushed to opens read only (git-operations.md):
+// the page asks when a folder opens, and waits for the remote's answer —
+// GET the one that stands, POST ("Check again") a new one.
+const getRepoAccess = withDataDir(async (dir) => json({ readOnly: readOnlyReason(await writeAccessOf(dir, { wait: true })) }));
+const postRepoAccess = withDataDir(async (dir) =>
+  json({ readOnly: readOnlyReason(await writeAccessOf(dir, { wait: true, fresh: true })) }),
+);
 
 // The data repo's own settings (specs/app/project-settings.feature.md): its
 // project-settings.json as the Project settings page shows it — the members,
@@ -4930,6 +4945,8 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["DELETE", "/api/signing/passphrase", unlessHosted(unlessDemo(deleteSigningPassphrase))],
   ["POST", "/api/logout", unlessHosted(unlessDemo(postLogout))],
   ["GET", "/api/features", getFeatures],
+  ["GET", "/api/repo-access", getRepoAccess],
+  ["POST", "/api/repo-access", postRepoAccess],
   ["POST", "/api/features", postFeatures],
   ["GET", "/api/images", getImages],
   ["POST", "/api/images", postImage],

@@ -29,7 +29,7 @@ import { currentGitAccess } from "./access";
 import { run, which } from "../run";
 import { getLogger } from "../telemetry";
 import type { RunOptions, RunResult } from "../run";
-import type { GitBackend, PathMove, PullResult, SyncResult } from "./backend";
+import type { GitBackend, PathMove, PullResult, SyncResult, WriteAccess } from "./backend";
 import { isRepoRoot } from "./repoRoot";
 import { BUILT_IN_CANNOT_SIGN, SIGN_CONFIG, makesCommit, maySign, signingHint, signsCommitsIn } from "./signing";
 import { signingEnv, signingTimeoutMs } from "./signingKey";
@@ -294,6 +294,26 @@ export function withoutProgress(stderr: string): string {
   return kept.join("\n");
 }
 
+/**
+ * A command's stderr without what ssh adds to it on a machine whose ssh
+ * config has `VisualHostKey yes`: the "Host key fingerprint is …" line and
+ * the 17×9 box of ASCII art under it, which a failed push would otherwise
+ * show the user as part of git's reason.
+ */
+export function withoutHostKeyArt(stderr: string): string {
+  if (!stderr.includes("Host key fingerprint is")) return stderr;
+  const kept: string[] = [];
+  for (const line of stderr.split("\n")) {
+    const trimmed = line.trimEnd();
+    if (/^Host key fingerprint is /.test(trimmed)) continue;
+    // The box: a border `+---[ECDSA 256]---+` or `+----[SHA256]-----+`, and
+    // rows `|  .o=X*+ .o.=   |` — 19 characters each.
+    if (trimmed.length === 19 && /^\+[-[\]A-Za-z0-9 ]{17}\+$|^\|.{17}\|$/.test(trimmed)) continue;
+    kept.push(line);
+  }
+  return kept.join("\n");
+}
+
 /** A remote command that was stopped at a limit: when, and what it then said. */
 export interface RemoteStop {
   at: number;
@@ -380,7 +400,8 @@ export function subprocessRun(context: () => Promise<GitContext>): GitRun {
       ...(guarded ? { timeoutMs: signingTimeoutMs() } : limitsFor(verb)),
       label: `git ${verb ?? ""}`.trim(),
     });
-    return reports && !res.timedOut ? { ...res, stderr: withoutProgress(res.stderr) } : res;
+    const stderr = withoutHostKeyArt(reports && !res.timedOut ? withoutProgress(res.stderr) : res.stderr);
+    return stderr === res.stderr ? res : { ...res, stderr };
   };
 }
 
@@ -398,6 +419,48 @@ export interface BackendOptions {
    * turns.
    */
   remoteBesideLocal?: boolean;
+  /**
+   * Replaces the dry-run push writeAccess asks the remote with — for the
+   * bundled engine, which has no dry run. Runs in the folder's remote turn,
+   * given the remote's name and url.
+   */
+  checkWrite?(repoDir: string, remoteName: string, url: string): Promise<WriteAccess>;
+}
+
+/**
+ * The ref a write check pushes to, dry: a new one, so the answer never
+ * hangs on whether the branch is ahead, behind or diverged — only on whether
+ * the remote lets this computer push at all.
+ */
+export const WRITE_CHECK_REF = "refs/specdriven/write-check";
+
+// What hosts answer a push they will not take from this account, by
+// transport: GitHub over ssh ("ERROR: Write access to repository not
+// granted.", "Permission to o/r.git denied to u.") and over https (the same
+// "Permission … denied", then a 403), GitLab ("You are not allowed to push
+// code to this project."), Bitbucket and Azure DevOps (403s, "access
+// denied"), a key the host does not know ("Permission denied (publickey)"),
+// and the receive-pack of a local path the user cannot write.
+const WRITE_DENIED =
+  /write access to repository not granted|permission to \S+ denied|permission denied|access denied|not allowed to push|you are not allowed|insufficient permission|returned error: 403|403 forbidden|unable to create temporary object directory/i;
+
+/** A remote url as the page may show it: a user name or token written into it left out. */
+export function withoutUserinfo(url: string): string {
+  return url.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/@]*@/i, "$1");
+}
+
+/**
+ * What a failed write check says: the remote turned the push down, or the
+ * check found out nothing — a network that is down, a host that did not
+ * answer and anything else that is not about access leaves the folder as it
+ * was. A credential problem is a refusal too, with the sign-in hint as its
+ * reason: this computer cannot push until it is fixed.
+ */
+export function writeRefusal(remoteUrl: string, output: string): WriteAccess {
+  const said = withoutHostKeyArt(output).trim();
+  if (WRITE_DENIED.test(said)) return { kind: "denied", remote: remoteUrl, reason: said };
+  if (isAuthFailure(said)) return { kind: "denied", remote: remoteUrl, reason: signInHint() };
+  return { kind: "unknown", reason: said || "the remote did not answer" };
 }
 
 /**
@@ -412,7 +475,13 @@ export interface BackendOptions {
  * Neither turn is asked for by code that already holds it. The one place
  * both are held is the bundled engine's pull, which is one command.
  */
-export function createGitBackend({ name, git, clone: cloneWith, remoteBesideLocal = false }: BackendOptions): GitBackend {
+export function createGitBackend({
+  name,
+  git,
+  clone: cloneWith,
+  remoteBesideLocal = false,
+  checkWrite,
+}: BackendOptions): GitBackend {
   const local = localTurn;
   const remote = remoteBesideLocal ? remoteTurn : localTurn;
 
@@ -439,6 +508,54 @@ export function createGitBackend({ name, git, clone: cloneWith, remoteBesideLoca
     const name = branch.stdout.trim();
     if (!name || name === "HEAD") return false; // detached, or no commit yet
     return (await git(repoDir, "config", "--get", `branch.${name}.remote`)).exitCode === 0;
+  }
+
+  /**
+   * The remote the checked-out branch pushes to: its upstream's, else
+   * `origin`, else the first one listed. Null when the repository has none.
+   */
+  async function pushRemote(repoDir: string): Promise<string | null> {
+    const listed = await git(repoDir, "remote");
+    if (listed.exitCode !== 0) return null;
+    const remotes = listed.stdout.split("\n").map((line) => line.trim()).filter(Boolean);
+    if (remotes.length === 0) return null;
+    const branch = await git(repoDir, "rev-parse", "--abbrev-ref", "HEAD");
+    const current = branch.exitCode === 0 ? branch.stdout.trim() : "";
+    if (current && current !== "HEAD") {
+      const tracked = (await git(repoDir, "config", "--get", `branch.${current}.remote`)).stdout.trim();
+      if (remotes.includes(tracked)) return tracked;
+    }
+    return remotes.includes("origin") ? "origin" : remotes[0]!;
+  }
+
+  /**
+   * Whether the remote takes a push from here (git-operations.md "a spec
+   * folder that cannot be pushed to opens read only"), asked by pushing
+   * HEAD to a ref of the app's own with `--dry-run`: git connects, the host
+   * decides whether this account may push — GitHub refuses over ssh and
+   * https alike before a ref is looked at — and nothing is sent. Hooks are
+   * skipped: a pre-push hook runs on a dry run too, and is not asked here.
+   * A folder that is not a repository of its own pushes nothing, and stays
+   * as editable as it always was.
+   */
+  async function writeAccess(repoDir: string): Promise<WriteAccess> {
+    if (!(await isRepoRoot(repoDir))) return { kind: "writable" };
+    const remoteName = await pushRemote(repoDir);
+    if (remoteName === null) return { kind: "no-remote" };
+    const url = (await git(repoDir, "config", "--get", `remote.${remoteName}.url`)).stdout.trim() || remoteName;
+    return remote(repoDir, async (): Promise<WriteAccess> => {
+      const held = heldBack(repoDir);
+      if (held) return { kind: "unknown", reason: held.message };
+      if (checkWrite) return checkWrite(repoDir, remoteName, url);
+      const shown = withoutUserinfo(url);
+      const res = noteRemote(
+        repoDir,
+        await git(repoDir, "push", "--dry-run", "--no-verify", remoteName, `HEAD:${WRITE_CHECK_REF}`),
+      );
+      if (res.exitCode === 0) return { kind: "writable" };
+      if (res.timedOut) return { kind: "unknown", reason: "the remote did not answer" };
+      return writeRefusal(shown, res.stderr + res.stdout);
+    });
   }
 
   /**
@@ -867,6 +984,7 @@ export function createGitBackend({ name, git, clone: cloneWith, remoteBesideLoca
     removeAndPush,
     commitAndPush,
     hasUpstream,
+    writeAccess,
     commitAllAndPublish,
   };
 }

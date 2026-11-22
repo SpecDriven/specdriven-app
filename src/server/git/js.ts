@@ -24,8 +24,8 @@ import { DEMO_USER, isDemoMode } from "../demoMode";
 import { readTextFile } from "../fsx";
 import { urlOnHost } from "../github";
 import type { RunResult } from "../run";
-import type { GitBackend } from "./backend";
-import { cloneFailure, createGitBackend } from "./cli";
+import type { GitBackend, WriteAccess } from "./backend";
+import { cloneFailure, createGitBackend, gitTimeouts, signInHint, withoutUserinfo } from "./cli";
 import type { GitRun } from "./cli";
 import { isHostedMode } from "../hostedMode";
 import { nodeFileSystem, plainFileSystem } from "./nodeFs";
@@ -213,4 +213,43 @@ export async function jsClone(git: GitRun, url: string, dir: string): Promise<vo
   if (res.exitCode !== 0) throw cloneFailure(url, res);
 }
 
-export const jsBackend: GitBackend = createGitBackend({ name: "js", git: jsRun, clone: jsClone });
+/**
+ * The write check on the bundled engine, which has no dry-run push: the
+ * request a push opens with — the remote's receive-pack refs, over the
+ * same https and with the same credential a push would send — whose answer
+ * is the host's decision. 200 takes pushes; 401 and 403 are a no, 404 the
+ * answer GitHub gives a private repository the account cannot see. A remote
+ * that is not https (a local path) is not asked: this engine reaches it
+ * through the file system, which is not this check's question.
+ *
+ * Exported for the unit test that stands in a host; the app reaches it
+ * through jsBackend.
+ */
+export async function jsCheckWrite(_repoDir: string, _remoteName: string, url: string): Promise<WriteAccess> {
+  if (!/^https?:\/\//i.test(url)) return { kind: "writable" };
+  const shown = withoutUserinfo(url);
+  // A credential written into the url is the push's own; this check does not send it.
+  if (shown !== url) return { kind: "unknown", reason: "the remote url carries its own credential" };
+  const target = `${shown.replace(/\/+$/, "")}/info/refs?service=git-receive-pack`;
+  const auth = await (await credentials())(target);
+  const headers: Record<string, string> = { "user-agent": "git/specdriven" };
+  if (auth?.type === "basic") headers.authorization = `Basic ${btoa(`${auth.username}:${auth.password}`)}`;
+  if (auth?.type === "bearer") headers.authorization = `Bearer ${auth.token}`;
+  let res: Response;
+  try {
+    res = await fetch(target, { headers, signal: AbortSignal.timeout(gitTimeouts().quietMs) });
+  } catch (e) {
+    return { kind: "unknown", reason: (e as Error).message };
+  }
+  const body = res.ok ? "" : (await res.text().catch(() => "")).trim().slice(0, 500);
+  await res.body?.cancel().catch(() => {});
+  if (res.ok) return { kind: "writable" };
+  if (res.status === 401 || (res.status === 404 && !auth)) return { kind: "denied", remote: shown, reason: signInHint() };
+  if (res.status === 403 || res.status === 404) {
+    const said = body || `the remote answered ${res.status}`;
+    return { kind: "denied", remote: shown, reason: `${said} — the signed-in account cannot push to it` };
+  }
+  return { kind: "unknown", reason: `the remote answered ${res.status}${body ? `: ${body}` : ""}` };
+}
+
+export const jsBackend: GitBackend = createGitBackend({ name: "js", git: jsRun, clone: jsClone, checkWrite: jsCheckWrite });

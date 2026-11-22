@@ -6,7 +6,8 @@
 // like the other modules' stores (src/frontend/testing.ts), so App.tsx holds
 // nothing of it — the page editor (PagesPane.tsx) holds the open page.
 
-import { useSyncExternalStore } from "react";
+import { useMemo, useSyncExternalStore } from "react";
+import { useRepoReadOnly } from "../repoReadOnly";
 import { ListTodo, Map as MapIcon, NotebookPen, type LucideIcon } from "lucide-react";
 import { PROJECT_PAGE, isProjectPage } from "../../server/pageFolders";
 import type { ArchivedListing, PageListing, ProjectListing } from "../../server/pages";
@@ -402,6 +403,12 @@ export const pageSettings = {
   },
 };
 
+/**
+ * The switches, with `readOnly` also true in a spec folder that cannot be
+ * pushed to (src/frontend/repoReadOnly.ts): its pages lock as the site's do.
+ */
 export function usePageSettings(): PageSettings {
-  return useSyncExternalStore(pageSettings.subscribe, pageSettings.get, pageSettings.get);
+  const shown = useSyncExternalStore(pageSettings.subscribe, pageSettings.get, pageSettings.get);
+  const repoLocked = useRepoReadOnly() !== null;
+  return useMemo(() => (repoLocked && !shown.readOnly ? { ...shown, readOnly: true } : shown), [shown, repoLocked]);
 }
