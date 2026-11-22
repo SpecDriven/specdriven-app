@@ -312,6 +312,7 @@ import {
 import { setProjectionOptions } from "./automerge/project";
 import type { NetSync } from "./automerge/netsync";
 import { errorAttributes, getLogger, setLogVerbosity } from "./telemetry";
+import { getResourceDisk, getResourceMemory, postResourceCleanup } from "./resources";
 import { getLogSettings, getLogs, putLogSettings, savedVerbosity } from "./logs";
 import { getDataDoc, getDataDocAt, getDataDocHistory, getDataTable, getDataTables } from "./dataViewer";
 import { version as appVersion } from "../../package.json";
@@ -4931,6 +4932,10 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/logs", getLogs],
   ["GET", "/api/logs/settings", getLogSettings],
   ["PUT", "/api/logs/settings", putLogSettings],
+  // Resources (src/server/resources.ts): memory and disk the app uses, and cleanups.
+  ["GET", "/api/resources/memory", getResourceMemory],
+  ["GET", "/api/resources/disk", getResourceDisk],
+  ["POST", "/api/resources/cleanup", postResourceCleanup],
   // Data viewer (src/server/dataViewer.ts): the Automerge store browsed
   // read-only as tables, documents and their history.
   ["GET", "/api/data/tables", withDataDir(getDataTables)],

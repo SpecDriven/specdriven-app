@@ -11917,6 +11917,7 @@ export function App() {
             onClose={closeAppPage}
             copyText={copyText}
             initialComponent={observabilityComponent}
+            confirm={confirm}
           />
         ) : appPageShown === "data" ? (
           /* Data: the Automerge store as tables, documents and history. */
