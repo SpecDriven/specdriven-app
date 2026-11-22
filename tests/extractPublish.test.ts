@@ -395,10 +395,31 @@ describe("an existing specification folder named by its GitHub url", () => {
   });
 
   test("a repository that is not a specification folder is refused", async () => {
-    await seedRemote("plain", false);
+    // More than GitHub starts a repository with: someone's work, not a fresh repository.
+    await makeRemote("acme", "plain", 2);
     const res = await call("POST", "/api/extract/repo", { codeDir: code, existing: "https://github.com/acme/plain", folders });
     expect(res.status).toBe(400);
     expect(res.body.error).toBe(`${join(root, "repos", "plain")} is not a specification folder — it has no .specdriven and specs folders`);
+  });
+
+  test("an empty repository named by its url is asked about, then set up, pushed and opened by its url", async () => {
+    const bare = join(remotes, "acme", "specs-jitter.git");
+    await mkdir(bare, { recursive: true });
+    await git(bare, "init", "--bare", "-b", "main");
+    const url = "https://github.com/acme/specs-jitter";
+    const dir = join(root, "repos", "specs-jitter");
+    const asked = await call("POST", "/api/extract/repo", { codeDir: code, existing: url, folders });
+    expect(asked.status).toBe(409);
+    expect(asked.body).toMatchObject({ initialize: true, dir });
+    const res = await call("POST", "/api/extract/repo", { codeDir: code, existing: url, folders, initialize: true });
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({ dir, open: url, existing: true, setUp: true, folders: ["specs/api", "specs/web"], github: null });
+    const remote = await remoteState("acme", "specs-jitter");
+    expect(remote.log).toEqual(["Set up specifications for shop"]);
+    expect(remote.files).toContain("specs/api/display-name.txt");
+    expect(remote.files).toContain("project-settings.yaml");
+    expect(remote.files).toContain("README.md");
+    expect(seen.some((s) => s.line.startsWith("POST"))).toBe(false);
   });
 });
 

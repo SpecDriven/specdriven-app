@@ -254,6 +254,16 @@ describe("ExtractSpecsDialog", () => {
     expect(markup).toMatch(/Create and open/);
   });
 
+  test("an empty repository where the new folder would go is offered to set up and add to", () => {
+    const markup = html(
+      <ExtractSpecsDialog agents={[]} initialAnalysis={{ ...analysis, targetState: "unset" }} initialStep="repo" onCreated={noop} onClose={noop} />,
+    );
+    expect(markup).toContain("/work/specs-shop is a repository with nothing in it yet.");
+    expect(markup).toMatch(/<button type="button" class="btn btn-ghost">Set it up and add to it<\/button>/);
+    // Nothing is made over it.
+    expect(markup).toMatch(/<button type="submit" class="btn btn-primary" disabled="">Create and open<\/button>/);
+  });
+
   test("every button has the app's button look", () => {
     const markup = html(
       <ExtractSpecsDialog agents={[agent("claude", "Claude")]} initialAnalysis={analysis} onCreated={noop} onClose={noop} />,

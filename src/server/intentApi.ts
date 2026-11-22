@@ -130,7 +130,9 @@ const deleteRefine: Handler = async (_req, params) => {
 // POST /api/extract/repo { codeDir, name, folders, link, github }: make the
 // specification folder beside the project, with the chosen folders in it.
 // With `existing` in place of `name` — a specification folder's path, or its
-// GitHub url — the chosen folders are added to that folder instead.
+// GitHub url — the chosen folders are added to that folder instead; a fresh
+// repository there is set up first when `initialize` is true, and otherwise
+// answered with `{ initialize: true }` so the dialog can ask.
 const postRepo: Handler = async (req) => {
   const body = await bodyOf(req);
   const codeDir = await resolveCodeProject(body.codeDir);
@@ -138,8 +140,8 @@ const postRepo: Handler = async (req) => {
   const folders = chosenFolders(body.folders, known);
   // An existing specification folder is added to, not made.
   if (body.existing !== undefined && body.existing !== null) {
-    const { dir, open } = await resolveSpecsFolder(body.existing, codeDir, getAppRoot());
-    const added = await addToSpecsFolder({ codeDir, dir, folders, link: body.link === true });
+    const { dir, open, setUp } = await resolveSpecsFolder(body.existing, codeDir, getAppRoot(), body.initialize === true);
+    const added = await addToSpecsFolder({ codeDir, dir, folders, link: body.link === true, setUp: setUp === true });
     return json({ ...added, ...(open !== dir ? { open } : {}) }, 201);
   }
   const created = await createSpecsFolder({

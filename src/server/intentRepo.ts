@@ -10,7 +10,7 @@
 // Node APIs only: this module also runs under Electron (src/server/run.ts).
 
 import { randomBytes } from "node:crypto";
-import { mkdir, readdir, readlink, rename, rm, stat } from "node:fs/promises";
+import { lstat, mkdir, readdir, readlink, rename, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { stampDataFormat } from "./dataFormat";
@@ -45,6 +45,18 @@ export class ExtractError extends Error {
 /** What a folder may hold and still be free to become a specification folder. */
 const IGNORED_WHEN_EMPTY = new Set([".DS_Store", "Thumbs.db", "desktop.ini"]);
 
+/**
+ * What a repository nobody has worked in yet holds, besides Finder's files:
+ * git's own folder, what GitHub can start a repository with (a README, a
+ * licence, a .gitignore), and the two folders of a specification folder
+ * that got only half set up. Such a folder can be set up as a
+ * specification folder without anything of someone's being in the way
+ * (specs/app/extract-specs-from-code.feature.md "Target specs repo is not
+ * initialized").
+ */
+const FRESH_REPO_NAMES = new Set([".git", ".gitignore", ".gitattributes", ".specdriven", SPECS_FOLDER]);
+const FRESH_REPO_FILE = /^(readme|license|licence|copying)(\.[\w-]+)?$/i;
+
 /** How many spec folders one extraction makes at most, and how deep. */
 const MAX_CHOSEN_FOLDERS = 200;
 const MAX_CHOSEN_DEPTH = 6;
@@ -69,6 +81,22 @@ export async function resolveCodeProject(input: unknown): Promise<string> {
   return dir;
 }
 
+/**
+ * Whether a folder that is not a specification folder can be set up as one:
+ * it holds nothing but what a fresh repository holds (FRESH_REPO_NAMES), and
+ * a `specs` there is a folder, not a code repository's link.
+ */
+async function canSetUp(dir: string): Promise<boolean> {
+  const names = await readdir(dir).catch(() => null);
+  if (!names || (await isSpecFolder(dir))) return false;
+  if (!names.every((n) => IGNORED_WHEN_EMPTY.has(n) || FRESH_REPO_NAMES.has(n) || FRESH_REPO_FILE.test(n))) return false;
+  for (const folder of [".specdriven", SPECS_FOLDER]) {
+    if (!names.includes(folder)) continue;
+    if (!(await lstat(join(dir, folder))).isDirectory()) return false;
+  }
+  return true;
+}
+
 async function isSpecFolder(dir: string): Promise<boolean> {
   const [data, specs] = await Promise.all([
     stat(join(dir, ".specdriven")).catch(() => null),
@@ -82,6 +110,8 @@ export type TargetState =
   | "free"
   /** A specification folder already: it can be opened instead. */
   | "spec"
+  /** A fresh repository — a clone of an empty one, or one with only a README: it can be set up and added to. */
+  | "unset"
   /** Something else: another name is needed. */
   | "taken";
 
@@ -93,7 +123,8 @@ export async function specsTarget(codeDir: string, name: string): Promise<{ dir:
   if (!info.isDirectory()) return { dir, state: "taken" };
   if (await isSpecFolder(dir)) return { dir, state: "spec" };
   const names = await readdir(dir).catch(() => ["?"]);
-  return { dir, state: names.every((n) => IGNORED_WHEN_EMPTY.has(n)) ? "free" : "taken" };
+  if (names.every((n) => IGNORED_WHEN_EMPTY.has(n))) return { dir, state: "free" };
+  return { dir, state: (await canSetUp(dir)) ? "unset" : "taken" };
 }
 
 /** The name a project's specification folder is given unless the user types another. */
@@ -126,8 +157,19 @@ export async function existingSpecsFor(codeDir: string): Promise<string | null> 
  * the app keeps its clones — as opening it would. Either way it must be a
  * specification folder, and not the code project. `open` is what the app
  * opens it by: the url for a repository, the path for a folder.
+ *
+ * A fresh repository — an empty one cloned, or one holding only what GitHub
+ * starts a repository with — is not refused outright: without `initialize`
+ * the answer asks whether to set it up (`{ initialize: true }`, 409); with
+ * it, `setUp` says the folder is to be set up before anything is added.
+ * Nothing is written here either way.
  */
-export async function resolveSpecsFolder(input: unknown, codeDir: string, appRoot: string): Promise<{ dir: string; open: string }> {
+export async function resolveSpecsFolder(
+  input: unknown,
+  codeDir: string,
+  appRoot: string,
+  initialize = false,
+): Promise<{ dir: string; open: string; setUp?: true }> {
   const typed = typeof input === "string" ? input.trim() : "";
   if (!typed) throw new ExtractError(400, "Name the specification folder to add to");
   let dir: string;
@@ -150,6 +192,10 @@ export async function resolveSpecsFolder(input: unknown, codeDir: string, appRoo
   }
   if (dir === resolve(codeDir)) throw new ExtractError(400, "That is the code project's own folder");
   if (!(await isSpecFolder(dir))) {
+    if (await canSetUp(dir)) {
+      if (initialize) return { dir, open, setUp: true };
+      throw new ExtractError(409, `${dir} is not set up as a specification folder yet`, { initialize: true, dir });
+    }
     throw new ExtractError(400, `${dir} is not a specification folder — it has no .specdriven and specs folders`);
   }
   return { dir, open };
@@ -262,6 +308,8 @@ export interface CreatedSpecs {
   open?: string;
   /** The folder was there already, and the chosen folders were added to it. */
   existing?: boolean;
+  /** The existing folder was a fresh repository, set up as a specification folder first. */
+  setUp?: boolean;
   /** The spec folders made, `specs/` prefixed. */
   folders: string[];
   /** The repository's page on GitHub, when it was published. */
@@ -304,6 +352,12 @@ export async function createSpecsFolder(options: CreateSpecsOptions): Promise<Cr
   if (target.dir === resolve(options.codeDir)) throw new ExtractError(400, "That is the code project's own folder");
   if (target.state === "spec") {
     throw new ExtractError(409, `${target.dir} is a specification folder already`, { existing: "spec", dir: target.dir });
+  }
+  if (target.state === "unset") {
+    throw new ExtractError(409, `${target.dir} is a repository not set up for specifications yet — set it up and add to it instead`, {
+      existing: "unset",
+      dir: target.dir,
+    });
   }
   if (target.state === "taken") {
     throw new ExtractError(409, `There is already something at ${target.dir} — choose another name`, { existing: "taken", dir: target.dir });
@@ -422,6 +476,12 @@ export async function publishSpecsFolder(dir: string, to: PublishTo): Promise<st
  * the code repositories its project-settings.yaml names — as the default
  * only when it names none — and what was written is committed as the app
  * commits any edit there.
+ *
+ * With `setUp` (resolveSpecsFolder's answer for a fresh repository) the
+ * folder is first made a specification folder — `.specdriven` and `specs`,
+ * the data format marker, project-settings.yaml, and a README when it has
+ * none — and everything is committed as one "Set up specifications for
+ * <project>" and pushed; an empty repository's first push starts its branch.
  */
 export async function addToSpecsFolder(options: {
   codeDir: string;
@@ -429,9 +489,17 @@ export async function addToSpecsFolder(options: {
   dir: string;
   folders: readonly ChosenFolder[];
   link?: boolean;
+  setUp?: boolean;
 }): Promise<CreatedSpecs> {
   const { codeDir, dir } = options;
   const project = basename(codeDir);
+  if (options.setUp) {
+    await initSpecFolder(dir);
+    await stampDataFormat(dir);
+    await ensureProjectSettings(dir);
+    const hasReadme = (await readdir(dir)).some((n) => /^readme(\.[\w-]+)?$/i.test(n));
+    if (!hasReadme) await writeTextFile(join(dir, "README.md"), readme(basename(dir), project));
+  }
   const settings = await readProjectSettings(dir);
   let settingsChanged = false;
   if (!settings.codeRepos.some((repo) => resolve(repo.dir) === resolve(codeDir))) {
@@ -445,9 +513,22 @@ export async function addToSpecsFolder(options: {
     dir,
     options.folders.map((f) => ({ path: f.folder, name: f.name })),
   );
-  const written = [...files, ...(settingsChanged ? [PROJECT_SETTINGS_FILE] : [])];
-  // A push that fails is the sync's to retry; the folders are there either way.
-  if (written.length > 0) await commitAndPush(dir, written, `Add spec folders for ${project}`).catch(() => undefined);
+  let githubProblem: string | undefined;
+  if (options.setUp) {
+    // All of it, as one commit: the folder held nothing of anyone's before.
+    if (await isRepoRoot(dir)) {
+      const sync = await commitAllAndPublish(dir, "main", commitMessage(project)).catch((e: Error) => ({
+        pushed: false,
+        failure: e.message,
+        message: e.message,
+      }));
+      if (!sync.pushed) githubProblem = `${dir} was set up and committed, but the push failed: ${sync.failure ?? sync.message}`;
+    }
+  } else {
+    const written = [...files, ...(settingsChanged ? [PROJECT_SETTINGS_FILE] : [])];
+    // A push that fails is the sync's to retry; the folders are there either way.
+    if (written.length > 0) await commitAndPush(dir, written, `Add spec folders for ${project}`).catch(() => undefined);
+  }
 
   let linkProblem: string | undefined;
   if (options.link) {
@@ -457,5 +538,13 @@ export async function addToSpecsFolder(options: {
       linkProblem = e instanceof SpecsLinkError ? e.message : `The specs link was not made: ${(e as Error).message}`;
     }
   }
-  return { dir, existing: true, folders, github: null, ...(linkProblem ? { linkProblem } : {}) };
+  return {
+    dir,
+    existing: true,
+    folders,
+    github: null,
+    ...(options.setUp ? { setUp: true } : {}),
+    ...(githubProblem ? { githubProblem } : {}),
+    ...(linkProblem ? { linkProblem } : {}),
+  };
 }

@@ -25,8 +25,10 @@ import {
   suggestedSpecsName,
 } from "../src/server/intentRepo";
 import { scanProject } from "../src/server/intentScan";
+import { setGitEngine } from "../src/server/git";
 import { readProjectSettings } from "../src/server/members";
 import { writeState } from "../src/server/state";
+import { git } from "./helpers/fixtures";
 
 let root: string;
 let code: string;
@@ -521,5 +523,94 @@ describe("the routes", () => {
 
   test("the desktop app's menu and the page agree on the event that starts the dialog", () => {
     expect(EXTRACT_SPECS_EVENT).toBe("specdriven:extract-specs");
+  });
+});
+
+// specs/app/extract-specs-from-code.feature.md "Target specs repo is not
+// initialized": a fresh repository named as the existing folder is asked
+// about, not refused, and set up once the user agrees.
+describe("a fresh repository named as the existing folder", () => {
+  let fresh: string;
+  let remote: string;
+  const chosen = [
+    { folder: "api", name: "API", modules: ["packages/api"], draft: true },
+    { folder: "web", name: "Storefront", modules: ["packages/web"], draft: true },
+  ];
+  const log = async (dir: string, ref = "HEAD") =>
+    (await git(dir, "log", "--format=%s", ref)).stdout.toString().split("\n").filter(Boolean);
+
+  beforeEach(async () => {
+    setGitEngine("cli");
+    // An empty repository, cloned: what a repository just made on GitHub is before anyone pushes.
+    remote = join(root, "remote", "specs-jitter.git");
+    await mkdir(remote, { recursive: true });
+    await git(remote, "init", "--bare", "-b", "main");
+    fresh = join(root, "work", "specs-jitter");
+    await git(join(root, "work"), "clone", remote, fresh);
+    // Whoever commits there: the user's own git identity, in a real clone.
+    await git(fresh, "config", "user.name", "Ada");
+    await git(fresh, "config", "user.email", "ada@example.com");
+    await git(fresh, "config", "commit.gpgsign", "false");
+  });
+  afterEach(() => setGitEngine(null));
+
+  test("an empty repository is asked about, and nothing is written until the user agrees", async () => {
+    const res = await call("POST", "/api/extract/repo", { codeDir: code, existing: fresh, folders: chosen });
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: `${fresh} is not set up as a specification folder yet`, initialize: true, dir: fresh });
+    expect(await readdir(fresh)).toEqual([".git"]);
+    expect(await resolveSpecsFolder(fresh, code, root, true)).toEqual({ dir: fresh, open: fresh, setUp: true });
+  });
+
+  test("once agreed, it is set up, the folders added, and all of it pushed as one commit", async () => {
+    const res = await call("POST", "/api/extract/repo", { codeDir: code, existing: fresh, folders: chosen, initialize: true });
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({ dir: fresh, existing: true, setUp: true, folders: ["specs/api", "specs/web"], github: null });
+    expect((await readDataFormat(fresh))?.format).toBeGreaterThan(1);
+    expect(await readFile(join(fresh, "specs/web/display-name.txt"), "utf8")).toBe("Storefront\n");
+    expect(await readFile(join(fresh, "README.md"), "utf8")).toStartWith("# specs-jitter\n");
+    expect((await readProjectSettings(fresh)).codeRepo).toBe(code);
+    // The empty repository's first push starts its main branch.
+    expect(await log(remote, "main")).toEqual(["Set up specifications for shop"]);
+    const files = (await git(remote, "ls-tree", "-r", "--name-only", "main")).stdout.toString();
+    for (const file of ["README.md", "project-settings.yaml", "specs/api/display-name.txt", ".specdriven/data-format.yaml"]) {
+      expect(files).toContain(file);
+    }
+    // Set up, it is an ordinary specification folder: a second add only adds.
+    const again = await call("POST", "/api/extract/repo", { codeDir: code, existing: fresh, folders: [{ ...chosen[0]!, folder: "more" }] });
+    expect(again.status).toBe(201);
+    expect(again.body.setUp).toBeUndefined();
+  });
+
+  test("a repository holding only what GitHub starts one with keeps its README", async () => {
+    const started = join(root, "work", "specs-started");
+    await put(started, "README.md", "# specs-started\n\nOurs.\n");
+    await put(started, "LICENSE", "MIT\n");
+    await put(started, ".gitignore", "*.log\n");
+    expect((await specsTarget(code, "specs-started")).state).toBe("unset");
+    expect((await call("POST", "/api/extract/repo", { codeDir: code, existing: started, folders: chosen })).body.initialize).toBe(true);
+    const res = await call("POST", "/api/extract/repo", { codeDir: code, existing: started, folders: chosen, initialize: true });
+    expect(res.status).toBe(201);
+    expect(await readFile(join(started, "README.md"), "utf8")).toBe("# specs-started\n\nOurs.\n");
+    expect((await readdir(join(started, "specs"))).sort()).toEqual(["api", "web"]);
+  });
+
+  test("a folder holding anything else, or a code repository's specs link, is still refused", async () => {
+    await put(fresh, "notes.txt", "mine\n");
+    const notes = await call("POST", "/api/extract/repo", { codeDir: code, existing: fresh, folders: chosen, initialize: true });
+    expect(notes.status).toBe(400);
+    expect(notes.body.error).toBe(`${fresh} is not a specification folder — it has no .specdriven and specs folders`);
+    expect((await specsTarget(code, "specs-jitter")).state).toBe("taken");
+    await rm(join(fresh, "notes.txt"));
+    await symlink(join(root, "elsewhere"), join(fresh, "specs"));
+    expect((await call("POST", "/api/extract/repo", { codeDir: code, existing: fresh, folders: chosen, initialize: true })).status).toBe(400);
+  });
+
+  test("a new folder is not made over it; the answer offers to add to it instead", async () => {
+    expect(await specsTarget(code, "specs-jitter")).toEqual({ dir: fresh, state: "unset" });
+    const res = await call("POST", "/api/extract/repo", { codeDir: code, name: "specs-jitter", folders: chosen, github: null });
+    expect(res.status).toBe(409);
+    expect(res.body).toMatchObject({ existing: "unset", dir: fresh });
+    expect(await readdir(fresh)).toEqual([".git"]);
   });
 });
