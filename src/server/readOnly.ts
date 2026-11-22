@@ -18,6 +18,7 @@ import { $ } from "bun";
 import { setFolderChooser } from "./folderChooser";
 import { getAppRoot } from "./paths";
 import { READ_ONLY_PLUGINS, readReadOnlyConfig, setReadOnlySite, type ReadOnlyConfig } from "./readOnlyMode";
+import { PROFILE_FORMAT } from "../plugins/profile";
 import { syncDataDir } from "./reload";
 import { resetSearchCache } from "./search";
 import { readState, writeState, type SpecDrivenState } from "./state";
@@ -28,8 +29,8 @@ export { isReadOnlyMode, READ_ONLY_REFUSAL, READ_ONLY_USER, readOnlyAllows } fro
  * Settings the site cannot run without, stamped on every snapshot: the
  * bundled git engine (no gh or credentials probed), no sync cron, no coding
  * agents, test links to GitHub rather than IntelliJ, and the plugin profile
- * of the open snapshot naming the roadmap alone — no other built-in, and
- * every plugin seen, so the loader adopts nothing it finds.
+ * of the open snapshot naming Specs and the roadmap alone — no other
+ * built-in, and every plugin seen, so the loader adopts nothing it finds.
  */
 function siteSettings(dir: string): Partial<SpecDrivenState> {
   return {
@@ -41,7 +42,11 @@ function siteSettings(dir: string): Partial<SpecDrivenState> {
     openTestsInIdea: false,
     ghostty: false,
     showTestLinks: true,
-    plugins: { seen: [...READ_ONLY_PLUGINS], repos: { [dir]: { enabled: [...READ_ONLY_PLUGINS] } } },
+    plugins: {
+      seen: [...READ_ONLY_PLUGINS],
+      repos: { [dir]: { enabled: [...READ_ONLY_PLUGINS] } },
+      format: PROFILE_FORMAT,
+    },
   };
 }
 

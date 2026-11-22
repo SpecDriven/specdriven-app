@@ -972,13 +972,38 @@ async function syncHostPlugins(state: SpecDrivenState): Promise<void> {
       : {}),
     // Only the profile section goes to disk, onto the file as it is now: a
     // sync runs beside other writers (a demo reseed, a Settings change),
-    // and the state it was handed may be behind them.
-    persist: async (s) => {
-      const fresh = (await readState(getAppRoot())) as Record<string, unknown>;
-      await writeState({ ...fresh, [PROFILE_KEY]: s[PROFILE_KEY] } as SpecDrivenState, getAppRoot());
-    },
+    // and the state it was handed may be behind them. As nobody's write: a
+    // window's would name its folder as the one a run without windows
+    // opens (state.ts writeState), and a sync is no folder switch — every
+    // folder's first one stores its list ("A folder's plugins are picked
+    // from its data the first time it opens").
+    persist: (s) =>
+      detached(async () => {
+        const fresh = (await readState(getAppRoot())) as Record<string, unknown>;
+        await writeState(
+          { ...fresh, [PROFILE_KEY]: profileOnto(fresh[PROFILE_KEY], s) } as SpecDrivenState,
+          getAppRoot(),
+        );
+      }),
     readState: async () => (await readState(getAppRoot())) as Record<string, unknown>,
   });
+}
+
+/**
+ * The profile section a sync stores: its own, with the other folders' lists
+ * as the file has them now — another window's sync may have stored its
+ * folder's since this one read the settings. Its own whole when the file's
+ * lists are in another format (profile.ts PROFILE_FORMAT): they are not to
+ * be read under this one's mark.
+ */
+function profileOnto(stored: unknown, synced: Record<string, unknown>): unknown {
+  const mine = synced[PROFILE_KEY] as { repos?: Record<string, unknown>; format?: unknown } | undefined;
+  const theirs = stored as { repos?: Record<string, unknown>; format?: unknown } | undefined;
+  const repo = profileRepo(synced);
+  if (!mine?.repos || !theirs?.repos || typeof theirs.repos !== "object" || mine.format !== theirs.format) return mine;
+  const repos = { ...mine.repos, ...theirs.repos };
+  if (repo && mine.repos[repo] !== undefined) repos[repo] = mine.repos[repo];
+  return { ...mine, repos };
 }
 
 /** The plugins of every open folder, each synced from its own window's reading of the settings. */

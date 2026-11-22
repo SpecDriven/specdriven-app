@@ -1,10 +1,21 @@
 // The profile (specs/app/plugins.feature.md "The profile lists enabled
 // plugins in tab order", "Each data folder keeps its own plugins"): the
 // ordered list of enabled plugins, which says exactly which plugins are
-// mounted and in what order their tabs follow Specs. Each data folder keeps
-// its own, under `plugins.repos[<folder>].enabled` in the device-local
-// settings file, so one folder may show Specs alone and another every
-// plugin; a folder with no list yet shows Specs alone.
+// mounted and in what order their tabs stand. Each data folder keeps its
+// own, under `plugins.repos[<folder>].enabled` in the device-local settings
+// file, so one folder may show Specs alone and another every plugin; a
+// folder with no list yet shows Specs alone.
+//
+// Specs is a plugin on that list like the others ("Specs is a built-in
+// plugin"). Lists stored before it was one never name it, and it was always
+// on, first: such a list is read with Specs put first, and the first write
+// puts it into every stored list and marks the file (`plugins.format`), so
+// from then on a list without Specs means Specs is switched off.
+//
+// The first time a data folder is opened its list is made from the data it
+// holds ("A folder's plugins are picked from its data the first time it
+// opens", seedFromData): `plugins.repos[<folder>].checked` remembers that
+// it was, so what Settings → Plugins switches afterwards holds.
 //
 // It replaces two older shapes: the per-module switches (`roadmap`, `tasks`,
 // `notebook`, `models`, `testing`, `issues`), and one device-wide
@@ -20,6 +31,12 @@ import type { PluginManifest } from "./manifest";
 
 /** The settings key the profile lives under. */
 export const PROFILE_KEY = "plugins";
+
+/** The Specs plugin's id (src/plugins/builtin/specs/manifest.ts). */
+export const SPECS_PLUGIN = "specs";
+
+/** `plugins.format` once the stored lists name Specs themselves. */
+export const PROFILE_FORMAT = 2;
 
 export interface Profile {
   /** The enabled plugins, in tab order. */
@@ -70,6 +87,16 @@ function repoProfile(state: State, repo: string): string[] | null {
   return idList((entry as { enabled?: unknown }).enabled);
 }
 
+/** Whether the file's lists name Specs themselves (`plugins.format`). */
+function namesSpecs(state: State): boolean {
+  return section(state).format === PROFILE_FORMAT;
+}
+
+/** A stored list as it reads: one from before Specs was a plugin had it on, first. */
+function withSpecs(state: State, list: string[]): string[] {
+  return namesSpecs(state) ? list : dedupe([SPECS_PLUGIN, ...list]);
+}
+
 /**
  * The list the open data folder stores — or, with none open, the
  * device-wide `plugins.enabled` — or null for none.
@@ -83,13 +110,16 @@ export function storedProfile(state: State): string[] | null {
  * The profile a settings object describes: the open folder's own list when
  * it has one; else the list an older file holds (the device-wide
  * `plugins.enabled`, or the legacy switches and the manifests' defaults, in
- * manifest order); else none — Specs alone.
+ * manifest order); else none — Specs alone. A list from before Specs was a
+ * plugin reads with Specs first.
  */
 export function readProfile(state: State, manifests: readonly PluginManifest[]): Profile {
   const stored = storedProfile(state);
-  if (stored) return { enabled: stored, migrated: false };
+  if (stored) return { enabled: withSpecs(state, stored), migrated: false };
   const older = olderProfile(state, manifests);
-  return older ? { enabled: older, migrated: true } : { enabled: [], migrated: false };
+  return older
+    ? { enabled: withSpecs(state, older), migrated: true }
+    : { enabled: [SPECS_PLUGIN], migrated: false };
 }
 
 /** The list an older settings file holds, or null when it holds none. */
@@ -146,10 +176,43 @@ export function hasLegacyKeys(state: State, manifests: readonly PluginManifest[]
  * Move an older file's list onto the folders: every folder the file knows
  * (the open one, then the recent ones) without a list of its own gets a
  * copy, and the device-wide list and the legacy switches go. With no folder
- * known yet the list stays device-wide (the switches still go). Returns
- * whether the settings changed.
+ * known yet the list stays device-wide (the switches still go). Lists from
+ * before Specs was a plugin then get it, first (nameSpecs). Returns whether
+ * the settings changed.
  */
 export function migrateProfile(state: State, manifests: readonly PluginManifest[]): boolean {
+  const moved = moveOlderLists(state, manifests);
+  return nameSpecs(state) || moved;
+}
+
+/**
+ * Put Specs, first, into every list a file from before it was a plugin
+ * stores, and mark the file as naming it. A file with no list is left
+ * alone — it reads as Specs alone either way, and the first list written
+ * marks it (writeProfile). Returns whether the settings changed.
+ */
+function nameSpecs(state: State): boolean {
+  if (namesSpecs(state)) return false;
+  const current = section(state);
+  const device = idList(current.enabled);
+  const lists: Record<string, unknown> = {};
+  let listed = device !== null;
+  for (const [repo, entry] of Object.entries(repoLists(state))) {
+    const list = repoProfile(state, repo);
+    if (list) listed = true;
+    lists[repo] = list ? { ...(entry as object), enabled: dedupe([SPECS_PLUGIN, ...list]) } : entry;
+  }
+  if (!listed) return false;
+  state[PROFILE_KEY] = {
+    ...current,
+    ...(device ? { enabled: dedupe([SPECS_PLUGIN, ...device]) } : {}),
+    ...(current.repos !== undefined ? { repos: lists } : {}),
+    format: PROFILE_FORMAT,
+  };
+  return true;
+}
+
+function moveOlderLists(state: State, manifests: readonly PluginManifest[]): boolean {
   const older = olderProfile(state, manifests);
   if (!older) return false;
   const repos = knownRepos(state);
@@ -194,13 +257,58 @@ export function writeProfile(
   migrateProfile(state, manifests);
   const repo = profileRepo(state);
   const list = dedupe([...enabled]);
+  // What is written names Specs itself: a list without it has it off.
   if (!repo) {
-    state[PROFILE_KEY] = { ...section(state), enabled: list };
+    state[PROFILE_KEY] = { ...section(state), enabled: list, format: PROFILE_FORMAT };
     return;
   }
   const lists = repoLists(state);
   const entry = lists[repo] && typeof lists[repo] === "object" ? (lists[repo] as object) : {};
-  state[PROFILE_KEY] = { ...section(state), repos: { ...lists, [repo]: { ...entry, enabled: list } } };
+  state[PROFILE_KEY] = {
+    ...section(state),
+    repos: { ...lists, [repo]: { ...entry, enabled: list } },
+    format: PROFILE_FORMAT,
+  };
+}
+
+/** Whether the open folder's list was already made from its data (`repos[<folder>].checked`). */
+export function dataChecked(state: State): boolean {
+  const repo = profileRepo(state);
+  const entry = repo ? repoLists(state)[repo] : null;
+  return !!entry && typeof entry === "object" && (entry as { checked?: unknown }).checked === true;
+}
+
+/**
+ * Make the open folder's list from the data it holds, the first time the
+ * folder is opened: every plugin among `manifests` that has data
+ * (`withData`) and is not listed goes on, in manifest order — Specs first —
+ * and Specs goes off when it has none and a listed plugin has some, so a
+ * folder of notebook entries opens on the notebook alone. A folder with no
+ * data keeps its list: Specs alone, for a new one. Records the list and
+ * that the folder was checked, so a later switch in Settings → Plugins
+ * holds; returns the list, or null when the folder was checked before (or
+ * none is open).
+ */
+export function seedFromData(
+  state: State,
+  enabled: readonly string[],
+  withData: readonly string[],
+  manifests: readonly PluginManifest[],
+): string[] | null {
+  const repo = profileRepo(state);
+  if (!repo || dataChecked(state)) return null;
+  const add = manifests.filter((m) => withData.includes(m.id) && !enabled.includes(m.id)).map((m) => m.id);
+  let next = [...enabled, ...add];
+  if (add.includes(SPECS_PLUGIN)) next = [SPECS_PLUGIN, ...next.filter((id) => id !== SPECS_PLUGIN)];
+  const others = next.some((id) => id !== SPECS_PLUGIN && withData.includes(id));
+  if (!withData.includes(SPECS_PLUGIN) && others) next = next.filter((id) => id !== SPECS_PLUGIN);
+  writeProfile(state, next, manifests);
+  const lists = repoLists(state);
+  state[PROFILE_KEY] = {
+    ...section(state),
+    repos: { ...lists, [repo]: { ...(lists[repo] as object), checked: true } },
+  };
+  return dedupe(next);
 }
 
 /** The ids a folder has switched on by itself before (`repos[<folder>].autoEnabled`). */

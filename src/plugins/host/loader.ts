@@ -18,7 +18,15 @@ import { version as appVersion } from "../../../package.json";
 import { Context, type Disposer, type Plugin, type Scope } from "../kernel";
 import type { PluginManifest } from "../manifest";
 import type { InstallRecord } from "../marketplace";
-import { PROFILE_KEY, autoEnablePlugins, profileRepo, readProfile, writeProfile } from "../profile";
+import {
+  PROFILE_KEY,
+  autoEnablePlugins,
+  dataChecked,
+  profileRepo,
+  readProfile,
+  seedFromData,
+  writeProfile,
+} from "../profile";
 import { builtinHostPlugins } from "../builtin/host";
 import { builtinManifests, profileManifests, retiredManifest } from "../builtin/manifests";
 import * as hostSdk from "../sdk/host";
@@ -297,6 +305,19 @@ export function syncPlugins(
     const here = options.dataDir ?? null;
     const dataDirs = [...new Set([...(options.open?.dataDirs ?? []), ...(here ? [here] : [])])];
 
+    // The first time a data folder is opened its list is made from the data
+    // it holds (specs/app/plugins.feature.md "A folder's plugins are picked
+    // from its data the first time it opens"): the built-ins with data go
+    // on, and Specs goes off where it has none and another has some. Before
+    // the folders' plugins and the self-enabling ones, which add to it.
+    if (here && isDataFolderProfile(state) && !dataChecked(state) && (await isDirectory(here))) {
+      const seeded = seedFromData(state, enabled, await pluginsWithData(here), builtinManifests);
+      if (seeded) {
+        enabled = seeded;
+        changed = true;
+      }
+    }
+
     if (options.sources) {
       const found = await discoverPlugins({
         dataDir: here,
@@ -381,6 +402,31 @@ export function syncPlugins(
   });
   turn = run.catch(() => {});
   return run;
+}
+
+/** Whether the profile being synced is a data folder's — not a code repository's, nor no folder's. */
+function isDataFolderProfile(state: Record<string, unknown>): boolean {
+  const code = state.openCodeRepo;
+  return profileRepo(state) !== null && !(typeof code === "string" && code.trim() !== "");
+}
+
+async function isDirectory(path: string): Promise<boolean> {
+  return (await stat(path).catch(() => null))?.isDirectory() === true;
+}
+
+/** The built-in plugins that have data in a folder; one whose look fails counts as having none. */
+async function pluginsWithData(dataDir: string): Promise<string[]> {
+  const found = await Promise.all(
+    builtinHostPlugins.map(async ({ manifest, hasData }) => {
+      if (!hasData) return null;
+      try {
+        return (await hasData(dataDir)) ? manifest.id : null;
+      } catch {
+        return null;
+      }
+    }),
+  );
+  return found.filter((id): id is string => id !== null);
 }
 
 /**
