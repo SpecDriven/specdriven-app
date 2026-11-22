@@ -4,6 +4,14 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.298 — 2026-11-22
+
+- The public specs site shows several projects, picked from the folder name's ▾ (SPECDRIVEN_READONLY_PROJECTS) ([#503](https://github.com/SpecDriven/specdriven-app/pull/503))
+- Extract specs links a project's existing tests to the drafted scenarios, in the same run or later ([#502](https://github.com/SpecDriven/specdriven-app/pull/502))
+- An empty repository picked as the existing specification folder is offered to be set up ([#501](https://github.com/SpecDriven/specdriven-app/pull/501))
+- A pom.xml comment pieced together around another, or left open, hides its modules ([#500](https://github.com/SpecDriven/specdriven-app/pull/500))
+- Extract specs from a code project: folders from its modules, first features drafted by an agent ([#499](https://github.com/SpecDriven/specdriven-app/pull/499))
+
 ## v0.1.297 — 2026-11-21
 
 - Observability gets a Resources tab: RAM and disk SpecDriven uses, with cleanups ([#498](https://github.com/SpecDriven/specdriven-app/pull/498))
