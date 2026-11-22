@@ -4,6 +4,12 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.293 — 2026-11-21
+
+- A spec folder that cannot be pushed to opens read only ([#491](https://github.com/SpecDriven/specdriven-app/pull/491))
+- Images pasted into a GitHub issue are committed to the default branch; no images branch ([#490](https://github.com/SpecDriven/specdriven-app/pull/490))
+- Window titles: the folder and the page only, at most 36 characters ([#489](https://github.com/SpecDriven/specdriven-app/pull/489))
+
 ## v0.1.292 — 2026-11-21
 
 - Desktop build: sign the macOS app ad hoc, without an Apple Developer account ([#488](https://github.com/SpecDriven/specdriven-app/pull/488))
