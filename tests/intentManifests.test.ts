@@ -18,6 +18,7 @@ import {
   readToml,
   readTsconfigReferences,
   stripJsonComments,
+  stripXmlComments,
   tomlStrings,
 } from "../src/server/intentManifests";
 
@@ -138,6 +139,16 @@ describe("pom.xml", () => {
 
   test("every module is listed, a profile's too, a commented one not", () => {
     expect(readPom(POM).modules).toEqual(["billing", "services/orders", "it-tests"]);
+  });
+
+  test("a comment pieced together around another, or left open, hides its modules too", () => {
+    const pom = (inner: string) => `<project><modules><module>billing</module>${inner}</modules></project>`;
+    expect(readPom(pom("<!<!-- x -->-- <module>hidden</module> -->")).modules).toEqual(["billing"]);
+    expect(readPom(pom("<!-- <module>unclosed</module>")).modules).toEqual(["billing"]);
+    for (const text of ["<!<!-- x -->--", "a<!<!<!-- 1 -->-- 2 -->-- 3 -->b", "<!-- open", "<!<!-- x -->-- y"]) {
+      expect(stripXmlComments(text)).not.toContain("<!--");
+    }
+    expect(stripXmlComments("a<!-- 1 -->b<!-- 2 -->c")).toBe("abc");
   });
 
   test("a name that is a property is not a name", () => {
