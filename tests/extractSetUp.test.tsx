@@ -49,13 +49,18 @@ afterAll(async () => {
   await happyWindow?.happyDOM.close();
 });
 
+// Every dialog is unmounted before the next test, and all of them before
+// this file hands its DOM back: a root left mounted would commit into
+// whatever DOM the next test file brings, and fail its tests instead.
+const roots: Root[] = [];
 afterEach(() => {
+  for (const root of roots.splice(0)) act(() => root.unmount());
   globalThis.fetch = realFetch;
   document.body.innerHTML = "";
 });
 
 import React, { act } from "react";
-import { createRoot } from "react-dom/client";
+import { createRoot, type Root } from "react-dom/client";
 import { ExtractSpecsDialog, type ExtractAnalysis, type ExtractCreated } from "../src/frontend/ExtractSpecsDialog";
 import { analyseModules } from "../src/server/intentModules";
 
@@ -86,6 +91,7 @@ async function mount(answers: { status: number; body: unknown }[], start: Extrac
   const host = document.createElement("div");
   document.body.appendChild(host);
   const root = createRoot(host);
+  roots.push(root);
   await act(async () => {
     root.render(
       <ExtractSpecsDialog agents={[]} initialAnalysis={start} initialStep="repo" onCreated={(c) => created.push(c)} onClose={() => {}} />,
