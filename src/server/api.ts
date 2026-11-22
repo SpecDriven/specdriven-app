@@ -2136,10 +2136,11 @@ const deleteConfluenceToken: Handler = async (req) => {
   return json({ tokens: await listConfluenceTokens() });
 };
 
-// qTest (specs/external-links/qtest-test-cases.feature.md "A qTest token is
-// kept per site on this device"): one bearer token per qTest site, kept on
-// this device (src/server/qtestTokens.ts), checked against the site before
-// it is kept. The list never carries a token.
+// qTest (specs/external-links/qtest-test-cases.feature.md "One qTest token
+// is kept on this device"): a single bearer token and the site it is for,
+// kept on this device (src/server/qtestTokens.ts), checked against the site
+// before it is kept; saving one replaces the last, whatever its site. The
+// list never carries a token.
 const getQtestTokens: Handler = async () => json({ tokens: await listQtestTokens() });
 
 const postQtestToken: Handler = async (req) => {
@@ -2155,6 +2156,9 @@ const postQtestToken: Handler = async (req) => {
   try {
     const { user } = await validateQtestToken(base, token);
     await saveQtestToken({ base, token, user });
+    for (const other of await listQtestTokens()) {
+      if (other.base.toLowerCase() !== base.toLowerCase()) await clearQtestToken(other.base);
+    }
     return json({ base, user });
   } catch (e) {
     // What qTest answered goes along, for the error's detail box.
