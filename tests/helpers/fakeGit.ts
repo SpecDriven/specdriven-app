@@ -87,6 +87,9 @@ export function installFakeGit(script: Partial<Omit<GitBackend, "name">> = {}): 
     async hasUpstream() {
       return true;
     },
+    async writeAccess() {
+      return { kind: "writable" };
+    },
     async commitAllAndPublish() {
       return PUSHED;
     },

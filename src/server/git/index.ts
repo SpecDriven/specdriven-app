@@ -7,15 +7,16 @@
 
 import type { Attributes } from "@opentelemetry/api";
 import { rm } from "node:fs/promises";
+import { getAuth } from "../auth";
 import { isHostedMode } from "../hostedMode";
 import { getLogger, withSpan } from "../telemetry";
-import type { GitBackend, PathMove, PullResult, SyncResult } from "./backend";
+import type { GitBackend, PathMove, PullResult, SyncResult, WriteAccess } from "./backend";
 import { cliBackend, cliGitAvailable, remoteStop } from "./cli";
 import { ghAvailable, ghBackend, resetGhCache } from "./gh";
 import { jsBackend } from "./js";
-import { registerEngineLookup } from "./access";
+import { currentGitAccess, registerEngineLookup } from "./access";
 
-export type { PathMove, PullResult, SyncResult } from "./backend";
+export type { PathMove, PullResult, SyncResult, WriteAccess } from "./backend";
 export { cliGitAvailable } from "./cli";
 export { ghAccount, ghAccountInUse, ghAvailable, ghHosts, ghSignedIn } from "./gh";
 export type { GhAccount } from "./gh";
@@ -167,12 +168,115 @@ function notePush(repoDir: string, result: SyncResult, settles = false): SyncRes
   if (result.failure) {
     if (pushProblems.get(repoDir) !== result.failure) {
       log.warn(`push failed: ${result.failure}`, { "specdriven.dir": repoDir });
+      // A push turned down may be the first word that this computer can no
+      // longer write there: the remote is asked again, for the page to hear.
+      void writeAccessOf(repoDir, { fresh: true });
     }
     pushProblems.set(repoDir, result.failure);
   } else if (result.pushed || settles) {
+    // A push that went through is the remote's own answer.
+    const known = accessAnswers.get(repoDir);
+    if (result.pushed && known && known.access.kind !== "writable") {
+      accessAnswers.set(repoDir, { ...known, access: { kind: "writable" }, at: Date.now() });
+    }
     if (pushProblems.delete(repoDir)) log.info("saved changes reach the remote again", { "specdriven.dir": repoDir });
   }
   return result;
+}
+
+// Whether each data folder's remote takes pushes from this computer
+// (git-operations.md "a spec folder that cannot be pushed to opens read
+// only"). Asked of the remote when a folder opens and again now and then —
+// access can be granted, a remote added — and remembered with who asked: a
+// change of engine, of Git access or of the signed-in account makes the
+// answer one about somebody else, and it is asked again.
+interface AccessAnswer {
+  access: WriteAccess;
+  at: number;
+  asker: string;
+}
+const accessAnswers = new Map<string, AccessAnswer>();
+const accessAsking = new Map<string, Promise<WriteAccess>>();
+
+/**
+ * How long an answer stands before the folder is asked again: a check that
+ * found nothing out is tried again soon; one the remote gave, or the
+ * repository's own config, after a few minutes.
+ */
+const ACCESS_RECHECK_MS: Record<WriteAccess["kind"], number> = {
+  writable: 10 * 60_000,
+  "no-remote": 60_000,
+  denied: 3 * 60_000,
+  unknown: 60_000,
+};
+
+/** Who a write check is asked as: the engine, the Git access and the signed-in account. */
+async function accessAsker(): Promise<string> {
+  const auth = await getAuth().catch(() => null);
+  return `${currentEngine()}|${currentGitAccess()}|${auth ? `${auth.login}@${auth.host ?? ""}` : ""}`;
+}
+
+function askWriteAccess(repoDir: string, asker: string): Promise<WriteAccess> {
+  const asking = accessAsking.get(repoDir);
+  if (asking) return asking;
+  const asked = traced(
+    "write_access",
+    repoDir,
+    async (): Promise<WriteAccess> => {
+      try {
+        return await backend().writeAccess(repoDir);
+      } catch (e) {
+        return { kind: "unknown", reason: (e as Error).message };
+      }
+    },
+    (access) => ({ "git.write_access": access.kind }),
+  ).then((access) => {
+    const before = accessAnswers.get(repoDir)?.access.kind;
+    if (before !== access.kind && (access.kind === "denied" || access.kind === "no-remote")) {
+      log.warn(`the folder opens read only: ${access.kind === "denied" ? access.reason : "it has no remote"}`, {
+        "specdriven.dir": repoDir,
+      });
+    }
+    accessAnswers.set(repoDir, { access, at: Date.now(), asker });
+    accessAsking.delete(repoDir);
+    return access;
+  });
+  accessAsking.set(repoDir, asked);
+  return asked;
+}
+
+/**
+ * Whether a folder's remote takes pushes from here. The answer last given,
+ * while it stands; else the remote is asked — waited for with `wait`, which
+ * the page does when a folder opens, and in the background otherwise, the
+ * answer standing in until the new one arrives (null before the first).
+ * `fresh` asks again whatever the last answer was: "Check again".
+ */
+export async function writeAccessOf(
+  repoDir: string,
+  { wait = false, fresh = false }: { wait?: boolean; fresh?: boolean } = {},
+): Promise<WriteAccess | null> {
+  const asker = await accessAsker();
+  const known = accessAnswers.get(repoDir);
+  const current = known && known.asker === asker ? known : null;
+  if (!fresh && current && Date.now() - current.at < ACCESS_RECHECK_MS[current.access.kind]) return current.access;
+  const asked = askWriteAccess(repoDir, asker);
+  return wait ? asked : (current?.access ?? null);
+}
+
+/**
+ * Why a folder is read only (git-operations.md "a spec folder that cannot
+ * be pushed to opens read only") — it has no remote, or the remote turned
+ * this computer down — or null while it may be edited: an answer that found
+ * nothing out is no reason to stop anyone.
+ */
+export function readOnlyReason(access: WriteAccess | null): Exclude<WriteAccess, { kind: "writable" | "unknown" }> | null {
+  return access && (access.kind === "denied" || access.kind === "no-remote") ? access : null;
+}
+
+/** Forget every answer — for tests. */
+export function forgetWriteAccess(): void {
+  accessAnswers.clear();
 }
 
 /**

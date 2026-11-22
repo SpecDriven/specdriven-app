@@ -811,6 +811,64 @@ aside header h1 {
   color: var(--danger-fg);
 }
 
+/* A read-only folder (git-operations.md "a spec folder that cannot be
+   pushed to opens read only"): a quiet line under the header, like the
+   demo's, that opens the dialog saying why. */
+.repo-read-only {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  width: calc(100% - 1.8rem);
+  margin: 0 0.9rem 0.4rem;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 0.6875rem;
+  cursor: pointer;
+}
+
+.repo-read-only:hover,
+.repo-read-only:focus-visible {
+  color: var(--text-1);
+  background: var(--hover);
+}
+
+.repo-read-only-why {
+  color: var(--text-3);
+}
+
+/* The dialog's "What the remote said": git's words, as written. */
+.read-only-reason {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-top: 0.6rem;
+}
+
+.read-only-reason pre {
+  margin: 0;
+  max-height: 9rem;
+  overflow: auto;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.read-only-repo-dialog code {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
 /* Demo mode: a quiet one-line note under the header, telling visitors the
    dataset is a sandbox that resets on refresh. */
 .demo-banner {

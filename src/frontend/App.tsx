@@ -97,6 +97,7 @@ import {
   Database,
   Images,
   Sparkles,
+  Lock,
 } from "lucide-react";
 import { PublishRing, StatusCounts, StatusIcon } from "./StatusIcon";
 import { NewFeatureIcon, NewFolderIcon, StartSessionIcon } from "./ActionIcons";
@@ -115,6 +116,9 @@ import { setShareRepo, shareUrl } from "./shareLink";
 import { SaveIndicator, Toaster, toast } from "./Toasts";
 import { missedFeatureNote, pullProblemOf, syncForLink } from "./linkSync";
 import { currentSyncProblem, pushHint, setSyncProblem, syncProblemMessage, useSyncProblem } from "./syncProblem";
+import { currentRepoReadOnly, parseRepoReadOnly, readOnlySummary, setRepoReadOnly, useRepoReadOnly } from "./repoReadOnly";
+import type { RepoReadOnly } from "./repoReadOnly";
+import { ReadOnlyRepoDialog } from "./ReadOnlyRepoDialog";
 import { IS_MAC, ShortcutSheet, isTypingTarget, useShortcuts, type Shortcut } from "./shortcuts";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { applyVimPref, setVimDemoMode, useVimMode } from "./vimPref";
@@ -1041,6 +1045,8 @@ interface Listing {
   customAttributes: string;
   /** Why saved changes are not reaching the remote (git-operations.md); null while they are. */
   syncProblem: string | null;
+  /** Why the folder is read only (src/frontend/repoReadOnly.ts); null while it may be edited. */
+  readOnlyRepo: RepoReadOnly | null;
 }
 
 /**
@@ -1160,6 +1166,7 @@ export async function fetchListing(
               : null,
           customAttributes: typeof data.customAttributes === "string" ? data.customAttributes : "",
           syncProblem: typeof data.syncProblem === "string" && data.syncProblem ? data.syncProblem : null,
+          readOnlyRepo: parseRepoReadOnly(data.readOnlyRepo),
         },
       };
     }
@@ -1295,6 +1302,30 @@ const READ_ONLY_SHORTCUTS = new Set([
   "divider",
 ]);
 /** The command palette's actions on the read-only site. */
+// The folders whose read-only dialog this window has shown, kept for the
+// window's session — a reload does not ask again, a new start does.
+const READ_ONLY_ANNOUNCED_KEY = "sd-read-only-announced";
+function readOnlyAnnouncedStored(): string[] {
+  try {
+    const raw = JSON.parse(sessionStorage.getItem(READ_ONLY_ANNOUNCED_KEY) ?? "[]");
+    return Array.isArray(raw) ? raw.filter((d): d is string => typeof d === "string") : [];
+  } catch {
+    return [];
+  }
+}
+function storeReadOnlyAnnounced(dirs: Set<string>): void {
+  try {
+    sessionStorage.setItem(READ_ONLY_ANNOUNCED_KEY, JSON.stringify([...dirs]));
+  } catch {
+    // Storage refused: the dialog may come up again after a reload.
+  }
+}
+
+// A read-only folder (src/frontend/repoReadOnly.ts) keeps every command but
+// the ones that change its specs: create, import, publish, rename, move,
+// delete, and the editor's formatting keys.
+const WRITES_SPECS =
+  /^(?:action:)?(?:create|publish|rename(?:-[\w-]+)?|move(?:-[\w-]+)?|delete(?:-[\w-]+)?|new-folder|import-[\w-]+|md-[\w-]+|divider)$/;
 const READ_ONLY_PALETTE = new RegExp(`^action:(${[...READ_ONLY_SHORTCUTS].join("|")}|go-[\\w-]+|theme-\\w+)$`);
 
 export function App() {
@@ -1408,6 +1439,18 @@ export function App() {
   // folder switch and Sync, every create, edit, move and delete, settings,
   // agents — and opens editors as previews.
   const [readOnly, setReadOnly] = useState(false);
+  // A spec folder that cannot be pushed to opens read only (src/frontend/
+  // repoReadOnly.ts, git-operations.md): no remote, or a remote that turns
+  // this computer down. Its specs lock like the read-only site's — every
+  // create, edit, move and delete hidden, editors opened as pages — while
+  // the rest of the app stays: Settings, the folder switch, Sync's pulls.
+  const repoReadOnly = useRepoReadOnly();
+  /** Whether the specs on screen can be changed from here: not on the site, not in a read-only folder. */
+  const locked = readOnly || repoReadOnly !== null;
+  /** The dialog that says why (ReadOnlyRepoDialog.tsx). */
+  const [readOnlyDialogOpen, setReadOnlyDialogOpen] = useState(false);
+  /** The folder the remote last answered for, when the folder opened — until then a null is no news. */
+  const [repoAccessFor, setRepoAccessFor] = useState<string | null>(null);
   // Check for Updates… belongs to the desktop app (src/frontend/main.tsx marks
   // it): the web server cannot replace itself, so its version is not a way in.
   const canCheckForUpdates = typeof document !== "undefined" && Boolean(document.documentElement.dataset.desktop);
@@ -2130,6 +2173,7 @@ export function App() {
     setIssuesRepo(listing.issuesRepo);
     setCustomAttributesText(listing.customAttributes);
     setSyncProblem(listing.syncProblem);
+    setRepoReadOnly(listing.readOnlyRepo);
     setLoadError(null);
     return listing;
   }, []);
@@ -2352,7 +2396,7 @@ export function App() {
     // the rule above leaves alone so a refresh cannot clobber an edit. Nothing
     // is edited on that site, so the pane re-opens on the scenario as the
     // server now has it, once the feature changed.
-    if (readOnly && selected && editing && editing.index !== null && !editing.isNew) {
+    if (locked && selected && editing && editing.index !== null && !editing.isNew) {
       loads.push(refreshReadOnlyPane(selected, editing.scenario));
     }
     // A pulled README shows up too — unless the home editor holds an edit
@@ -3387,11 +3431,12 @@ export function App() {
     openAppPage("project-settings");
   };
   useEffect(() => {
-    if (!dataDir || loading || needsRepo || outdated || demo || readOnly || hosted || modalOpen) return;
+    // One question at a time: a read-only folder's dialog is read first.
+    if (!dataDir || loading || needsRepo || outdated || demo || readOnly || hosted || modalOpen || readOnlyDialogOpen) return;
     if (cloneOffered.current.has(dataDir)) return;
     cloneOffered.current.add(dataDir);
     void offerClonesRef.current();
-  }, [dataDir, loading, needsRepo, outdated, demo, readOnly, hosted, modalOpen]);
+  }, [dataDir, loading, needsRepo, outdated, demo, readOnly, hosted, modalOpen, readOnlyDialogOpen]);
   /** Settings, scrolled to one section (`settings-<id>`) once the page has drawn it. */
   const openSettingsAt = (sectionId: string) => {
     openAppPage("settings");
@@ -3412,6 +3457,11 @@ export function App() {
   // Sync button keeps saying so for as long as it is true.
   const syncProblem = useSyncProblem();
   const syncProblemToast = useRef<number | null>(null);
+  /** Whether the open folder's write access is known — or not asked for here at all. */
+  const repoAccessSettled =
+    !dataDir || repoAccessFor === dataDir || readOnly || demo || needsRepo || codeRepoDir !== null;
+  /** Whether Sync shows the failing push: not in a read-only folder, nor before its answer is in. */
+  const pushFailing = syncProblem !== null && repoReadOnly === null && repoAccessSettled;
   const announceSyncProblem = (reason: string) => {
     if (syncProblemToast.current !== null) toast.dismiss(syncProblemToast.current);
     // A credential problem is fixed in Settings; the hosted app's token
@@ -3426,6 +3476,16 @@ export function App() {
   const announceSyncProblemRef = useRef(announceSyncProblem);
   announceSyncProblemRef.current = announceSyncProblem;
   useEffect(() => {
+    // A read-only folder's dialog and chip already say why nothing is
+    // pushed from it, in fewer and kinder words than a push's error.
+    if (syncProblem !== null && repoReadOnly !== null) {
+      if (syncProblemToast.current !== null) toast.dismiss(syncProblemToast.current);
+      syncProblemToast.current = null;
+      return;
+    }
+    // A folder that just opened may yet turn out read only: its push
+    // problem waits for the remote's answer rather than flashing up first.
+    if (syncProblem !== null && !repoAccessSettled) return;
     if (syncProblem !== null) {
       announceSyncProblemRef.current(syncProblem);
       return;
@@ -3434,7 +3494,70 @@ export function App() {
     toast.dismiss(syncProblemToast.current);
     syncProblemToast.current = null;
     toast.success("Saved changes pushed");
-  }, [syncProblem]);
+  }, [syncProblem, repoReadOnly, repoAccessSettled]);
+
+  // A spec folder that cannot be pushed to opens read only (git-operations.md
+  // "a spec folder that cannot be pushed to opens read only"): when a folder
+  // opens the remote is asked, and the page waits for its answer, so the
+  // dialog comes up with the folder rather than a tick later. The listing
+  // keeps the answer current after that.
+  useEffect(() => {
+    setRepoReadOnly(null);
+    setRepoAccessFor(null);
+    if (!dataDir || readOnly || demo || needsRepo || codeRepoDir !== null) return;
+    let live = true;
+    void fetch("/api/repo-access")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { readOnly?: unknown } | null) => {
+        if (live && data) setRepoReadOnly(parseRepoReadOnly(data.readOnly));
+      })
+      .catch(() => {})
+      // Answered or not, the folder's other news need wait no longer.
+      .finally(() => {
+        if (live) setRepoAccessFor(dataDir);
+      });
+    return () => {
+      live = false;
+    };
+  }, [dataDir, readOnly, demo, needsRepo, codeRepoDir]);
+  // The folders whose read-only dialog was shown on this page: once each,
+  // and again only after the folder could be edited in between.
+  const readOnlyAnnounced = useRef(new Set<string>(readOnlyAnnouncedStored()));
+  useEffect(() => {
+    if (!dataDir) return;
+    if (repoReadOnly === null) {
+      // Gone read-write: said once, and only of an answer about this folder.
+      if (repoAccessFor === dataDir && readOnlyAnnounced.current.delete(dataDir)) {
+        storeReadOnlyAnnounced(readOnlyAnnounced.current);
+        setReadOnlyDialogOpen(false);
+        toast.success(`${repoDisplayName(dataRepo ?? dataDir)} can be edited again`);
+      }
+      return;
+    }
+    // Shown once whatever dialog is up has been answered.
+    if (readOnlyAnnounced.current.has(dataDir) || modalOpen) return;
+    readOnlyAnnounced.current.add(dataDir);
+    storeReadOnlyAnnounced(readOnlyAnnounced.current);
+    setReadOnlyDialogOpen(true);
+  }, [repoReadOnly, dataDir, modalOpen, repoAccessFor]);
+  const checkRepoAccessAgain = async (): Promise<RepoReadOnly | null> => {
+    try {
+      const res = await fetch("/api/repo-access", { method: "POST" });
+      const data = (await res.json()) as { readOnly?: unknown };
+      const next = res.ok ? parseRepoReadOnly(data.readOnly) : repoReadOnly;
+      // Unlocked with commits an earlier push left behind: a sync pushes
+      // them now, before the page lets go of the lock — rather than the
+      // old push error showing until the next tick.
+      if (next === null && currentSyncProblem() !== null) {
+        await fetch("/api/reload", { method: "POST" }).catch(() => null);
+        await refreshViewRef.current().catch(() => {});
+      }
+      setRepoReadOnly(next);
+      return next;
+    } catch {
+      return repoReadOnly;
+    }
+  };
   const openPlugins = () => openAppPage("plugins");
   /** A marketplace plugin the Plugins page opens scrolled to, when the agent pane sent the user there. */
   const [pluginsWanted, setPluginsWanted] = useState<string | null>(null);
@@ -4726,7 +4849,7 @@ export function App() {
       // Asked for by hand, a sync that still cannot push says so again —
       // the first toast may be long dismissed.
       const stillFailing = currentSyncProblem();
-      if (stillFailing !== null) announceSyncProblemRef.current(stillFailing);
+      if (stillFailing !== null && currentRepoReadOnly() === null) announceSyncProblemRef.current(stillFailing);
     } catch {
       toast.error("Sync failed — is the server running?");
     } finally {
@@ -7486,7 +7609,7 @@ export function App() {
         data-file={f.fileName}
         /* The checkbox and the twisty carry the depth indent before it. */
         style={{ paddingLeft: "0.2rem" }}
-        draggable={!readOnly}
+        draggable={!locked}
         onDragStart={(e) => {
           e.dataTransfer.setData("text/plain", f.fileName);
           e.dataTransfer.effectAllowed = "move";
@@ -7680,13 +7803,13 @@ export function App() {
                     /* Shift+F10 on the row opens its ⋯ (onTreeKeyDown). */
                     data-scenario={menuKey}
                     aria-current={here ? "page" : undefined}
-                    aria-selected={readOnly ? undefined : picked}
+                    aria-selected={locked ? undefined : picked}
                     /* Line up just past the feature's twisty: the codegen
                        checkbox, when on, already carries the depth indent for
                        the whole row, so it is not added twice. */
                     style={{ paddingLeft: `${(codeGen ? 1.5 : 0.6) + depth * 0.9}rem` }}
                     title={`${s.name} v${s.version}`}
-                    draggable={!readOnly}
+                    draggable={!locked}
                     onDragStart={(e) => {
                       e.stopPropagation();
                       e.dataTransfer.setData("text/plain", scenarioPath(f.fileName, s));
@@ -7697,14 +7820,14 @@ export function App() {
                     /* Shift-click would select the page's text from here to
                        the last click before the click picks the range. */
                     onMouseDown={(e) => {
-                      if (!readOnly && e.shiftKey) e.preventDefault();
+                      if (!locked && e.shiftKey) e.preventDefault();
                     }}
                     onClick={(e) => {
                       // ⌘/Ctrl-click toggles the row, Shift-click picks the
                       // range ("delete several scenarios at once") — in place
                       // of the browser's new tab or window for this link;
                       // right-click → Open in new tab still works.
-                      if (!readOnly && !e.altKey && (e.metaKey || e.ctrlKey || e.shiftKey)) {
+                      if (!locked && !e.altKey && (e.metaKey || e.ctrlKey || e.shiftKey)) {
                         e.preventDefault();
                         if (e.shiftKey) pickTreeScenario(menuKey, "range", e.metaKey || e.ctrlKey);
                         else pickTreeScenario(menuKey, "toggle");
@@ -7934,7 +8057,7 @@ export function App() {
               aria-expanded={!collapsed.has(child.path)}
               data-folder={child.path}
               title={child.description ? child.path : undefined}
-              draggable={!readOnly}
+              draggable={!locked}
               onDragStart={(e) => {
                 e.stopPropagation();
                 e.dataTransfer.setData("text/plain", child.path);
@@ -8326,7 +8449,7 @@ export function App() {
   };
   // The shown plugin tab's own "new" (specs/app/plugins.feature.md): what `c`
   // creates while that tab is the sidebar — a task, a case, an issue.
-  const tabCreate = readOnly || shownTab === "specs"
+  const tabCreate = locked || shownTab === "specs"
     ? undefined
     : pluginTabs.find((tab) => tab.id === shownTab)?.create;
   const allShortcuts: Shortcut[] = [
@@ -8716,7 +8839,9 @@ export function App() {
   // The read-only site keeps the ways around and nothing that writes.
   const shortcuts = readOnly
     ? allShortcuts.filter((x) => READ_ONLY_SHORTCUTS.has(x.id) || x.id.startsWith("go-"))
-    : allShortcuts;
+    : locked
+      ? allShortcuts.filter((x) => !WRITES_SPECS.test(x.id))
+      : allShortcuts;
   useShortcuts(shortcuts);
 
   // The command palette's contents (src/frontend/CommandPalette.tsx): the
@@ -8902,7 +9027,7 @@ export function App() {
     // The read-only site: the keyboard's own commands left above, plus the
     // theme — no create, move, publish, sync or settings, and none of a
     // plugin tab's own commands.
-    .filter((x) => !readOnly || READ_ONLY_PALETTE.test(x.id));
+    .filter((x) => (readOnly ? READ_ONLY_PALETTE.test(x.id) : !locked || !WRITES_SPECS.test(x.id)));
 
   const scenarioStatus = (fileName: string, s: { name: string; version: number }) =>
     features
@@ -9082,7 +9207,7 @@ export function App() {
     copyLink: (path) => void copyLink(path),
     copied,
     goHome,
-    readOnly,
+    readOnly: locked,
   };
   const folderCrumbs = (fileName: string): Crumb[] => {
     const parts = fileName.split("/").slice(0, -1);
@@ -9126,7 +9251,7 @@ export function App() {
   const me = user?.name || user?.login || user?.username || null;
   const filtering = isFiltering(filter);
 
-  const treePicksCount = readOnly ? 0 : pickedTreeScenarios().length;
+  const treePicksCount = locked ? 0 : pickedTreeScenarios().length;
 
   // Tree keyboard: ↑/↓ walk the visible rows, → opens a folder (or steps
   // in), ← closes it or climbs to it from a feature, Home/End jump,
@@ -9155,12 +9280,12 @@ export function App() {
     switch (e.key) {
       case "ArrowDown":
         e.preventDefault();
-        if (e.shiftKey && !readOnly && extend(i + 1)) return;
+        if (e.shiftKey && !locked && extend(i + 1)) return;
         move(i + 1);
         return;
       case "ArrowUp":
         e.preventDefault();
-        if (e.shiftKey && !readOnly && extend(i - 1)) return;
+        if (e.shiftKey && !locked && extend(i - 1)) return;
         move(i - 1);
         return;
       case "Delete":
@@ -9168,7 +9293,7 @@ export function App() {
         // Delete on a scenario row: the picks when there are any, else the
         // row itself — each with its confirmation.
         const key = t.dataset.scenario;
-        if (key === undefined || readOnly) return;
+        if (key === undefined || locked) return;
         e.preventDefault();
         if (treePicks.size > 0) {
           void deletePickedScenarios();
@@ -10811,7 +10936,7 @@ export function App() {
 
   return (
     <main
-      className={`layout${resizingSidebar || resizingAgent ? " resizing" : ""}${sidebarCollapsed && !compact ? " collapsed" : ""}${compact ? " compact" : ""}${paneShown && !compact ? " agent-open" : ""}${editorOff ? " editor-hidden" : ""}${readOnly ? " read-only" : ""}`}
+      className={`layout${resizingSidebar || resizingAgent ? " resizing" : ""}${sidebarCollapsed && !compact ? " collapsed" : ""}${compact ? " compact" : ""}${paneShown && !compact ? " agent-open" : ""}${editorOff ? " editor-hidden" : ""}${locked ? " read-only" : ""}`}
       style={{ "--sidebar-w": `${sidebarWidth}px`, "--agent-w": `${pane.width}px` } as CSSProperties}
     >
       {compact && (
@@ -11155,23 +11280,29 @@ export function App() {
                 label={
                   syncing
                     ? "Syncing…"
-                    : syncProblem !== null
+                    : repoReadOnly !== null
+                      ? "Sync — pull the data folder; it is read only, so nothing is pushed"
+                      : pushFailing && syncProblem !== null
                       ? `${syncProblemMessage(syncProblem)}. Click to try again.`
                       : "Sync — pull the data folder and push saved changes"
                 }
               >
                 <button
                   type="button"
-                  className={syncProblem !== null ? "ibtn repo-sync failing" : "ibtn repo-sync"}
+                  className={pushFailing ? "ibtn repo-sync failing" : "ibtn repo-sync"}
                   aria-label={
-                    syncing ? "Syncing…" : syncProblem !== null ? "Sync — saved changes are not being pushed" : "Sync"
+                    syncing
+                      ? "Syncing…"
+                      : pushFailing
+                        ? "Sync — saved changes are not being pushed"
+                        : "Sync"
                   }
                   disabled={syncing}
                   onClick={() => void syncNow()}
                 >
                   {/* While pushes fail the icon itself says so, struck
                       through — the tooltip gives the reason. */}
-                  {syncProblem !== null && !syncing ? (
+                  {pushFailing && !syncing ? (
                     <RefreshCwOff size={14} className="sync-icon" aria-hidden="true" />
                   ) : (
                     <RefreshCw
@@ -11234,6 +11365,19 @@ export function App() {
         {/* Demo mode: say what the sandbox does — edits are ephemeral. On a
             small screen the top bar carries the note instead. */}
         {demo && !compact && <div className="demo-banner">Demo — edits reset on refresh</div>}
+        {/* A read-only folder (src/frontend/repoReadOnly.ts) says so under
+            the header for as long as it is — a line of its own, so the
+            folder's name keeps its room — and the line opens the dialog
+            with the reason and the way back. */}
+        {repoReadOnly !== null && !readOnly && codeRepoDir === null && (
+          <Tooltip label={readOnlySummary(repoReadOnly)}>
+            <button type="button" className="repo-read-only" onClick={() => setReadOnlyDialogOpen(true)}>
+              <Lock size={12} aria-hidden="true" />
+              <span>Read only</span>
+              <span className="repo-read-only-why">— why?</span>
+            </button>
+          </Tooltip>
+        )}
         {/* Search (specs/search.feature.md): top-left, under the header so the
             macOS drag region above it stays draggable. The field opens the
             command palette, where the results are. */}
@@ -11423,7 +11567,7 @@ export function App() {
               count of checked specs rides on its button. Timing your own
               work is the Pomodoro at the foot of the sidebar
               (specs/app/pomodoro.feature.md), not a kind of session. */
-          actions={!readOnly && (<>
+          actions={!locked && (<>
             <Tooltip label={selectedFolder ? `New folder in "${selectedFolder}"` : "New folder"}>
               <button type="button" className="ibtn" aria-label="New folder" onClick={createFolder}>
                 <NewFolderIcon size={15} />
@@ -11540,7 +11684,7 @@ export function App() {
             ref={treeRef}
             role="tree"
             aria-label="Features"
-            aria-multiselectable={readOnly ? undefined : true}
+            aria-multiselectable={locked ? undefined : true}
             onKeyDown={onTreeKeyDown}
             onClick={(e) => {
               // A click on the bare background deselects the folder, so the
@@ -11786,7 +11930,7 @@ export function App() {
         ) : appPageShown === "updates" ? (
           /* Updates: the newest release, and the desktop app installing it. */
           <UpdatesPage onClose={closeAppPage} />
-        ) : readOnly && editing && selected && feature ? (
+        ) : locked && editing && selected && feature ? (
           /* The read-only site: a scenario's page is a page, not the editor —
              its trail, the way to its neighbours, and the scenario rendered
              with its links. */
@@ -12533,7 +12677,7 @@ export function App() {
               <Breadcrumbs
                 items={[repoCrumb, ...folderCrumbs(selected), ...pluginCrumbs(selected)]}
                 tail={
-                  readOnly ? (
+                  locked ? (
                     <span className="crumb current">{feature.name || titleFromFileName(selected)}</span>
                   ) : renameDraft === null ? (
                     <Tooltip label="Rename feature">
@@ -12606,7 +12750,7 @@ export function App() {
                 />
                 {/* The read-only site has no ⋯ menu, so the feature's
                     "Copy link" is a button of its own. */}
-                {readOnly && (
+                {locked && (
                   <CopyLinkButton
                     keys="mod+shift+c"
                     copied={copied === featurePath(selected)}
@@ -12617,7 +12761,7 @@ export function App() {
                     Button"): from the header, pinned above the list, so it is
                     always in view — at the end of the feature; a card's ⋯
                     adds one below that card. */}
-                {!readOnly && (
+                {!locked && (
                 <>
                 <Tooltip label="New scenario" keys="c">
                   <button
@@ -12784,7 +12928,7 @@ export function App() {
                 off unless Settings turns assignments on); the ticket
                 (specs/external-links/project-management-jira-linear-etc
                 .feature.md "Add link to feature"), edited in a popover. */}
-            {readOnly ? (
+            {locked ? (
               /* The read-only site: the same properties, as plain chips and
                  links — nothing to assign, link or publish. */
               <div className="props">
@@ -13304,10 +13448,10 @@ export function App() {
                 /* Clicking the rendered description opens the editor too —
                    links inside it still open as links. */
                 <div
-                  className={`feature-desc md-preview${readOnly ? "" : " editable"}`}
-                  title={readOnly ? undefined : "Click to edit the description"}
+                  className={`feature-desc md-preview${locked ? "" : " editable"}`}
+                  title={locked ? undefined : "Click to edit the description"}
                   onClick={(e) => {
-                    if (readOnly || (e.target as HTMLElement).closest("a")) return;
+                    if (locked || (e.target as HTMLElement).closest("a")) return;
                     openDescriptionEditor(selected, feature.description);
                   }}
                 >
@@ -13351,7 +13495,7 @@ export function App() {
                   className={`scenario-card ${s.status}${i === selectedScenario ? " selected" : ""}${dropEdge}${
                     isCard(scenarioDrag) ? " dragging" : ""
                   }`}
-                  draggable={!readOnly}
+                  draggable={!locked}
                   onDragStart={(e) => {
                     e.dataTransfer.setData("text/plain", scenarioPath(selected, s));
                     e.dataTransfer.effectAllowed = "move";
@@ -13393,7 +13537,7 @@ export function App() {
                   // A right-click opens the card's ⋯ menu, on the card it
                   // also highlights.
                   onContextMenu={(e) => {
-                    if (readOnly || isCardControl(e.target)) return;
+                    if (locked || isCardControl(e.target)) return;
                     e.preventDefault();
                     setSelectedScenario(i);
                     setCardMenu(i);
@@ -13473,12 +13617,12 @@ export function App() {
                         <PolarityPill
                           compact
                           negative={!!s.negative}
-                          disabled={editing !== null || readOnly}
+                          disabled={editing !== null || locked}
                           onToggle={() => void toggleScenarioPolarityAt(i)}
                         />
                       )}
                     </span>
-                    {readOnly ? (
+                    {locked ? (
                       /* The read-only site's card offers only its link
                          (specs/app/public-specs-site.feature.md "copies a
                          deep link"), on hover, focus or selection like the
@@ -13658,7 +13802,7 @@ export function App() {
                 )}
               {feature.scenarios.length === 0 && (
                 <p className="empty">
-                  {readOnly ? "No scenarios yet." : "No scenarios yet. Press c, or the + above, to add one."}
+                  {locked ? "No scenarios yet." : "No scenarios yet. Press c, or the + above, to add one."}
                 </p>
               )}
             </div>
@@ -13682,7 +13826,7 @@ export function App() {
                 items={[repoCrumb]}
                 tail={<span className="crumb current plain">README.md</span>}
               />
-              {!readOnly && (
+              {!locked && (
               <div className="editor-actions page-actions">
                 <SaveIndicator
                   saving={saving}
@@ -13698,8 +13842,8 @@ export function App() {
               )}
             </header>
             {/* The read-only site shows the README rendered, as a page. */}
-            {readme !== null && readOnly && <div className="md-preview read-only-page">{renderMarkdown(readme)}</div>}
-            {readme !== null && !readOnly && (
+            {readme !== null && locked && <div className="md-preview read-only-page">{renderMarkdown(readme)}</div>}
+            {readme !== null && !locked && (
               <MarkdownEditor
                 value={readme}
                 onChange={setReadme}
@@ -14126,6 +14270,19 @@ export function App() {
           loadError={settingsFileError}
           trapRef={settingsFileTrapRef}
           onClose={() => setSettingsFileOpen(false)}
+        />
+      )}
+      {/* A spec folder that cannot be pushed to opens read only
+          (git-operations.md, src/frontend/repoReadOnly.ts): why, and the
+          way back — shown when the folder is found so, and from the
+          sidebar's "Read only" chip. */}
+      {readOnlyDialogOpen && repoReadOnly !== null && dataDir && (
+        <ReadOnlyRepoDialog
+          why={repoReadOnly}
+          folder={repoDisplayName(dataRepo ?? dataDir)}
+          onClose={() => setReadOnlyDialogOpen(false)}
+          onCheckAgain={checkRepoAccessAgain}
+          onOpenSettings={hosted ? undefined : () => openSettingsAt("settings-git")}
         />
       )}
       {/* Manage specification folders (specs/app/spec-folders.feature.md):

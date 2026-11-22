@@ -24,6 +24,23 @@ export interface SyncResult {
   failure?: string;
 }
 
+/**
+ * Whether this computer can push a folder's commits to its remote
+ * (git-operations.md "a spec folder that cannot be pushed to opens read
+ * only"). Only an answer the remote gave, or the lack of a remote, makes
+ * the folder read only: a remote that did not answer — offline, stopped at
+ * its time limit — says nothing about it, and the folder stays editable.
+ */
+export type WriteAccess =
+  /** The remote takes pushes — or the folder is not a git repository of its own, and pushes nothing. */
+  | { kind: "writable" }
+  /** A git repository with no remote: what is saved here never reaches anyone. */
+  | { kind: "no-remote" }
+  /** The remote turned the push down: git's own words, or the sign-in hint. */
+  | { kind: "denied"; remote: string; reason: string }
+  /** No answer: offline, stopped at its limit, or a failure that is not about access. */
+  | { kind: "unknown"; reason: string };
+
 /** A path rename carried alongside a move (e.g. a feature's Automerge doc dir). */
 export interface PathMove {
   from: string;
@@ -71,6 +88,11 @@ export interface GitBackend {
   ): Promise<SyncResult>;
   commitAndPush(repoDir: string, paths: string | string[], message: string): Promise<SyncResult>;
   hasUpstream(repoDir: string): Promise<boolean>;
+  /**
+   * Ask the remote whether it takes a push from here, sending nothing: a
+   * dry-run push where the engine has one, else the push's first request.
+   */
+  writeAccess(repoDir: string): Promise<WriteAccess>;
   /**
    * Commit everything in the working tree and push it, setting the branch
    * to track the remote's — the first push into a repository created empty
