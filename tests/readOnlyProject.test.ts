@@ -1,7 +1,7 @@
 // The visitor's project on a read-only site showing several
 // (src/frontend/readOnlyProject.ts): a `?project=` link picks it into the
-// cookie every request carries, and a tab brought back to the front puts
-// its own project back.
+// cookie every request carries, the address bar names it through every
+// navigation, and a tab brought back to the front puts its own project back.
 import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test";
 import { Window } from "happy-dom";
 
@@ -28,27 +28,73 @@ afterAll(async () => {
 
 import {
   adoptProjectFromUrl,
+  chooseProject,
   cookieProject,
   parseReadOnlyProjects,
   setTabProject,
+  showProjectInUrl,
 } from "../src/frontend/readOnlyProject";
+
+const here = () => location.pathname + location.search + location.hash;
 
 beforeEach(() => {
   document.cookie = "specdriven-project=; Path=/; Max-Age=0";
+  showProjectInUrl(null);
 });
 
-test("a ?project= link picks the project and leaves the address bar", () => {
+test("a ?project= link picks the project, and the address bar keeps naming it", () => {
   happy.happyDOM.setURL("http://localhost/features/shop/checkout?project=claims#S2");
   adoptProjectFromUrl();
   expect(cookieProject()).toBe("claims");
-  expect(location.pathname + location.search + location.hash).toBe("/features/shop/checkout#S2");
+  expect(here()).toBe("/features/shop/checkout?project=claims#S2");
 });
 
-test("a malformed project id is dropped from the url and picks nothing", () => {
+test("the address bar names the tab's project through the page's own navigation", () => {
+  happy.happyDOM.setURL("http://localhost/features/shop#S2");
+  showProjectInUrl("claims");
+  expect(here()).toBe("/features/shop?project=claims#S2");
+  history.pushState(null, "", "/features/shop/checkout");
+  expect(here()).toBe("/features/shop/checkout?project=claims");
+  history.replaceState(null, "", "/tasks?view=board#top");
+  expect(here()).toBe("/tasks?view=board&project=claims#top");
+  // A url that names another project is the tab's again.
+  history.pushState(null, "", "/?project=quotes");
+  expect(here()).toBe("/?project=claims");
+  // Another origin's url is not the page's to rename.
+  expect(() => history.pushState(null, "", "https://example.com/x")).toThrow();
+});
+
+test("a site showing one project names none in the address bar", () => {
+  happy.happyDOM.setURL("http://localhost/features/shop?project=claims");
+  showProjectInUrl(null);
+  expect(here()).toBe("/features/shop");
+  history.pushState(null, "", "/features/shop/checkout");
+  expect(here()).toBe("/features/shop/checkout");
+});
+
+test("a malformed project id picks nothing, and the project shown replaces it in the url", () => {
   happy.happyDOM.setURL("http://localhost/?project=..%2Fetc");
   adoptProjectFromUrl();
   expect(cookieProject()).toBeNull();
-  expect(location.search).toBe("");
+  showProjectInUrl("quotes");
+  expect(location.search).toBe("?project=quotes");
+});
+
+test("picking another project opens its home with the address bar naming it", () => {
+  const real = Object.getOwnPropertyDescriptor(globalThis, "location")!;
+  const opened: string[] = [];
+  Object.defineProperty(globalThis, "location", {
+    value: { protocol: "http:", assign: (url: string) => opened.push(url) },
+    configurable: true,
+    writable: true,
+  });
+  try {
+    chooseProject("claims");
+  } finally {
+    Object.defineProperty(globalThis, "location", real);
+  }
+  expect(opened).toEqual(["/?project=claims"]);
+  expect(cookieProject()).toBe("claims");
 });
 
 test("a tab coming back to the front puts its own project back in the cookie", () => {

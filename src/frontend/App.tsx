@@ -113,7 +113,13 @@ import { createPromiseQueue } from "./promiseQueue";
 export { createPromiseQueue };
 
 import { setShareProject, setShareRepo, shareUrl } from "./shareLink";
-import { chooseProject, parseReadOnlyProjects, setTabProject, type ReadOnlyProjectInfo } from "./readOnlyProject";
+import {
+  chooseProject,
+  parseReadOnlyProjects,
+  setTabProject,
+  showProjectInUrl,
+  type ReadOnlyProjectInfo,
+} from "./readOnlyProject";
 import { SaveIndicator, Toaster, toast } from "./Toasts";
 import { missedFeatureNote, pullProblemOf, syncForLink } from "./linkSync";
 import { currentSyncProblem, pushHint, setSyncProblem, syncProblemMessage, useSyncProblem } from "./syncProblem";
@@ -2322,8 +2328,10 @@ export function App() {
           setReadOnlyProjects(projects);
           setReadOnlyProject(project);
           setTabProject(project);
-          // A link names the project only where there is a choice of them.
+          // A link, and the address bar, name the project only where there
+          // is a choice of them.
           setShareProject(projects.length > 1 ? project : null);
+          showProjectInUrl(projects.length > 1 ? project : null);
         }
         setHosted(Boolean(state.hosted));
         setHostedGithubApp(Boolean(state.hostedGithubApp));

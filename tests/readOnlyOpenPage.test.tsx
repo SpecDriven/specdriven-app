@@ -215,6 +215,24 @@ describe("a public specs site showing several projects", () => {
     expect(writes).toEqual([]);
   }, 15_000);
 
+  test("the address bar names the visitor's project, on every page the app opens", async () => {
+    stateExtra = {
+      readOnlyProject: "quotes",
+      readOnlyProjects: [
+        { id: "quotes", repo: "https://github.com/acme/quotes" },
+        { id: "claims", repo: "https://github.com/acme/claims" },
+      ],
+    };
+    await openLink("/features/quotes/scenarios/renewal/v1");
+    await until(() => Boolean(host?.textContent?.includes("Given a quote for {amount}")), "the scenario page");
+    expect(location.pathname + location.search).toBe("/features/quotes/scenarios/renewal/v1?project=quotes");
+    // The folder name goes home.
+    await act(async () => (host!.querySelector(".repo-name") as HTMLElement).click());
+    await until(() => location.pathname === "/", "the home page");
+    expect(location.search).toBe("?project=quotes");
+    expect(writes).toEqual([]);
+  }, 15_000);
+
   test("with one project there is no ▾ and links name none", async () => {
     stateExtra = { readOnlyProject: "quotes", readOnlyProjects: [{ id: "quotes", repo: "https://github.com/acme/quotes" }] };
     await openLink("/");
@@ -222,5 +240,6 @@ describe("a public specs site showing several projects", () => {
     expect(host!.querySelector('button[aria-label="Projects"]')).toBeNull();
     const { shareUrl } = await import("../src/frontend/shareLink");
     expect(shareUrl("/features/quotes")).toBe("http://localhost/features/quotes");
+    expect(location.search).toBe("");
   }, 15_000);
 });

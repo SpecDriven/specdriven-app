@@ -3,7 +3,9 @@
 // and every request of the page is answered for the one the
 // `specdriven-project` cookie names — the first project's when it names
 // none. A link with `?project=<id>` picks it, so "Copy link" hands out
-// urls that open the same project (src/frontend/shareLink.ts).
+// urls that open the same project (src/frontend/shareLink.ts), and the
+// address bar names it too, through every navigation of the page, so the
+// url a visitor copies from it opens the project they were looking at.
 //
 // The cookie is the browser's, not the tab's: a tab that comes back to the
 // front puts its own project back, so two tabs on two projects do not read
@@ -41,16 +43,49 @@ export function cookieProject(): string | null {
 
 /**
  * At page load, before the first request: a `?project=` link picks its
- * project, and the parameter leaves the address bar — the page's own urls
- * name no project, the cookie does.
+ * project. The parameter stays in the address bar until /api/state names
+ * the project shown (showProjectInUrl), which drops it where the site shows
+ * one project, or names no project it knows.
  */
 export function adoptProjectFromUrl(): void {
-  const url = new URL(location.href);
-  const asked = url.searchParams.get(PROJECT_PARAM);
-  if (asked === null) return;
-  if (PROJECT_ID_RE.test(asked)) writeCookie(asked);
-  url.searchParams.delete(PROJECT_PARAM);
-  history.replaceState(history.state, "", url.pathname + url.search + url.hash);
+  const asked = new URL(location.href).searchParams.get(PROJECT_PARAM);
+  if (asked !== null && PROJECT_ID_RE.test(asked)) writeCookie(asked);
+}
+
+/** The project the address bar names; null where it names none. */
+let urlProject: string | null = null;
+/** The history whose pushState/replaceState keep it (one per page; the tests swap windows). */
+let keptIn: History | null = null;
+
+/** A same-origin url the page navigates to, naming the tab's project or none. */
+function naming(url: string | URL): string | URL {
+  const next = new URL(String(url), location.href);
+  if (next.origin !== location.origin) return url;
+  if (urlProject) next.searchParams.set(PROJECT_PARAM, urlProject);
+  else if (next.searchParams.has(PROJECT_PARAM)) next.searchParams.delete(PROJECT_PARAM);
+  else return url;
+  return next.pathname + next.search + next.hash;
+}
+
+/**
+ * Name the project this tab shows in its address bar — null where the site
+ * shows one project, or is no site. The page's own urls (src/frontend/
+ * App.tsx, plugin views) are bare paths: every pushState and replaceState
+ * of this history from here on adds the parameter to the url it is given.
+ */
+export function showProjectInUrl(id: string | null): void {
+  urlProject = id && PROJECT_ID_RE.test(id) ? id : null;
+  if (urlProject && keptIn !== history) {
+    const h = history;
+    const push = h.pushState.bind(h);
+    const replace = h.replaceState.bind(h);
+    h.pushState = (data, unused, url) => push(data, unused, url == null ? url : naming(url));
+    h.replaceState = (data, unused, url) => replace(data, unused, url == null ? url : naming(url));
+    keptIn = h;
+  }
+  const here = location.pathname + location.search + location.hash;
+  const named = naming(here);
+  if (named !== here) history.replaceState(history.state, "", named);
 }
 
 let tabProject: string | null = null;
@@ -72,12 +107,12 @@ export function setTabProject(id: string | null): void {
   });
 }
 
-/** Show another project: its home, read afresh. */
+/** Show another project: its home, read afresh, the address bar naming it. */
 export function chooseProject(id: string): void {
   if (!PROJECT_ID_RE.test(id)) return;
   tabProject = id;
   writeCookie(id);
-  location.assign("/");
+  location.assign(`/?${PROJECT_PARAM}=${encodeURIComponent(id)}`);
 }
 
 /** The projects an /api/state answer lists; empty off the read-only site. */
