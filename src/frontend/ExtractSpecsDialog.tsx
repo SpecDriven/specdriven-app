@@ -224,6 +224,14 @@ export function ExtractSpecsDialog({
   const [busy, setBusy] = useState<"analyse" | "create" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [existing, setExisting] = useState<string | null>(null);
+  /**
+   * A fresh repository named as the existing folder, which the server asked
+   * about (specs/app/extract-specs-from-code.feature.md "Target specs repo is
+   * not initialized"): the folder, while the question is up.
+   */
+  const [setUpOffer, setSetUpOffer] = useState<string | null>(null);
+  /** The folder the user agreed to have set up; sent as `initialize` while it is still the one named. */
+  const [setUpAgreed, setSetUpAgreed] = useState<string | null>(null);
   /** The regrouping an agent is at work on, by its job's id. */
   const [refining, setRefining] = useState<string | null>(null);
   /** What the last regrouping came to, said under the tree. */
@@ -333,7 +341,7 @@ export function ExtractSpecsDialog({
   const place = analysis ? `${besides(analysis.target)}${name.trim()}` : "";
   const sameName = analysis !== null && name.trim() === analysis.name;
   const taken = sameName ? target?.state : undefined;
-  const blocked = taken === "spec" || taken === "taken";
+  const blocked = taken === "spec" || taken === "taken" || taken === "unset";
   const toExisting = into === "existing";
   const github = analysis?.github;
   const canPublish = Boolean(github && github.owners.length > 0 && !github.problem);
@@ -377,19 +385,27 @@ export function ExtractSpecsDialog({
     }
   };
 
-  const create = async () => {
+  const create = async (agreed: string | null = setUpAgreed) => {
     if (busy || !analysis || problem || badModel) return;
     if (toExisting ? !existingFolder.trim() : nameProblem !== null) return;
     setBusy("create");
     setError(null);
     setExisting(null);
+    setSetUpOffer(null);
+    const initialize = agreed !== null && agreed === existingFolder.trim();
     try {
       const res = await fetch("/api/extract/repo", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
           toExisting
-            ? { codeDir: analysis.codeDir, existing: existingFolder.trim(), folders: picked, link }
+            ? {
+                codeDir: analysis.codeDir,
+                existing: existingFolder.trim(),
+                folders: picked,
+                link,
+                ...(initialize ? { initialize: true } : {}),
+              }
             : {
                 codeDir: analysis.codeDir,
                 name: name.trim(),
@@ -399,10 +415,20 @@ export function ExtractSpecsDialog({
               },
         ),
       });
-      const data = (await res.json()) as CreatedSpecs & { error?: string; existing?: string; dir?: string };
+      const data = (await res.json()) as CreatedSpecs & {
+        error?: string;
+        existing?: string;
+        dir?: string;
+        initialize?: boolean;
+      };
+      if (!res.ok && data.initialize) {
+        // Not refused: asked. The answer is the question under the field.
+        setSetUpOffer(existingFolder.trim());
+        return;
+      }
       if (!res.ok) {
         setError(data.error ?? `Making the folder failed (HTTP ${res.status})`);
-        if (data.existing === "spec" && data.dir) setExisting(data.dir);
+        if ((data.existing === "spec" || data.existing === "unset") && data.dir) setExisting(data.dir);
         return;
       }
       onCreated({
@@ -602,7 +628,10 @@ export function ExtractSpecsDialog({
                       placeholder="/path/to/specs-folder or https://github.com/owner/repo"
                       value={existingFolder}
                       autoFocus
-                      onChange={(e) => setExistingFolder(e.target.value)}
+                      onChange={(e) => {
+                        setExistingFolder(e.target.value);
+                        setSetUpOffer(null);
+                      }}
                     />
                     {browseSpecs && (
                       <button
@@ -616,11 +645,39 @@ export function ExtractSpecsDialog({
                     )}
                   </div>
                 </label>
+                {setUpOffer !== null && setUpOffer === existingFolder.trim() ? (
+                  <div className="extract-setup" role="group" aria-label="Set up the folder">
+                    <p>
+                      <code>{setUpOffer}</code> is not set up as a specification folder yet. Set it up? Its <code>.specdriven</code> and{" "}
+                      <code>specs</code> folders, project settings and a README are added, committed and pushed, then the folders are
+                      added to it.
+                    </p>
+                    <div className="dialog-actions">
+                      <button type="button" className="btn btn-ghost" disabled={busy !== null} onClick={() => setSetUpOffer(null)}>
+                        Not now
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        disabled={busy !== null}
+                        onClick={() => {
+                          setSetUpAgreed(setUpOffer);
+                          void create(setUpOffer);
+                        }}
+                      >
+                        Set it up and add
+                      </button>
+                    </div>
+                  </div>
+                ) : setUpAgreed !== null && setUpAgreed === existingFolder.trim() ? (
+                  <p className="hint">It is set up as a specification folder first, then the folders are added to it.</p>
+                ) : (
                 <p className="hint">
                   {analysis.existing && existingFolder.trim() === analysis.existing
                     ? `${analysis.proposal.project} already has this specification folder.`
                     : "A folder on this computer, or a repository on GitHub, which is cloned. The project is added to its code repositories."}
                 </p>
+                )}
               </>
             ) : (
               <>
@@ -642,6 +699,22 @@ export function ExtractSpecsDialog({
                       }}
                     >
                       Add to it instead
+                    </button>
+                  </p>
+                ) : taken === "unset" ? (
+                  <p className="error">
+                    {place} is a repository with nothing in it yet.{" "}
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={() => {
+                        setExistingFolder(target!.dir);
+                        setSetUpAgreed(target!.dir);
+                        setSetUpOffer(null);
+                        setInto("existing");
+                      }}
+                    >
+                      Set it up and add to it
                     </button>
                   </p>
                 ) : taken === "taken" ? (

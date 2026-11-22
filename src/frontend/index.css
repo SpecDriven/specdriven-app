@@ -11780,6 +11780,24 @@ aside.rail .rail-btn.pomodoro-chip.flash {
   margin: 0;
 }
 
+/* The question an empty repository named as the existing folder gets:
+   set it up as a specification folder, or not now. */
+.extract-dialog .extract-setup {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}
+
+.extract-dialog .extract-setup p {
+  margin: 0 0 0.5rem;
+}
+
+.extract-dialog .extract-setup .dialog-actions {
+  margin-top: 0;
+}
+
 .extract-dialog .extract-tree,
 .extract-dialog .extract-tree ul {
   list-style: none;
