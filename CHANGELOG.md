@@ -4,6 +4,10 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.299 — 2026-11-22
+
+- The public specs site's address bar names the project shown (?project=<id>) ([#504](https://github.com/SpecDriven/specdriven-app/pull/504))
+
 ## v0.1.298 — 2026-11-22
 
 - The public specs site shows several projects, picked from the folder name's ▾ (SPECDRIVEN_READONLY_PROJECTS) ([#503](https://github.com/SpecDriven/specdriven-app/pull/503))
