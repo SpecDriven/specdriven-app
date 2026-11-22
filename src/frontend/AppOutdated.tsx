@@ -86,7 +86,7 @@ export function AppOutdated({
   return (
     <main className="centered">
       <section className="repo-prompt app-outdated" role="alert" aria-label="Update required">
-        <h1>Update SpecDriven</h1>
+        <h1>Update to latest version</h1>
         <p>
           This folder was saved by a newer version of SpecDriven
           {minAppVersion ? (
@@ -128,10 +128,10 @@ export function AppOutdated({
           </p>
         )}
         <div className="input-row">
-          <button type="button" onClick={onCheckAgain} disabled={checking}>
+          <button type="button" className="btn btn-primary" onClick={onCheckAgain} disabled={checking}>
             {checking ? "Checking…" : "Check again"}
           </button>
-          <button type="button" className="browse" onClick={onOtherFolder}>
+          <button type="button" className="btn btn-secondary" onClick={onOtherFolder}>
             Open another folder
           </button>
         </div>

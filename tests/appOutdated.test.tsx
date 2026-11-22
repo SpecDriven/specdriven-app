@@ -27,7 +27,7 @@ const render = (platform: UpgradePlatform, minAppVersion: string | null = "0.1.1
 describe("AppOutdated — data saved by a newer app blocks this one", () => {
   test("it names the version the folder needs and the one running", () => {
     const markup = render("unix");
-    expect(markup).toContain('role="alert"');
+    expect(markup).toMatch(/role="alert".*<h1>Update to latest version<\/h1>/);
     expect(markup).toContain("<strong>0.1.160</strong> or later");
     expect(markup).toContain("You are running 0.1.150.");
     expect(markup).toContain("Check again");
