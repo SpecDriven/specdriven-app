@@ -229,11 +229,11 @@ export function PluginsPage(props: PluginsPageProps) {
       <PageSection
         id="plugins-on"
         title="In the sidebar"
-        hint="Each plugin adds a sidebar tab, in this order after Specs. Switching one off takes its tab, shortcuts and routes away and leaves its files in the data folder alone."
+        hint="Each plugin adds a sidebar tab, in this order. Switching one off takes its tab and shortcuts away and leaves its files in the data folder alone."
         className="settings-plugins"
       >
         {on.length === 0 ? (
-          <p className="settings-row page-empty">No plugin is on — the sidebar shows Specs alone.</p>
+          <p className="settings-row page-empty">No plugin is on — the sidebar shows no tab.</p>
         ) : (
           on.map((p, i) => row(p, i))
         )}

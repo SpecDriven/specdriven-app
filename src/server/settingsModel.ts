@@ -223,13 +223,19 @@ export interface SpecDrivenState {
   /**
    * The plugin profile (specs/app/plugins.feature.md "The profile lists
    * enabled plugins in tab order", "Each data folder keeps its own
-   * plugins"): per data folder, the enabled plugins in the order their tabs
-   * follow Specs; a folder without a list shows Specs alone. Device-local
-   * like the switches it replaces (src/plugins/profile.ts).
+   * plugins"): per data folder, the enabled plugins — Specs among them — in
+   * the order of their tabs; a folder without a list shows Specs alone.
+   * Device-local like the switches it replaces (src/plugins/profile.ts).
    */
   plugins?: {
-    /** Each data folder's list, keyed by the folder as `dataRepo` saves it. */
-    repos?: Record<string, { enabled?: string[] }>;
+    /**
+     * Each data folder's list, keyed by the folder as `dataRepo` saves it;
+     * `checked` once the list was made from the folder's data, which happens
+     * the first time the folder is opened.
+     */
+    repos?: Record<string, { enabled?: string[]; checked?: boolean }>;
+    /** 2 once the lists name Specs themselves; before, every list had it on. */
+    format?: number;
     /**
      * @deprecated The device-wide list from before the per-folder ones,
      * still used while no folder is open. An older file's is copied to the

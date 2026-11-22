@@ -7,6 +7,8 @@ import issues from "./issues/client";
 import { manifest as issuesManifest } from "./issues/manifest";
 import { pagesClient } from "./pages/client";
 import { notebookManifest, roadmapManifest, tasksManifest } from "./pages/manifest";
+import specs from "./specs/client";
+import { manifest as specsManifest } from "./specs/manifest";
 import selfFix from "./self-fix/client";
 import { manifest as selfFixManifest } from "./self-fix/manifest";
 import tests from "./tests/client";
@@ -19,6 +21,7 @@ export interface ClientPlugin {
 }
 
 export const builtinClientPlugins: ClientPlugin[] = [
+  { manifest: specsManifest, plugin: specs },
   // The special folders: one plugin each, from the pages factory.
   { manifest: roadmapManifest, plugin: pagesClient(ROADMAP_TAB) as Plugin<Context> },
   { manifest: tasksManifest, plugin: pagesClient(TASKS_TAB) as Plugin<Context> },

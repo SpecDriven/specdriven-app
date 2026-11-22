@@ -125,7 +125,7 @@ test("a plugin folder under ~/.specdriven/plugins is found, built, mounted and s
 
   // Found for the first time: on, at the end of the tab order, and stored.
   const profile = state.plugins as { enabled: string[]; seen: string[] };
-  expect(profile.enabled).toEqual(["hello"]);
+  expect(profile.enabled).toEqual(["specs", "hello"]);
   expect(profile.seen).toEqual(["hello"]);
   expect(persisted).toEqual(state);
 
@@ -244,14 +244,21 @@ test("an installed plugin whose manifest says autoEnable switches itself on in t
   const opts = { sources: true, dataDir: null };
   // Found for the first time in a folder that has its own list: off by its
   // manifest, yet on in that folder by autoEnable, and recorded as such.
-  const state: Record<string, unknown> = { dataRepo: repo, plugins: { repos: { [repo]: { enabled: [] } } } };
+  const state: Record<string, unknown> = { dataRepo: repo, plugins: { format: 2, repos: { [repo]: { enabled: [] } } } };
   await syncPlugins(state, opts);
-  expect(state.plugins).toEqual({ repos: { [repo]: { enabled: ["pal"], autoEnabled: ["pal"] } }, seen: ["pal"] });
+  expect(state.plugins).toEqual({
+    format: 2,
+    repos: { [repo]: { enabled: ["pal"], autoEnabled: ["pal"] } },
+    seen: ["pal"],
+  });
   expect(matchApi("GET", "/api/pal")).not.toBeNull();
   expect(row("pal")).toMatchObject({ enabled: true, active: true });
 
   // Switched off in that folder afterwards: the record says it was done once.
-  await syncPlugins({ dataRepo: repo, plugins: { repos: { [repo]: { enabled: [], autoEnabled: ["pal"] } }, seen: ["pal"] } }, opts);
+  await syncPlugins(
+    { dataRepo: repo, plugins: { format: 2, repos: { [repo]: { enabled: [], autoEnabled: ["pal"] } }, seen: ["pal"] } },
+    opts,
+  );
   expect(matchApi("GET", "/api/pal")).toBeNull();
   expect(row("pal")).toMatchObject({ enabled: false, active: false });
 });
@@ -280,7 +287,7 @@ test("a manifest the app cannot accept is refused with the reason, and loads not
   await writeFile(join(pluginsHome(), "broken", "package.json").replace("/broken/", "/"), "");
   const state: Record<string, unknown> = {};
   await syncPlugins(state, { sources: true, dataDir: null });
-  expect((state.plugins as { enabled: string[] }).enabled).toEqual([]);
+  expect((state.plugins as { enabled: string[] }).enabled).toEqual(["specs"]);
   expect(row("future")).toMatchObject({ enabled: false, active: false });
   expect(row("future")!.error).toBe("the plugin needs plugin api 2; this app speaks api 1");
   expect(row("newer")!.error).toMatch(/needs SpecDriven 99\.0\.0 or newer/);
@@ -327,7 +334,7 @@ test("a plugin under the data repo asks for trust before its first load", async 
   state.plugins = { enabled: ["notebook"], trusted: [dir] };
   await syncPlugins(state, opts);
   expect(row("team")).toMatchObject({ trusted: true, enabled: true, active: true });
-  expect((state.plugins as { enabled: string[] }).enabled).toEqual(["notebook", "team"]);
+  expect((state.plugins as { enabled: string[] }).enabled).toEqual(["specs", "notebook", "team"]);
   expect(await (await get("/api/team"))!.json()).toEqual({ greeting: "hello" });
 });
 

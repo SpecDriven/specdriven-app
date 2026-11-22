@@ -292,6 +292,7 @@ import {
   type KindQuestion,
 } from "./StartFolder";
 import { FILES_TAB } from "./files/plugin";
+import { SPECS_TAB } from "../plugins/builtin/specs/client";
 import { FILES_HOME, type FilesView } from "./files/route";
 import { CloneFromGitHub, GITHUB_HOST, PasteToken, TokenSignInDialog } from "./GitHubToken";
 import { accountMenuEntries } from "./accountMenu";
@@ -514,15 +515,16 @@ function storeEditorHeight(key: string, h: number | null): void {
 // /pages). They all share the one column, so the choice is remembered like
 // the sidebar width: a tab left open is meant to stay open, not to reset on
 // every reload.
-type SidebarTab = "specs" | (string & {});
+type SidebarTab = typeof SPECS_TAB | (string & {});
 
-function readSidebarTab(): SidebarTab {
+function readSidebarTab(): SidebarTab | null {
   try {
-    // Every stored name is kept: one that is not on offer any more falls
-    // back to Specs where `shownTab` is derived.
-    return localStorage.getItem("sd-sidebar-tab") ?? "specs";
+    // Every stored name is kept: one that is not on offer any more — and
+    // none stored at all — falls back to the first tab where `shownTab` is
+    // derived.
+    return localStorage.getItem("sd-sidebar-tab");
   } catch {
-    return "specs";
+    return null;
   }
 }
 
@@ -1938,12 +1940,20 @@ export function App() {
   // which plugin view has the pane — null when none. App knows only the tab
   // id and an opaque view; the tab parses, renders and titles it.
   const registeredTabs = useRegistry(tabs);
-  // With a code repository open (specs/app/code-repo-mode.feature.md) the
-  // Files tab is the only one; otherwise it is never shown.
-  const pluginTabs = useMemo(
+  // The tabs on screen, in the profile's order. With a code repository open
+  // (specs/app/code-repo-mode.feature.md) the Files tab is the only one;
+  // otherwise it is never shown.
+  const barTabs = useMemo(
     () => registeredTabs.filter((tab) => (tab.id === FILES_TAB) === (codeRepoDir !== null)),
     [registeredTabs, codeRepoDir],
   );
+  // Specs is a plugin too (specs/app/plugins.feature.md "Specs is a built-in
+  // plugin"): its tab is registered while it is on in the open folder, and
+  // stands among the others where the profile puts it. The tree and the
+  // editor are App's own, so every other tab — the ones App renders through
+  // their plugin — is listed apart.
+  const specsOn = barTabs.some((tab) => tab.id === SPECS_TAB);
+  const pluginTabs = useMemo(() => barTabs.filter((tab) => tab.id !== SPECS_TAB), [barTabs]);
   // The Settings sections the plugins register (src/plugins/client/
   // settings.ts), and the state payload they read; each sits where its
   // order puts it among the core sections.
@@ -1964,13 +1974,16 @@ export function App() {
   // the Settings dialog's row shows it; the tasks plugin reads it too.
   const [googleCalendarOn, setGoogleCalendarOn] = useState(false);
   /** Which sidebar tab is open — Specs or a plugin's; remembered. */
-  const [sidebarTab, setSidebarTab] = useState<SidebarTab>(readSidebarTab);
-  /** The tab on screen: a plugin's tab only while it is still mounted. */
-  const shownTab: SidebarTab = pluginTabs.some((tab) => tab.id === sidebarTab)
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab | null>(readSidebarTab);
+  /**
+   * The tab on screen: the remembered one while it is still mounted, else
+   * the first there is — the notebook, in a folder that shows it alone.
+   */
+  const shownTab: SidebarTab = sidebarTab !== null && barTabs.some((tab) => tab.id === sidebarTab)
     ? sidebarTab
-    : codeRepoDir !== null
-      ? FILES_TAB
-      : "specs";
+    : (barTabs[0]?.id ?? (codeRepoDir !== null ? FILES_TAB : SPECS_TAB));
+  /** The feature tree is the sidebar: Specs is on, and its tab is the one shown. */
+  const specsShown = specsOn && shownTab === SPECS_TAB;
   // Live sync (specs/datastore/automerge-store.feature.md): optional websocket
   // sync server; empty means off — git stays the only transport.
   const [syncServerUrl, setSyncServerUrl] = useState<string | null>(null);
@@ -3237,7 +3250,7 @@ export function App() {
       setAppPage(null);
       // A new feature shows up in the tree, so the sidebar turns to the Specs
       // tab; a same-file refresh (sync, cron) leaves the tab where it is.
-      if (file !== selected) selectSidebarTab("specs");
+      if (file !== selected) selectSidebarTab(SPECS_TAB);
       setSelected(file);
       setFeature(parsed);
       let missingScenario: string | null = null;
@@ -3630,6 +3643,12 @@ export function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pluginTabs]);
+  // So does Specs ("Specs is a built-in plugin"): switched off while a
+  // feature has the pane, the feature leaves for home.
+  useEffect(() => {
+    if (!specsOn && selected !== null && codeRepoDir === null) goHome();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [specsOn]);
 
   /**
    * Re-read the plugins from the server — a plugin from a folder was
@@ -3748,10 +3767,12 @@ export function App() {
     if (pluginHit) {
       // A tab with nothing to open — an empty models folder — goes home.
       if (!openPluginView(pluginHit.tab.id, pluginHit.view)) goHome();
-    } else if (route.feature) {
+    } else if (route.feature && tabs.get(SPECS_TAB)) {
       // A scenario url is a link to that scenario's page — the card's "Copy
       // link" makes one — so it opens the pane, not just the card
-      // (specs/ui/navigation.feature.md "open a scenario link").
+      // (specs/ui/navigation.feature.md "open a scenario link"). Only while
+      // Specs is on (read from the registry: this runs from boot's closure):
+      // with the plugin off its urls read as home, like any plugin's.
       await openFeature(route.feature, { scenario: route.scenario ?? null, pane: true, pullProblem });
     } else {
       // Back to home while the editor pane is open: it leaves the way `<`
@@ -8449,9 +8470,12 @@ export function App() {
   };
   // The shown plugin tab's own "new" (specs/app/plugins.feature.md): what `c`
   // creates while that tab is the sidebar — a task, a case, an issue.
-  const tabCreate = locked || shownTab === "specs"
+  const tabCreate = locked || specsShown
     ? undefined
     : pluginTabs.find((tab) => tab.id === shownTab)?.create;
+  // `c` with nothing open makes a feature only while there is a Specs tab
+  // to show it in; on another tab it is that tab's own "new", or quiet.
+  const canCreateHere = specsShown || tabCreate !== undefined;
   const allShortcuts: Shortcut[] = [
     // mod+k and `/` open the palette; the browser's own Find (mod+f) is
     // left alone, since the in-sidebar field it used to focus is gone.
@@ -8515,11 +8539,12 @@ export function App() {
       keys: "g s",
       label: "Go to the specs",
       group: "Navigate",
-      // A code repository has no specs tab (specs/app/code-repo-mode.feature.md).
-      when: () => !quiet && codeRepoDir === null,
-      palette: () => !quietBehindPalette && codeRepoDir === null,
+      // Only while Specs is on: a folder may have it switched off, and a
+      // code repository has no specs tab (specs/app/code-repo-mode.feature.md).
+      when: () => !quiet && specsOn,
+      palette: () => !quietBehindPalette && specsOn,
       run: () => {
-        selectSidebarTab("specs");
+        selectSidebarTab(SPECS_TAB);
         // A plugin's view or an app page (Settings, Images) leaves for the
         // README; a feature page stays, it is the tree's own.
         if (pluginView || appPage) {
@@ -8668,8 +8693,8 @@ export function App() {
             ? tabCreate.label
             : "New feature",
       group: "Create",
-      when: () => !quiet && (editing === null || canAddAfter),
-      palette: () => !quietBehindPalette && (editing === null || canAddAfter),
+      when: () => !quiet && (editing !== null ? canAddAfter : onFeaturePage || canCreateHere),
+      palette: () => !quietBehindPalette && (editing !== null ? canAddAfter : onFeaturePage || canCreateHere),
       run: () => {
         if (editing) void newScenarioAfterCurrent();
         else if (onFeaturePage) void newScenario();
@@ -8684,8 +8709,8 @@ export function App() {
       keys: [],
       label: selectedFolder ? `Import from Aha! into "${selectedFolder}"…` : "Import from Aha!…",
       group: "Create",
-      when: () => !quiet && ahaImport && editing === null,
-      palette: () => !quietBehindPalette && ahaImport && editing === null,
+      when: () => !quiet && ahaImport && specsOn && editing === null,
+      palette: () => !quietBehindPalette && ahaImport && specsOn && editing === null,
       run: () => setAhaImportOpen({ folder: selectedFolder }),
     },
     {
@@ -8693,8 +8718,8 @@ export function App() {
       keys: [],
       label: selectedFolder ? `Import from OpenSpec into "${selectedFolder}"…` : "Import from OpenSpec…",
       group: "Create",
-      when: () => !quiet && openSpecImport && editing === null,
-      palette: () => !quietBehindPalette && openSpecImport && editing === null,
+      when: () => !quiet && openSpecImport && specsOn && editing === null,
+      palette: () => !quietBehindPalette && openSpecImport && specsOn && editing === null,
       run: () => setOpenSpecImportOpen({ folder: selectedFolder }),
     },
     {
@@ -9054,6 +9079,8 @@ export function App() {
         }),
       );
     }
+    // With Specs switched off the palette offers no feature or scenario.
+    if (!specsOn) return [];
     const res = await fetch(`/api/search?scope=specs&q=${encodeURIComponent(q)}`, { signal });
     const data = (await res.json()) as { results?: SearchResultItem[]; error?: string };
     if (!res.ok) throw new Error(data.error ?? "Search failed");
@@ -9086,6 +9113,8 @@ export function App() {
   const recentItems: PaletteItem[] = recent.flatMap((e): PaletteItem[] => {
     const owner = e.kind === "plugin" ? pluginTabs.find((t) => t.id === e.tab) : undefined;
     if (e.kind === "plugin" && !owner) return [];
+    // Nor is a feature or a scenario while Specs is switched off.
+    if (e.kind !== "plugin" && !specsOn) return [];
     return [
       {
         id: `recent:${e.kind}:${e.fileName}:${e.scenario?.name ?? ""}@${e.scenario?.version ?? 0}`,
@@ -11031,32 +11060,33 @@ export function App() {
               <Search size={16} aria-hidden="true" />
             </button>
           </Tooltip>
-          {/* The rail mirrors the sidebar's tab bar: Specs first, then the
-              plugins' tabs, lit the way the bar's tabs are (shownTab) — so
-              collapsing the sidebar never loses the tree. */}
-          {codeRepoDir === null && (
-          <Tooltip label="Specs" keys="g s">
-            <a
-              href="/"
-              className={`rail-link${!pluginView && shownTab === "specs" ? " active" : ""}`}
-              aria-label="Specs"
-              onClick={(e) =>
-                spaClick(e, () => {
-                  selectSidebarTab("specs");
-                  if (pluginView || appPage) {
-                    goHome();
-                    void loadReadme();
-                  }
-                })
-              }
-            >
-              <FileText size={16} aria-hidden="true" />
-            </a>
-          </Tooltip>
-          )}
-          {/* The plugins' tabs — the special folders first. A tab with nothing
+          {/* The rail mirrors the sidebar's tab bar: the tabs in the
+              profile's order, lit the way the bar's tabs are (shownTab) — so
+              collapsing the sidebar never loses the tree. A tab with nothing
               to open — an empty folder — has no icon on the rail. */}
-          {pluginTabs.filter(tabReachable).map((tab) => (
+          {barTabs.filter((tab) => tab.id === SPECS_TAB || tabReachable(tab)).map((tab) =>
+            tab.id === SPECS_TAB ? (
+            // Specs (specs/app/plugins.feature.md "Specs is a built-in
+            // plugin"): the tree is App's own, and its door is home.
+            <Tooltip key={tab.id} label={tab.title} keys={tab.shortcut}>
+              <a
+                href="/"
+                className={`rail-link${!pluginView && specsShown ? " active" : ""}`}
+                aria-label={tab.title}
+                onClick={(e) =>
+                  spaClick(e, () => {
+                    selectSidebarTab(SPECS_TAB);
+                    if (pluginView || appPage) {
+                      goHome();
+                      void loadReadme();
+                    }
+                  })
+                }
+              >
+                <tab.icon size={16} aria-hidden="true" />
+              </a>
+            </Tooltip>
+            ) : (
             <Tooltip key={tab.id} label={tab.title} keys={tab.shortcut}>
               <a
                 href={tab.route.path(tab.route.home)}
@@ -11071,7 +11101,8 @@ export function App() {
                 <tab.icon size={16} aria-hidden="true" />
               </a>
             </Tooltip>
-          ))}
+            ),
+          )}
           <div className="rail-bottom">
             <PomodoroBar
               compact
@@ -11399,32 +11430,16 @@ export function App() {
             closed (src/frontend/pomodoroPref.ts). */}
         <PomodoroBar settingsOpen={pomodoroSettings} onSettingsOpen={setPomodoroSettings} />
         {/* Sidebar tabs (specs/app/roadmap.feature.md, specs/app/tasks.feature
-            .md): Specs is the feature tree, and each mounted plugin — each
-            special folder the Settings switches show among them — adds its
-            own beside it. The bar only shows once there is something to
-            switch to — one tab is no tab bar. */}
-        {pluginTabs.length > (codeRepoDir !== null ? 1 : 0) && (
+            .md): each mounted plugin's — Specs, the feature tree, and each
+            special folder the Plugins page shows among them — in the
+            profile's order (specs/app/plugins.feature.md). The bar only
+            shows once there is something to switch to — one tab is no tab
+            bar. */}
+        {barTabs.length > 1 && (
           <div className="side-tabs" role="tablist" aria-label="Sidebar">
             {/* Each tab's tooltip carries its `g` chord, as the rail's icons
-                do. A code repository has no Specs tab. */}
-            {codeRepoDir === null && (
-            <Tooltip label="Specs" keys="g s">
-              <button
-                type="button"
-                role="tab"
-                id="side-tab-specs"
-                aria-selected={shownTab === "specs"}
-                aria-controls="side-panel-specs"
-                className={shownTab === "specs" ? "active" : ""}
-                onClick={() => selectSidebarTab("specs")}
-              >
-                <FileText size={14} aria-hidden="true" /> <span className="side-tab-label">Specs</span>
-              </button>
-            </Tooltip>
-            )}
-            {/* The plugins' tabs (specs/app/plugins.feature.md), in their
-                order, after the core's. */}
-            {pluginTabs.map((tab) => (
+                do. */}
+            {barTabs.map((tab) => (
               <Tooltip key={tab.id} label={tab.title} keys={tab.shortcut}>
                 <button
                   type="button"
@@ -11437,7 +11452,8 @@ export function App() {
                     selectSidebarTab(tab.id);
                     // The tab is the module's door: with none of its views
                     // open yet, it opens the tab's home view — unless the tab
-                    // is a list to pick from (a special folder's pages).
+                    // is a list to pick from (a special folder's pages, or
+                    // the feature tree).
                     if (tab.opensOnSelect !== false && pluginViewRef.current?.tab !== tab.id) {
                       openPluginView(tab.id, tab.route.home, { push: true });
                     }
@@ -11449,12 +11465,12 @@ export function App() {
             ))}
           </div>
         )}
-        {shownTab === "specs" && (
+        {specsShown && (
         <div
           className="side-panel"
-          role={pluginTabs.length > 0 ? "tabpanel" : undefined}
+          role={barTabs.length > 1 ? "tabpanel" : undefined}
           id="side-panel-specs"
-          aria-labelledby={pluginTabs.length > 0 ? "side-tab-specs" : undefined}
+          aria-labelledby={barTabs.length > 1 ? "side-tab-specs" : undefined}
         >
         {/* A load that failed every retry offers the manual one: without it
             the sidebar would sit empty until the next page load, and with
@@ -11758,6 +11774,17 @@ export function App() {
           </div>
         )}
         </div>
+        )}
+        {/* Every plugin switched off in this folder, Specs included: the
+            sidebar says where they are switched on. */}
+        {!loading && barTabs.length === 0 && codeRepoDir === null && (
+          <p className="empty">
+            No plugin is on in this folder.{" "}
+            <a href="/plugins" onClick={(e) => spaClick(e, () => openAppPage("plugins"))}>
+              Open Plugins
+            </a>{" "}
+            to switch one on.
+          </p>
         )}
         {/* A plugin's tab (specs/app/plugins.feature.md) — a special folder's
             page list or the Tests tab's plans and case library, say: the
