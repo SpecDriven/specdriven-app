@@ -116,6 +116,29 @@ export function threeWayPageStrict(
 const STATUS_RANK = { draft: 0, proposed: 1, published: 2 } as const;
 
 /**
+ * `forced`: ours is a write a person chose to make against published content
+ * (features.ts absorbIntoDoc `force` — "Unpublish a Spec" moves a scenario
+ * back to [proposed]). The status it changed is then the answer, though
+ * theirs still holds the one it had.
+ */
+export type MergeOptions = { forced?: boolean };
+
+/**
+ * A scenario's status is a one-way latch: the side further along the
+ * lifecycle wins, so a concurrent publish (or propose) on either side sticks.
+ * The one move back is a forced one of ours (MergeOptions).
+ */
+function mergeStatus(
+  base: Scenario["status"] | undefined,
+  ours: Scenario["status"],
+  theirs: Scenario["status"],
+  { forced = false }: MergeOptions,
+): Scenario["status"] {
+  if (forced && base !== undefined && ours !== base) return ours;
+  return STATUS_RANK[ours] >= STATUS_RANK[theirs] ? ours : theirs;
+}
+
+/**
  * An external link is one value, not text: the side that changed it wins,
  * ours when both did (specs/external-links/project-management-jira-linear-
  * etc.feature.md). A qTest test case link merges the same way.
@@ -209,7 +232,12 @@ function mergeNegative(
 }
 
 /** Merge one scenario present on both sides. */
-function mergeScenario(base: Scenario | undefined, ours: Scenario, theirs: Scenario): Scenario {
+function mergeScenario(
+  base: Scenario | undefined,
+  ours: Scenario,
+  theirs: Scenario,
+  options: MergeOptions = {},
+): Scenario {
   const baseTests = (base?.tests ?? []).join("\n");
   const tests =
     theirs.tests.join("\n") !== baseTests && ours.tests.join("\n") === baseTests
@@ -223,9 +251,7 @@ function mergeScenario(base: Scenario | undefined, ours: Scenario, theirs: Scena
   return {
     name: ours.name,
     version: ours.version,
-    // status is a one-way latch: the side further along the lifecycle wins,
-    // so a concurrent publish (or propose) on either side sticks.
-    status: STATUS_RANK[ours.status] >= STATUS_RANK[theirs.status] ? ours.status : theirs.status,
+    status: mergeStatus(base?.status, ours.status, theirs.status, options),
     body: mergeText(base?.body ?? "", ours.body, theirs.body),
     tests: [...tests],
     ...(negative ? { negative } : {}),
@@ -274,6 +300,7 @@ export function threeWayFeature(
   base: Feature,
   ours: Feature,
   theirs: Feature,
+  options: MergeOptions = {},
 ): ThreeWayResult {
   const name = mergeText(base.name, ours.name, theirs.name);
   const description = mergeText(base.description, ours.description, theirs.description);
@@ -287,7 +314,7 @@ export function threeWayFeature(
     const inOurs = o.get(k);
     const inTheirs = t.get(k);
     if (inOurs && inTheirs) {
-      merged.set(k, mergeScenario(inBase, inOurs, inTheirs));
+      merged.set(k, mergeScenario(inBase, inOurs, inTheirs, options));
     } else if (inOurs && !inTheirs) {
       if (!inBase) {
         merged.set(k, inOurs); // we added it
@@ -363,6 +390,7 @@ export function threeWayFeatureStrict(
   base: Feature,
   ours: Feature,
   theirs: Feature,
+  options: MergeOptions = {},
 ): ThreeWayResult {
   const clash = (b: string, o: string, t: string) => o !== b && t !== b && o !== t;
   if (clash(base.name, ours.name, theirs.name)) {
@@ -379,5 +407,5 @@ export function threeWayFeatureStrict(
       return { ok: false, conflict: `scenario ${key(s)} was changed on both sides` };
     }
   }
-  return threeWayFeature(base, ours, theirs);
+  return threeWayFeature(base, ours, theirs, options);
 }

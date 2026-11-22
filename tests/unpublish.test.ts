@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { handleApi, reloader } from "../src/server/api";
 import {
   createFeature,
+  deletePublishedScenario,
   publishFeature,
   readFeature,
   saveFeature,
@@ -133,4 +134,42 @@ test("an unpublished spec keeps its tests and links, and the change is committed
   );
   expect((await git(originDir, "show", `main:${FILE}`)).stdout.toString()).toBe(text);
   expect((await git(a, "status", "--porcelain", "--", FILE)).stdout.toString()).toBe("");
+});
+
+// What happened on 2026-11-21: a scenario was rewritten in the file by hand,
+// and seconds later — before a sync tick had absorbed the edit — another
+// scenario of the feature was unpublished in the app. The write folds the
+// disk edit in first (features.ts foldDrift), and that fold must not take
+// the unpublish back.
+test("an unpublish survives an edit of the file the app has not absorbed yet", async () => {
+  await publishedQuote();
+  await saveFeature(data, FILE, `${(await readFeature(data, FILE))!}\n## Draft @v1 [proposed]\n\nfirst\n`);
+  const absorbed = (await readFeature(data, FILE))!;
+  await Bun.write(join(data, FILE), absorbed.replace("first", "rewritten on disk"));
+
+  await unpublishScenario(data, FILE, { name: "Basic", version: 1 });
+
+  const text = (await readFeature(data, FILE))!;
+  expect(text).toContain("## S1: Basic @v1 [proposed]\n\nbody");
+  expect(text).toContain("## S2: Extra @v1 [published]");
+  // The disk edit is kept too.
+  expect(text).toContain("## S3: Draft @v1 [proposed]\n\nrewritten on disk");
+  const loaded = await loadFeatureDoc(data, FILE);
+  const basic = loaded!.doc.specs.find((s) => s.name === "Basic")!;
+  expect(basic.status).toBe("proposed");
+  expect(basic.publishedBody).toBeUndefined();
+});
+
+test("a published spec's delete survives an edit of the file the app has not absorbed yet", async () => {
+  await publishedQuote();
+  await saveFeature(data, FILE, `${(await readFeature(data, FILE))!}\n## Draft @v1 [proposed]\n\nfirst\n`);
+  const absorbed = (await readFeature(data, FILE))!;
+  await Bun.write(join(data, FILE), absorbed.replace("first", "rewritten on disk"));
+
+  await deletePublishedScenario(data, FILE, { name: "Basic", version: 1 });
+
+  const text = (await readFeature(data, FILE))!;
+  expect(text).not.toContain("Basic");
+  expect(text).toContain("## S1: Extra @v1 [published]");
+  expect(text).toContain("## S2: Draft @v1 [proposed]\n\nrewritten on disk");
 });
