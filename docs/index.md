@@ -4,6 +4,7 @@
 | [Features and specs](docs/user-guide/specs.md) | The Specs tab, the draft → proposed → published lifecycle, syncing, links to tests, specs as a submodule of a code repo |
 | [AI sessions](docs/user-guide/ai-sessions.md) | Handing specs to Claude Code, Codex or Pi |
 | [Opening a code repository](docs/user-guide/code-repository.md) | The coding agent, a file tree and IntelliJ on a code repository, with no specs and no sync |
+| [Extracting specs from a code project](docs/user-guide/extract-specs.md) | A `specs-<project>` folder for a project that has code and no specs: folders from its modules, first features drafted by an agent |
 | [Engineering notebook](docs/user-guide/engineering-notebook.md) | The shared, dated log of observations and decisions |
 | [Pomodoro](docs/user-guide/pomodoro.md) | Timing your own work |
 

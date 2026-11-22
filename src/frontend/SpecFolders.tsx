@@ -164,6 +164,7 @@ export function SpecFoldersDialog({
   onShowWindow,
   onRemove,
   onAdd,
+  onExtract,
   onClose,
   trapRef,
 }: {
@@ -191,6 +192,12 @@ export function SpecFoldersDialog({
   onRemove: (folder: FolderEntry) => void;
   /** Pick another folder — of either kind — from the file system. */
   onAdd: () => void;
+  /**
+   * Make a specification folder for a code project, from its code
+   * (specs/app/extract-specs-from-code.feature.md); absent where code
+   * repositories cannot be opened.
+   */
+  onExtract?: () => void;
   onClose: () => void;
   trapRef?: RefObject<HTMLDivElement | null>;
 }) {
@@ -311,6 +318,17 @@ export function SpecFoldersDialog({
           <button type="button" className="btn btn-secondary" disabled={busy} onClick={onAdd}>
             Open another folder…
           </button>
+          {onExtract && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={busy}
+              title="Make a specification folder for a code project, with specs drafted from its code"
+              onClick={onExtract}
+            >
+              Extract specs from code…
+            </button>
+          )}
           <button type="button" className="btn btn-primary" autoFocus onClick={onClose}>
             Close
           </button>

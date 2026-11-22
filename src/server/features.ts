@@ -344,6 +344,60 @@ export async function setFolderOrder(
   return { folders: order, message: sync.message };
 }
 
+/** One spec folder to make: where, and what the sidebar calls it. */
+export interface NewSpecFolder {
+  /** Under the spec tree, slug segments: `billing/invoices`. */
+  path: string;
+  /** Its display name; "" to show the folder's own name. */
+  name: string;
+}
+
+/**
+ * Make several spec folders at once (specs/app/extract-specs-from-code.
+ * feature.md "Chosen folders are created with their names and order"):
+ * each directory, its display-name.txt when the name says more than the
+ * folder's own, and a folder-order.txt wherever the given order is not the
+ * order by name. A folder already there is left as it is, its display
+ * name too. Nothing is committed — createFolder and setFolderDescription
+ * would make a commit each; the caller commits the files returned, or
+ * leaves them to the next sync. Returns the folders, `specs/` prefixed,
+ * and the files written.
+ */
+export async function createSpecFolders(
+  dataDir: string,
+  folders: readonly NewSpecFolder[],
+): Promise<{ folders: string[]; files: string[] }> {
+  const made: string[] = [];
+  const written: string[] = [];
+  const siblings = new Map<string, string[]>();
+  for (const { path, name } of folders) {
+    const segments = path.split("/").map(slugify).filter(Boolean);
+    if (segments[0] === SPECS_FOLDER) segments.shift();
+    if (segments.length === 0) throw new Error("Folder name is required");
+    const folder = safeFolder([SPECS_FOLDER, ...segments].join("/"));
+    if (made.includes(folder)) continue;
+    const existed = await isDirectory(`${dataDir}/${folder}`);
+    await mkdir(`${dataDir}/${folder}`, { recursive: true });
+    made.push(folder);
+    const parent = folder.slice(0, folder.lastIndexOf("/"));
+    siblings.set(parent, [...(siblings.get(parent) ?? []), segments[segments.length - 1]!]);
+    const display = cleanLine(name);
+    if (!existed && display && display !== segments[segments.length - 1]) {
+      const file = `${folder}/${FOLDER_DISPLAY_NAME_FILE}`;
+      await writeTextFile(`${dataDir}/${file}`, `${display}\n`);
+      written.push(file);
+    }
+  }
+  for (const [parent, names] of siblings) {
+    if (names.length < 2 || names.join("\n") === [...names].sort().join("\n")) continue;
+    const file = `${parent}/${FOLDER_ORDER_FILE}`;
+    if ((await readTextFile(`${dataDir}/${file}`)) !== null) continue;
+    await writeTextFile(`${dataDir}/${file}`, `${names.join("\n")}\n`);
+    written.push(file);
+  }
+  return { folders: made, files: written };
+}
+
 /**
  * A renamed subfolder keeps its place: the parent's order file, when it
  * names the old folder, names the new one instead, committed and pushed.

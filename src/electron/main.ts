@@ -74,6 +74,7 @@ import { setAhaTokenBackend } from "../server/ahaTokens";
 import { LEGACY_SECRET_FILES, setSecretBackendFactory } from "../server/secrets";
 import { appPagePath, DESKTOP_SCHEME } from "../frontend/route";
 import { appMenuTemplate } from "./appMenu";
+import { EXTRACT_SPECS_EVENT } from "../server/intentNames";
 import { contextMenuTemplate } from "./contextMenu";
 import { startInspector, devtoolsUrl } from "./debugger";
 import { parseDesktopLink } from "./deepLink";
@@ -736,6 +737,15 @@ function installAppMenu(): void {
             label: f.kind === "code" ? `${f.path} — code repository` : f.path,
             onOpen: () => void openFolderWindow({ path: f.path, kind: f.kind }),
           })),
+          // specs/app/extract-specs-from-code.feature.md: the dialog is the
+          // page's own, so the window in front is told to open it — a new
+          // window, which starts on the screen that offers it, when none is.
+          onExtractSpecs: () => {
+            const front = frontWindow();
+            if (!front || front.win.isDestroyed()) return void openFolderWindow();
+            front.win.focus();
+            void front.win.webContents.executeJavaScript(`window.dispatchEvent(new Event(${JSON.stringify(EXTRACT_SPECS_EVENT)}))`);
+          },
         },
         ...(app.isPackaged ? {} : { debug }),
       }),
