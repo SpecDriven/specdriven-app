@@ -186,7 +186,7 @@ describe("a token qTest refuses in Settings → qTest", () => {
       });
     type(input("qTest url"), "https://acme.qtestnet.com");
     type(input("qTest Bearer token"), "tok-bad");
-    const save = [...host.querySelectorAll("button")].find((b) => b.textContent === "Save token")!;
+    const save = [...host.querySelectorAll("button")].find((b) => b.textContent === "Save")!;
     await act(async () => save.click());
     const line = host.querySelector("button.error-link") as HTMLButtonElement;
     expect(line.textContent).toContain("did not accept this token");

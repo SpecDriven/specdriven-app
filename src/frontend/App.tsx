@@ -10476,8 +10476,8 @@ export function App() {
             <span className="switch-track" aria-hidden="true" />
           </span>
         </label>
-        {/* specs/external-links/qtest-test-cases.feature.md "A qTest token is
-            kept per site on this device": the token that lets a feature's
+        {/* specs/external-links/qtest-test-cases.feature.md "One qTest token is
+            kept on this device": the token that lets a feature's
             scenarios be created as test cases, from its ⋯ menu. Not in the
             hosted app, which keeps no device secrets. */}
         {!demo && !hosted && settingsQtestLinksDraft && (

@@ -1,7 +1,7 @@
-// Automates specs/external-links/qtest-test-cases.feature.md "A qTest token
-// is kept per site on this device", "Create qTest test cases from a feature"
-// and "Creating the test cases again updates them" through the routes: a
-// token per site kept on this device after qTest accepts it, a feature's
+// Automates specs/external-links/qtest-test-cases.feature.md "One qTest token
+// is kept on this device", "Create qTest test cases from a feature"
+// and "Creating the test cases again updates them" through the routes: one
+// token kept on this device after qTest accepts it, a feature's
 // scenarios created as test cases of a module named after it under a parent
 // module — created, then updated — and linked back from the feature. qTest
 // is a loopback stub that keeps its modules and test cases in memory,
@@ -382,6 +382,20 @@ describe("qTest tokens", () => {
     const gone = await call("DELETE", "/api/qtest/tokens", { base: site });
     expect(gone.body).toEqual({ tokens: [] });
     expect(await qtestToken(site)).toBeNull();
+  });
+
+  test("one token is kept, so saving one for another site replaces the last", async () => {
+    await saveToken();
+    const other = site.replace("127.0.0.1", "localhost");
+    expect((await saveToken(GOOD, other)).status).toBe(200);
+    expect((await call("GET", "/api/qtest/tokens")).body).toEqual({ tokens: [{ base: other, user: "1 project" }] });
+    expect(await qtestToken(site)).toBeNull();
+  });
+
+  test("a refused token leaves the saved one in place", async () => {
+    await saveToken();
+    expect((await saveToken("tok-bad", site.replace("127.0.0.1", "localhost"))).status).toBe(400);
+    expect((await qtestToken(site))!.token).toBe(GOOD);
   });
 });
 

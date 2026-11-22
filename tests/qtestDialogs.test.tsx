@@ -1,8 +1,8 @@
 // specs/external-links/qtest-test-cases.feature.md "Create qTest test cases
-// from a feature" and "A qTest token is kept per site on this device" as
+// from a feature" and "One qTest token is kept on this device" as
 // static markup: the dialog (the parent module, which scenarios go in,
-// Publish test cases) and the Settings → qTest form (the sites with a token,
-// and how to add one). App.tsx owns the open state, the menu entry and the
+// Publish test cases) and the Settings → qTest form (the url, the token and
+// Save, with the saved site filled in). App.tsx owns the open state, the menu entry and the
 // chips.
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -71,20 +71,23 @@ describe("QtestPublishDialog", () => {
 });
 
 describe("QtestTokens", () => {
-  test("lists each site with what its token reaches, never the token, each with Remove", () => {
+  test("shows the saved site in the url field and what its token reaches, never the token", () => {
     const markup = html(<QtestTokens sites={[SITE]} onChange={noop} />);
-    expect(markup).toContain("<strong>https://acme.qtestnet.com</strong>");
-    expect(markup).toContain("3 projects");
-    expect(markup).toContain('aria-label="Remove the token for https://acme.qtestnet.com"');
-    expect(markup).toContain("Add another qTest site");
+    expect(markup).toContain('value="https://acme.qtestnet.com"');
+    expect(markup).toContain("Token saved — it reaches 3 projects");
+    expect(markup).toContain("Paste to replace");
+    expect(markup).not.toContain("Remove");
+    expect(markup).not.toContain("Add");
   });
 
-  test("offers the url and token fields, the token as a password", () => {
+  test("offers only the url and token fields, the token as a password, and Save", () => {
     const markup = html(<QtestTokens sites={[]} onChange={noop} />);
-    expect(markup).toContain("Add a qTest site");
+    expect(markup.match(/<input/g)).toHaveLength(2);
     expect(markup).toContain('aria-label="qTest url"');
     expect(markup).toMatch(/aria-label="qTest Bearer token" type="password"/);
-    expect(markup).toContain("its url and a Bearer token");
+    expect(markup.match(/<button/g)).toHaveLength(1);
+    expect(markup).toMatch(/<button[^>]*>Save<\/button>/);
     expect(markup).toContain("kept on this device only");
+    expect(markup).not.toContain("Add");
   });
 });

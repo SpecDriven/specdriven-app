@@ -2,12 +2,13 @@ import { useState } from "react";
 import { normalizeQtestBase } from "../server/qtestUrl";
 import { FailureLine, type FailureDetails } from "./FailureDetails";
 
-// Settings → qTest (specs/external-links/qtest-test-cases.feature.md "A qTest
-// token is kept per site on this device"): the qTest sites this device holds
-// a Bearer token for, and a form to add one. The server checks a token against
-// the site before keeping it and never sends one back — the list shows the
-// site and what the token reaches. A token qTest refuses shows as one line;
-// clicking it opens what qTest answered.
+// Settings → qTest (specs/external-links/qtest-test-cases.feature.md "One
+// qTest token is kept on this device"): the qTest site's url, a Bearer token
+// and Save. The server checks a token against the site before keeping it,
+// keeps one token only — saving replaces the last, whatever its site — and
+// never sends one back: the url field shows the saved site and a line says
+// what its token reaches. A token qTest refuses shows as one line; clicking
+// it opens what qTest answered.
 
 /** A qTest site with a token on this device. */
 export interface QtestSite {
@@ -46,28 +47,17 @@ export async function postQtestToken(
   }
 }
 
-export async function deleteQtestToken(base: string): Promise<QtestSite[] | null> {
-  try {
-    const res = await fetch("/api/qtest/tokens", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ base }),
-    });
-    if (!res.ok) return null;
-    return ((await res.json()) as { tokens?: QtestSite[] }).tokens ?? [];
-  } catch {
-    return null;
-  }
-}
-
-/** The saved sites, each with Remove, and the form that adds one. */
+/** The url and token fields and Save; the saved site fills the url. */
 export function QtestTokens({ sites, onChange }: { sites: QtestSite[]; onChange: (sites: QtestSite[]) => void }) {
-  const [base, setBase] = useState("");
+  const saved = sites[0] ?? null;
+  const [base, setBase] = useState<string | null>(null);
   const [token, setToken] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [details, setDetails] = useState<FailureDetails | null>(null);
   const [busy, setBusy] = useState(false);
-  const cleanBase = normalizeQtestBase(base);
+  // Until the user types, the url field shows the saved site.
+  const shownBase = base ?? saved?.base ?? "";
+  const cleanBase = normalizeQtestBase(shownBase);
 
   const save = async () => {
     if (!token.trim() || !cleanBase) return;
@@ -82,44 +72,17 @@ export function QtestTokens({ sites, onChange }: { sites: QtestSite[]; onChange:
       return;
     }
     setToken("");
-    setBase("");
-    onChange([...sites.filter((s) => s.base.toLowerCase() !== result.site.base.toLowerCase()), result.site]);
-  };
-
-  const remove = async (site: QtestSite) => {
-    const next = await deleteQtestToken(site.base);
-    if (next === null) {
-      setStatus(`Could not remove the token for ${site.base}`);
-      setDetails(null);
-    }
-    else onChange(next);
+    setBase(null);
+    onChange([result.site]);
   };
 
   return (
     <div className="paste-token confluence-tokens qtest-tokens">
-      {sites.length > 0 && (
-        <ul className="confluence-wikis qtest-sites">
-          {sites.map((s) => (
-            <li key={s.base}>
-              <span>
-                <strong>{s.base}</strong>
-                {s.user && <span className="hint"> — {s.user}</span>}
-              </span>
-              <button className="link" onClick={() => void remove(s)} aria-label={`Remove the token for ${s.base}`}>
-                Remove
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      <span className="settings-row-hint">
-        {sites.length > 0 ? "Add another qTest site" : "Add a qTest site"} — its url and a Bearer token:
-      </span>
       <div className="auth-row">
         <input
           aria-label="qTest url"
           className="paste-token-host"
-          value={base}
+          value={shownBase}
           onChange={(e) => setBase(e.target.value)}
           placeholder="https://acme.qtestnet.com"
         />
@@ -132,13 +95,18 @@ export function QtestTokens({ sites, onChange }: { sites: QtestSite[]; onChange:
           onKeyDown={(e) => {
             if (e.key === "Enter") void save();
           }}
-          placeholder="Bearer token"
+          placeholder={saved ? "Paste to replace" : "Bearer token"}
         />
-        <button className="secondary" disabled={busy || !token.trim() || !cleanBase} onClick={() => void save()}>
-          {busy ? "Checking…" : "Save token"}
+        <button type="button" className="btn btn-secondary" disabled={busy || !token.trim() || !cleanBase} onClick={() => void save()}>
+          {busy ? "Checking…" : "Save"}
         </button>
       </div>
       <span className="hint">
+        {saved && (
+          <>
+            Token saved{saved.user ? ` — it reaches ${saved.user}` : ""}.{" "}
+          </>
+        )}
         Copy the Bearer token from qTest under your name → API &amp; SDK, as a user who can add test cases to the
         project — with or without the leading "Bearer". It is checked against the site and kept on this device only.
       </span>
