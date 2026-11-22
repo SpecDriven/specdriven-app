@@ -1,18 +1,25 @@
 // Project settings live with the specs, not with the app: `project-settings
-// .json` in the root of the data repo describes the project, so every
+// .yaml` in the root of the data repo describes the project, so every
 // checkout of the repo — and every teammate — sees the same thing, and
 // changing it is an ordinary commit. The app makes the file for every data
 // folder it opens (ensureProjectSettings, from the reload tick), and the
 // Project settings page (src/frontend/ProjectSettingsPage.tsx) edits it.
 //
-//   {
-//     "members": [
-//       { "name": "Ada Lovelace", "email": "ada.lovelace@acme.example" },
-//       "Grace Hopper"
-//     ],
-//     "code-repos": ["../acme-app", "../acme-mobile"],
-//     "default-code-repo": "../acme-app"
-//   }
+//   members:
+//     - name: Ada Lovelace
+//       email: ada.lovelace@acme.example
+//     - Grace Hopper
+//   code-repos:
+//     - ../acme-app
+//     - ../acme-mobile
+//   default-code-repo: ../acme-app
+//
+// YAML, like the app's own settings.yaml. A data folder from before that
+// holds `project-settings.json`: it is read until the reload tick converts
+// it — the same settings written as YAML, the JSON file removed — and a
+// save through the app converts it too. The data format marker
+// (src/server/dataFormat.ts, format 4) stops the releases that read only the
+// JSON file, which would otherwise make an empty one beside the YAML.
 //
 // `members` lists the people working on the project. The editor offers those
 // names in the feature's "Assigned" dropdown, and the chosen one is written
@@ -40,11 +47,46 @@
 // not a device one, so every teammate's app writes the files the same way.
 
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { rm } from "node:fs/promises";
 import { readTextFile, writeTextFile } from "./fsx";
 import { isHostedMode } from "./hostedMode";
+import { parseSettingsText, serializeSettings } from "./settingsFormat";
 
 /** The data repo's project settings file, at its root. */
-export const PROJECT_SETTINGS_FILE = "project-settings.json";
+export const PROJECT_SETTINGS_FILE = "project-settings.yaml";
+
+/** The settings file from before YAML, read until it is converted. */
+export const LEGACY_PROJECT_SETTINGS_FILE = "project-settings.json";
+
+/** Whether a repo path is the project settings file, in either format. */
+export function isProjectSettingsPath(path: string): boolean {
+  return path === PROJECT_SETTINGS_FILE || path === LEGACY_PROJECT_SETTINGS_FILE;
+}
+
+/**
+ * The settings file a data folder holds, with its text: the YAML file, or
+ * the JSON one from before it while it has not been converted. A JSON file
+ * beside a YAML one is not read. Null when there is neither.
+ */
+async function readSettingsFile(dataDir: string): Promise<{ path: string; text: string } | null> {
+  for (const name of [PROJECT_SETTINGS_FILE, LEGACY_PROJECT_SETTINGS_FILE]) {
+    const path = `${dataDir}/${name}`;
+    const text = await readTextFile(path);
+    if (text !== null) return { path, text };
+  }
+  return null;
+}
+
+/** Settings as the YAML file's text. */
+function settingsText(settings: object): string {
+  return serializeSettings(settings);
+}
+
+/** Write the YAML file, and remove a JSON one it replaces. */
+async function writeSettingsFile(dataDir: string, settings: object, replacing: string | null): Promise<void> {
+  await writeTextFile(`${dataDir}/${PROJECT_SETTINGS_FILE}`, settingsText(settings));
+  if (replacing?.endsWith(LEGACY_PROJECT_SETTINGS_FILE)) await rm(replacing, { force: true });
+}
 
 export interface ProjectMember {
   /** Display name, and the identity a feature's `assigned` holds. */
@@ -216,10 +258,10 @@ const EMPTY_SETTINGS: ProjectSettings = {
  * is what a project that never wrote the file should see.
  */
 export async function readProjectSettings(dataDir: string): Promise<ProjectSettings> {
-  const text = await readTextFile(`${dataDir}/${PROJECT_SETTINGS_FILE}`);
-  if (text === null) return { ...EMPTY_SETTINGS };
+  const file = await readSettingsFile(dataDir);
+  if (file === null) return { ...EMPTY_SETTINGS };
   try {
-    return normalizeProjectSettings(JSON.parse(text), dataDir);
+    return normalizeProjectSettings(parseSettingsText(file.text, file.path), dataDir);
   } catch {
     return { ...EMPTY_SETTINGS };
   }
@@ -228,52 +270,73 @@ export async function readProjectSettings(dataDir: string): Promise<ProjectSetti
 /** What a data folder's settings file starts as — nobody listed, no code repo. */
 const INITIAL_SETTINGS = { members: [], [CODE_REPOS_KEY]: [] };
 
+/** What ensureProjectSettings did to a data folder's settings file. */
+export type EnsuredSettings = "created" | "converted" | null;
+
 /**
  * Make the data folder's settings file when it has none (specs/app/
  * project-settings.feature.md "The settings file is created for every data
  * folder"): the empty settings, for the Project settings page to fill in. A
- * file that is there is left alone whatever it holds — even one that does
- * not parse, which is someone's to fix by hand. Returns whether it was made.
+ * project-settings.json from before YAML is converted instead (specs/app/
+ * project-settings.feature.md "A settings file from before YAML is
+ * converted"): the same settings written as project-settings.yaml, and the
+ * JSON file removed. A file that is there is otherwise left alone whatever
+ * it holds — a JSON one that does not parse too, which is someone's to fix
+ * by hand. Returns what it did, or null when it did nothing.
  */
-export async function ensureProjectSettings(dataDir: string): Promise<boolean> {
-  const path = `${dataDir}/${PROJECT_SETTINGS_FILE}`;
-  if ((await readTextFile(path)) !== null) return false;
-  await writeTextFile(path, `${JSON.stringify(INITIAL_SETTINGS, null, 2)}\n`);
-  return true;
+export async function ensureProjectSettings(dataDir: string): Promise<EnsuredSettings> {
+  const file = await readSettingsFile(dataDir);
+  if (file === null) {
+    await writeTextFile(`${dataDir}/${PROJECT_SETTINGS_FILE}`, settingsText(INITIAL_SETTINGS));
+    return "created";
+  }
+  if (!file.path.endsWith(LEGACY_PROJECT_SETTINGS_FILE)) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(file.text);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null) return null;
+  await writeSettingsFile(dataDir, parsed, file.path);
+  return "converted";
 }
 
 /**
  * Change the data repo's settings file in place, keeping every key the
  * mutation leaves alone. A file that is missing is created; one that does
- * not parse as a JSON object is refused rather than overwritten, since it is
+ * not parse as an object is refused rather than overwritten, since it is
  * hand-edited and may hold what someone meant to fix. A bare member list —
- * the file's other accepted form — becomes `{ "members": … }`. Local write;
- * the reload cron commits and pushes it like any saved change. Returns
- * whether the file changed.
+ * the file's other accepted form — becomes `members: …`. A JSON file from
+ * before YAML is saved as the YAML one and removed. Local write; the reload
+ * cron commits and pushes it like any saved change. Returns whether the
+ * file changed.
  */
 export async function updateProjectSettings(
   dataDir: string,
   mutate: (settings: Record<string, unknown>) => void,
 ): Promise<boolean> {
-  const path = `${dataDir}/${PROJECT_SETTINGS_FILE}`;
-  const text = await readTextFile(path);
+  const file = await readSettingsFile(dataDir);
   let settings: Record<string, unknown> = {};
-  if (text !== null && text.trim() !== "") {
+  if (file !== null && file.text.trim() !== "") {
+    const name = file.path.slice(dataDir.length + 1);
+    const format = name === PROJECT_SETTINGS_FILE ? "YAML" : "JSON";
     let parsed: unknown;
     try {
-      parsed = JSON.parse(text);
+      parsed = parseSettingsText(file.text, file.path);
     } catch {
-      throw new Error(`${PROJECT_SETTINGS_FILE} is not valid JSON — fix it by hand first`);
+      throw new Error(`${name} is not valid ${format} — fix it by hand first`);
     }
     if (Array.isArray(parsed)) settings = { members: parsed };
     else if (typeof parsed === "object" && parsed !== null) settings = parsed as Record<string, unknown>;
-    else throw new Error(`${PROJECT_SETTINGS_FILE} must hold a JSON object`);
+    else if (parsed !== null) throw new Error(`${name} must hold a ${format} object`);
   }
   const before = JSON.stringify(settings);
   mutate(settings);
-  const after = `${JSON.stringify(settings, null, 2)}\n`;
+  // Nothing changed, nothing written: a JSON file stays for the tick to
+  // convert.
   if (JSON.stringify(settings) === before) return false;
-  await writeTextFile(path, after);
+  await writeSettingsFile(dataDir, settings, file?.path ?? null);
   return true;
 }
 

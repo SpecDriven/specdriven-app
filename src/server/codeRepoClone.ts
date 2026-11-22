@@ -1,6 +1,6 @@
 // Cloning a missing code repo (specs/app/project-settings.feature.md "A
 // code repo that is not on this computer is offered for cloning"): a
-// teammate's project-settings.json names `../acme-app`, but this computer has
+// teammate's project-settings.yaml names `../acme-app`, but this computer has
 // only the data repo — a fresh clone through the app's GitHub sign-in, say,
 // or the desktop app's own clones folder. The app offers to clone it into
 // the folder the path resolves to, from a url it suggests: the data repo's

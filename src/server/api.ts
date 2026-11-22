@@ -2297,7 +2297,7 @@ const postAhaImport = withDataDir(async (dir, req) => {
 // capabilities a code repository's openspec/specs folder holds — only that
 // folder; openspec/changes is never read — each becoming a feature in the
 // chosen folder. The repository is one of the code repos the data repo's
-// project-settings.json names (the default one unless another is asked
+// project-settings.yaml names (the default one unless another is asked
 // for), or any folder on this machine typed in, since the specs only
 // usually live in a code repo. No agent and no network: the files are
 // already structured markdown.
@@ -2959,7 +2959,7 @@ const postRepoAccess = withDataDir(async (dir) =>
 );
 
 // The data repo's own settings (specs/app/project-settings.feature.md): its
-// project-settings.json as the Project settings page shows it — the members,
+// project-settings.yaml as the Project settings page shows it — the members,
 // each code repo with whether its folder is there and the state of its
 // `specs` symlink, which one is the default, and the authorship switch.
 async function projectSettingsPayload(dir: string, settings?: ProjectSettings) {
@@ -3883,7 +3883,7 @@ async function resolveSessionRequest(
     specs.push({ fileName, content, partial: scenarios !== undefined });
   }
   // Where the session runs (src/server/members.ts `code-repo`): the code
-  // repo the data repo's project-settings.json names, else the data repo.
+  // repo the data repo's project-settings.yaml names, else the data repo.
   // A code repo that isn't there is the user's to fix — the setting is
   // checked in, so the message names the folder it resolved to.
   const { codeRepo } = await readProjectSettings(dir);
@@ -3974,7 +3974,7 @@ const postAgentSessionPrompt = withDataDir(async (dir, req) => {
 // ---------------------------------------------------------------------------
 // Coding agent pane (specs/agents/agent-pane.feature.md): a live Claude
 // Code chat the app drives itself (src/server/agentChat.ts). Creating one
-// needs the data repo — for the code repo its project-settings.json names —
+// needs the data repo — for the code repo its project-settings.yaml names —
 // so it goes through withDataDir; everything after that addresses a session
 // by id. Events reach the client over a one-way NDJSON stream, the only kind
 // of push that works over both Bun.serve and Electron's app:// protocol.

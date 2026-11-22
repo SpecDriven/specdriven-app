@@ -124,7 +124,7 @@ test("the route starts the clone, and the folder counts as missing until the clo
   process.env.SPECDRIVEN_ROOT = root;
   try {
     await origin("https://github.com/acme/acme-specs.git");
-    await writeFile(join(data, "project-settings.json"), JSON.stringify({ members: [], "code-repos": ["../acme-app", "../here"] }));
+    await writeFile(join(data, "project-settings.yaml"), JSON.stringify({ members: [], "code-repos": ["../acme-app", "../here"] }));
     await mkdir(join(root, "here"));
     await writeState({ dataRepo: data }, root);
     let release!: () => void;

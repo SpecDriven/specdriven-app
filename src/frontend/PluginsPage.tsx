@@ -92,7 +92,7 @@ export function PluginsPage(props: PluginsPageProps) {
     // (specs/app/github-issues.feature.md).
     const note =
       plugin.id === "issues" && plugin.enabled && !props.hasIssuesRepo
-        ? "The data folder's project-settings.json names no GitHub code repo yet, so the tab stays hidden until it does."
+        ? "The data folder's project-settings.yaml names no GitHub code repo yet, so the tab stays hidden until it does."
         : null;
     return (
       <div className="settings-row plugin-row" key={plugin.id} data-plugin={plugin.id}>

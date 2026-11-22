@@ -35,7 +35,7 @@ import { BUILT_IN_CANNOT_SIGN, SIGN_CONFIG, makesCommit, maySign, signingHint, s
 import { signingEnv, signingTimeoutMs } from "./signingKey";
 import { localTurn, remoteTurn } from "./turns";
 import { FALLBACK_TITLE, pathsInStatus, summarizeSavedChanges } from "./saveSummary";
-import { PROJECT_SETTINGS_FILE } from "../members";
+import { isProjectSettingsPath } from "../members";
 import type { ChangedFile } from "./saveSummary";
 
 export function cliGitAvailable(): boolean {
@@ -96,7 +96,7 @@ const SUMMARY_READ_LIMIT = 40;
  * (specs/app/project-settings.feature.md).
  */
 function isSpecText(path: string): boolean {
-  return path.endsWith(".md") || path.endsWith(".txt") || path === PROJECT_SETTINGS_FILE;
+  return path.endsWith(".md") || path.endsWith(".txt") || isProjectSettingsPath(path);
 }
 
 /** Commit-author overrides for a known GitHub identity. */

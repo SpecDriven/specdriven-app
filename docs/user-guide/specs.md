@@ -157,7 +157,7 @@ Under the header, chips summarise the feature:
   made before the app kept this show no chip until somebody edits them.
 - The **assignee** chip (`Unassigned` or a member's name) appears when
   **Assign features to project members** is on. Members are the names listed
-  in the data folder's `project-settings.json`; the assignment is written
+  in the data folder's `project-settings.yaml`; the assignment is written
   into the file as an `**Assigned:** <name>` line.
 - The **ticket** chip (`Link ticket`, or `Jira:ABC-123` once linked) opens a
   small form with the tracking tool, id and url, plus **Remove link**. The
@@ -274,7 +274,7 @@ Below, in one scrolling column:
   every tab. Every markdown editor in the app follows the size, and it is
   remembered on this device.
 - **Entity fields**: when the project names a code repo (`code-repo` in
-  `project-settings.json`), type `@` and press `Tab` to pick a field of
+  `project-settings.yaml`), type `@` and press `Tab` to pick a field of
   one of its data entities — `@firstName`, or `@User.firstName` when two
   entities share the name. Keep typing to narrow the list, `↑`/`↓` to move,
   `Enter` or `Tab` to insert, `Esc` to close; any other `Tab` moves focus on
@@ -398,7 +398,7 @@ To have the specs come along whenever someone clones the code, add the data
 repository to the code repository as a git submodule. Open **Settings → Git
 & GitHub → Code repo submodule**, press **Add to a code repo…**, and pick the
 code repository's folder (it starts out filled in with `code-repo` from
-`project-settings.json`, when one is set). The app:
+`project-settings.yaml`, when one is set). The app:
 
 - runs `git submodule add` in the code repo, pointing at the data
   repository's `origin` and following the branch you are on, into a folder
@@ -427,7 +427,7 @@ git config submodule.recurse true                # optional: pull and checkout u
 
 A submodule is always a whole repository at one commit; git cannot make one out
 of a single folder. Keep the whole data repository as the submodule (the app
-treats it as one unit, `project-settings.json`, `README.md`, `roadmap/`,
+treats it as one unit, `project-settings.yaml`, `README.md`, `roadmap/`,
 `tasks/` and `.specdriven/` included). Then show only the folder you want, in
 either of two ways.
 
@@ -503,8 +503,8 @@ Open Settings with `⌘,` or `g s`.
 | **Feature flags** | Off by default. On, features and scenarios show their `[ff:<name>:on\|off]` flags as chips (red when off) and the editors add, toggle and remove them. Off hides them; the flag lines stay in the files. |
 | **Custom attributes** | A setting of the open data folder, shared with the team: its `custom-attributes.txt`, described below. |
 | **Aha! links** and **Figma links** | Each off by default. On, features and scenarios offer links to Aha! records or Figma designs. Off hides them; links already added are kept. |
-| **Write authors into feature files** | A setting of the open data folder, not of the device: `"authors-in-markdown": true` in its `project-settings.json`. On, every feature and scenario in the `.feature.md` files carries `**Created by:**` and `**Updated by:**` lines; off (the default), the app still records and shows them, but the markdown leaves them out. Switching it rewrites every feature file at once; the next sync pushes them. |
-| **Assign features to project members** | Adds the assignee chip and the Assignee filter. Members come from `project-settings.json`. |
+| **Write authors into feature files** | A setting of the open data folder, not of the device: `authors-in-markdown: true` in its `project-settings.yaml`. On, every feature and scenario in the `.feature.md` files carries `**Created by:**` and `**Updated by:**` lines; off (the default), the app still records and shows them, but the markdown leaves them out. Switching it rewrites every feature file at once; the next sync pushes them. |
+| **Assign features to project members** | Adds the assignee chip and the Assignee filter. Members come from `project-settings.yaml`. |
 | **Allow deleting published specs** | Offers Delete on published scenarios, behind the Danger Zone confirmation. |
 | **Git engine** | Which git the app drives: the GitHub CLI, the system `git`, or the built-in engine. |
 | **GitHub account** | Sign in so that pushes and test-name lookups are authenticated. |
@@ -613,7 +613,7 @@ On Windows and Linux `⌘` is `Ctrl`.
 - **Custom attribute**: a team-defined tag on a feature or a scenario, such
   as a business rule `[br:young-driver-surcharge:on]`, written under its
   heading and defined in the data folder's `custom-attributes.txt`.
-- **Member / assignee**: a name from `project-settings.json` that a feature
+- **Member / assignee**: a name from `project-settings.yaml` that a feature
   can be assigned to.
 - **Publish ring**: the arc on a sidebar feature showing how many of its
   scenarios are published.

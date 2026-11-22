@@ -178,7 +178,7 @@ test("an Enterprise code repo has issues when the app is signed in on its host",
   await writeFile(join(code, ".git", "config"), `[remote "origin"]\n\turl = http://${ent}/acme/app.git\n`);
   const data = join(dir, "data");
   await mkdir(data);
-  await writeFile(join(data, "project-settings.json"), JSON.stringify({ "code-repo": code }));
+  await writeFile(join(data, "project-settings.yaml"), JSON.stringify({ "code-repo": code }));
 
   expect(await readIssuesRepo(data)).toBeNull();
   await signInOn(ent);

@@ -207,7 +207,7 @@ beforeEach(async () => {
   data = join(root, "data");
   code = join(root, "code");
   await mkdir(join(data, "specs"), { recursive: true });
-  await put(data, "project-settings.json", JSON.stringify({ "code-repos": ["../code"] }));
+  await put(data, "project-settings.yaml", JSON.stringify({ "code-repos": ["../code"] }));
   await put(code, "openspec/specs/auth/spec.md", AUTH);
   await put(code, "openspec/specs/payments/spec.md", PAYMENTS);
   await put(code, "openspec/changes/add-2fa/specs/auth/spec.md", DELTA);
@@ -289,7 +289,7 @@ describe("GET /api/openspec/specs", () => {
     expect(empty.body.specs).toEqual([]);
     expect(empty.body.problem).toContain("No OpenSpec specs in");
 
-    await put(data, "project-settings.json", "{}");
+    await put(data, "project-settings.yaml", "{}");
     const none = await call("GET", "/api/openspec/specs");
     expect(none.body.repo).toBeNull();
     expect(none.body.problem).toContain("No code repository in Project settings");
