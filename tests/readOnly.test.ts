@@ -8,8 +8,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { $ } from "bun";
 import { readOnlyEnv } from "../src/gateway/readOnly";
+import { PROFILE_FORMAT } from "../src/plugins/profile";
+import { statePath } from "../src/server/state";
+import { readSettings } from "./helpers/settingsFile";
 import {
   DEFAULT_READ_ONLY_REPO,
+  READ_ONLY_PLUGINS,
   readOnlyAllows,
   readReadOnlyConfig,
 } from "../src/server/readOnlyMode";
@@ -130,6 +134,16 @@ test("the state says read-only, names the repo and no one signed in", async () =
   expect((state.user as { name: string }).name).toBe("Visitor");
   const enabled = (state.plugins as { id: string; enabled: boolean }[]).filter((p) => p.enabled).map((p) => p.id);
   expect(enabled).toEqual(["specs", "roadmap"]);
+  // The site's own list, stamped on the settings of the open snapshot: it
+  // names Specs itself and says so, so the list is read as written — Specs
+  // and the roadmap, nothing picked from the snapshot's data.
+  expect(enabled).toEqual([...READ_ONLY_PLUGINS]);
+  const stored = (await readSettings(statePath(root))) as {
+    dataRepo: string;
+    plugins: { format: number; repos: Record<string, { enabled: string[]; checked?: boolean }> };
+  };
+  expect(stored.plugins.format).toBe(PROFILE_FORMAT);
+  expect(stored.plugins.repos[stored.dataRepo]).toEqual({ enabled: ["specs", "roadmap"] });
 });
 
 test("features and the roadmap are served", async () => {
