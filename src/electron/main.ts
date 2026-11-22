@@ -66,6 +66,7 @@ import { shutdown } from "../server/shutdown";
 import { initTelemetry } from "../server/telemetry";
 import { setTokenBackend } from "../server/tokenStore";
 import { setConfluenceMcpLauncher, setConfluenceMcpTokensFile } from "../server/agentMcp";
+import { setDesktopResources } from "../server/resourceUsage";
 import { exportConfluenceTokens, onConfluenceTokensChanged, setConfluenceTokenBackend } from "../server/confluenceTokens";
 import { setJiraTokenBackend } from "../server/jiraTokens";
 import { setQtestTokenBackend } from "../server/qtestTokens";
@@ -935,6 +936,23 @@ if (!app.requestSingleInstanceLock()) {
       env: { ELECTRON_RUN_AS_NODE: "1" },
     }));
     setConfluenceMcpTokensFile(() => exportConfluenceTokens(mcpTokensFile));
+    // Resources (src/server/resourceUsage.ts): Electron's own figure for
+    // each of its processes, where its app data lives, and its cache.
+    setDesktopResources({
+      userData,
+      metrics: () =>
+        app.getAppMetrics().map((m) => ({
+          pid: m.pid,
+          type: m.type,
+          ...(m.name || m.serviceName ? { name: m.name || m.serviceName } : {}),
+          // Electron reports kilobytes.
+          bytes: m.memory.workingSetSize * 1024,
+        })),
+      clearBrowserCache: async () => {
+        await session.defaultSession.clearCache();
+        await session.defaultSession.clearCodeCaches({});
+      },
+    });
     onConfluenceTokensChanged(() => {
       if (existsSync(mcpTokensFile)) void exportConfluenceTokens(mcpTokensFile).catch(() => {});
     });
