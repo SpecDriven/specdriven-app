@@ -4,6 +4,11 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.300 — 2026-11-23
+
+- The app finds out by itself where commits are signed; Settings no longer asks for GitHub urls ([#508](https://github.com/SpecDriven/specdriven-app/pull/508))
+- The update screen offers Install & restart, as the Updates page does, in place of Open another folder ([#507](https://github.com/SpecDriven/specdriven-app/pull/507))
+
 ## v0.1.299 — 2026-11-22
 
 - The public specs site's address bar names the project shown (?project=<id>) ([#504](https://github.com/SpecDriven/specdriven-app/pull/504))
