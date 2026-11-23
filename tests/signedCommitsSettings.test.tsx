@@ -1,44 +1,49 @@
 // Settings → Git & GitHub's Signed commits (specs/app/user-info-settings
-// .feature.md "Signed commits"): the list of GitHub urls whose commits the
-// app signs, each with what it covers and Remove, a field that adds one,
-// and the SSH key's passphrase — shown as kept or not, never as text.
-// Static markup of SignedCommits, and the rules behind its Add button.
+// .feature.md "Signed commits"): no list to fill in — the section says
+// whether the open folder's commits are signed and what told the app so —
+// and the SSH key's passphrase, shown as kept or not, never as text.
+// Static markup of SignedCommits, and the words of its status line.
 import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
-  addSignedRepo,
   deleteSigningPassphrase,
   putSigningPassphrase,
-  scopeWords,
   SignedCommits,
+  signingWords,
 } from "../src/frontend/SignedCommits";
 
-const saved = async () => true;
 const noop = () => {};
 
-test("lists each signed url with what it covers, and a field to add another", () => {
-  const markup = renderToStaticMarkup(
-    <SignedCommits
-      repos={["https://github.com/acme/specs", "https://github.com/team", "https://github.example.com"]}
-      passphraseKept={false}
-      onSave={saved}
-      onPassphraseKept={noop}
-    />,
-  );
+test("the section asks for no url, and says whether the open folder's commits are signed and why", () => {
+  const markup = renderToStaticMarkup(<SignedCommits signing="git-config" passphraseKept={false} onPassphraseKept={noop} />);
   expect(markup).toContain("Signed commits");
-  expect(markup).toContain("<strong>https://github.com/acme/specs</strong>");
-  expect(markup).toContain("this repository");
-  expect(markup).toContain("every repository of this owner");
-  expect(markup).toContain("every repository on this host");
-  expect(markup).toContain('aria-label="Stop signing commits to https://github.com/team"');
-  expect(markup).toContain('placeholder="https://github.com/owner/repo"');
-  // It says whose key signs: git's on this computer, not one the app holds.
+  // Nothing to list, add or remove.
+  expect(markup).not.toContain("https://github.com/owner/repo");
+  expect(markup).not.toContain("GitHub url whose commits are signed");
+  expect(markup).not.toMatch(/<button[^>]*>\s*Add\s*<\/button>/);
+  // What the app goes by, and whose key signs: git's on this computer.
+  expect(markup).toContain("commit.gpgsign");
   expect(markup).toContain("user.signingkey");
+  const status = markup.match(/<p class="hint signing-status" role="status">(.*?)<\/p>/)![1]!;
+  expect(status).toContain("commits are signed");
+  expect(status).toContain("git&#x27;s config on this computer says so");
+});
+
+test("the status line names what told the app, and says so when nothing did", () => {
+  expect(signingWords("git-config")).toContain("git's config on this computer says so (commit.gpgsign)");
+  expect(signingWords("history")).toContain("the latest commits on its remote are");
+  expect(signingWords("listed")).toContain("signedCommitRepos");
+  expect(signingWords("listed")).toContain("refused unsigned commits");
+  for (const none of [null, undefined, "", "something else"]) {
+    expect(signingWords(none)).toBe("The open folder's commits are not signed.");
+  }
+  const markup = renderToStaticMarkup(<SignedCommits signing={null} passphraseKept={false} onPassphraseKept={noop} />);
+  expect(markup).toContain("The open folder&#x27;s commits are not signed.");
 });
 
 test("the passphrase field is a password field, and a kept passphrase is named, not shown", () => {
   const none = renderToStaticMarkup(
-    <SignedCommits repos={[]} passphraseKept={false} onSave={saved} onPassphraseKept={noop} />,
+    <SignedCommits signing={null} passphraseKept={false} onPassphraseKept={noop} />,
   );
   const field = none.match(/<input[^>]*aria-label="SSH signing key passphrase"[^>]*>/)![0];
   expect(field).toContain('type="password"');
@@ -46,28 +51,11 @@ test("the passphrase field is a password field, and a kept passphrase is named, 
   expect(none).not.toContain("A passphrase is kept on this computer");
 
   const kept = renderToStaticMarkup(
-    <SignedCommits repos={[]} passphraseKept={true} onSave={saved} onPassphraseKept={noop} />,
+    <SignedCommits signing={null} passphraseKept={true} onPassphraseKept={noop} />,
   );
   expect(kept).toContain("A passphrase is kept on this computer");
   expect(kept).toContain('aria-label="Remove the kept passphrase"');
   expect(kept).toContain('placeholder="Replace the passphrase"');
-});
-
-test("adding takes a url in any form and keeps it as written; a non-url and a repeat are turned down", () => {
-  expect(addSignedRepo([], "git@github.com:acme/specs.git")).toEqual({ repos: ["https://github.com/acme/specs"] });
-  expect(addSignedRepo(["https://github.com/acme/specs"], "github.com/team")).toEqual({
-    repos: ["https://github.com/acme/specs", "https://github.com/team"],
-  });
-  expect(addSignedRepo([], "acme/specs")).toEqual({ error: expect.stringContaining("Enter a GitHub url") });
-  expect(addSignedRepo(["https://github.com/acme/specs"], "https://github.com/Acme/Specs.git")).toEqual({
-    error: "https://github.com/Acme/Specs is on the list already.",
-  });
-});
-
-test("a url is described by how much it covers", () => {
-  expect(scopeWords("https://github.com/acme/specs")).toBe("this repository");
-  expect(scopeWords("https://github.com/acme")).toBe("every repository of this owner");
-  expect(scopeWords("https://github.example.com")).toBe("every repository on this host");
 });
 
 test("saving a passphrase reports what the server said, and removing one asks the server to forget it", async () => {

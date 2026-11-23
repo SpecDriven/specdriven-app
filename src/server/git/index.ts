@@ -15,6 +15,7 @@ import { cliBackend, cliGitAvailable, remoteStop } from "./cli";
 import { ghAvailable, ghBackend, resetGhCache } from "./gh";
 import { jsBackend } from "./js";
 import { currentGitAccess, registerEngineLookup } from "./access";
+import { REFUSED_PUSH_HINT, rememberSigned, signatureRefusal } from "./signing";
 
 export type { PathMove, PullResult, SyncResult, WriteAccess } from "./backend";
 export { cliGitAvailable } from "./cli";
@@ -27,10 +28,12 @@ export { isRepoRoot } from "./repoRoot";
 export {
   normalizeSignedCommitRepos,
   parseRepoScope,
+  onSignedRepoLearned,
   setSignedCommitRepos,
-  signsAnyCommits,
+  signingReason,
   signsCommitsIn,
 } from "./signing";
+export type { SigningReason } from "./signing";
 export {
   checkSigningPassphrase,
   clearSigningPassphrase,
@@ -166,13 +169,18 @@ export function pushProblem(repoDir: string): string | null {
  */
 function notePush(repoDir: string, result: SyncResult, settles = false): SyncResult {
   if (result.failure) {
-    if (pushProblems.get(repoDir) !== result.failure) {
-      log.warn(`push failed: ${result.failure}`, { "specdriven.dir": repoDir });
+    // A remote that wants signatures says so here first: said in the app's
+    // own words after git's, and acted on (signAfterRefusal below).
+    const unsigned = !isHostedMode() && signatureRefusal(result.failure);
+    const failure = unsigned ? `${result.failure} — ${REFUSED_PUSH_HINT}` : result.failure;
+    if (pushProblems.get(repoDir) !== failure) {
+      log.warn(`push failed: ${failure}`, { "specdriven.dir": repoDir });
       // A push turned down may be the first word that this computer can no
       // longer write there: the remote is asked again, for the page to hear.
-      void writeAccessOf(repoDir, { fresh: true });
+      if (!unsigned) void writeAccessOf(repoDir, { fresh: true });
     }
-    pushProblems.set(repoDir, result.failure);
+    pushProblems.set(repoDir, failure);
+    if (unsigned) void signAfterRefusal(repoDir);
   } else if (result.pushed || settles) {
     // A push that went through is the remote's own answer.
     const known = accessAnswers.get(repoDir);
@@ -182,6 +190,42 @@ function notePush(repoDir: string, result: SyncResult, settles = false): SyncRes
     if (pushProblems.delete(repoDir)) log.info("saved changes reach the remote again", { "specdriven.dir": repoDir });
   }
   return result;
+}
+
+// The folders whose waiting commits are being signed after a refusal: the
+// push that follows may be refused again — the host does not know the key —
+// and must not start the same work over.
+const signing = new Set<string>();
+
+/**
+ * What a push refused for want of a signature leads to (signing.ts): the
+ * repository is remembered as one whose commits are signed, the commits
+ * that wait are signed again (resign.ts), and — when that signed any — they
+ * are pushed at once rather than at the next sync. Where nothing could be
+ * signed the push problem stands, in the words above.
+ */
+async function signAfterRefusal(repoDir: string): Promise<void> {
+  if (signing.has(repoDir)) return;
+  signing.add(repoDir);
+  try {
+    const url = await rememberSigned(repoDir);
+    const resign = backend().resign;
+    const signed = resign ? await resign(repoDir) : 0;
+    log.info(`the remote only takes signed commits: signing from now on, ${signed} waiting commit(s) signed again`, {
+      "specdriven.dir": repoDir,
+      ...(url ? { "git.url": url } : {}),
+    });
+    if (signed > 0) await push(repoDir);
+  } catch (e) {
+    log.warn(`could not sign the commits waiting to be pushed: ${(e as Error).message}`, { "specdriven.dir": repoDir });
+  } finally {
+    signing.delete(repoDir);
+  }
+}
+
+/** Resolves once no refused push is being acted on — for tests. */
+export async function signingSettled(): Promise<void> {
+  while (signing.size > 0) await new Promise((resolve) => setTimeout(resolve, 10));
 }
 
 // Whether each data folder's remote takes pushes from this computer

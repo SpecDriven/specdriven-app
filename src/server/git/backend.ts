@@ -110,4 +110,10 @@ export interface GitBackend {
   checkoutRef(repoDir: string, ref: string): Promise<string>;
   /** The commit HEAD is at. */
   headCommit(repoDir: string): Promise<string>;
+  /**
+   * Sign the commits that wait to be pushed (resign.ts), answering how many
+   * were unsigned. Only on the engines that can sign: the bundled one has
+   * none.
+   */
+  resign?(repoDir: string): Promise<number>;
 }

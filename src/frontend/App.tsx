@@ -10204,12 +10204,11 @@ export function App() {
           </span>
         </label>
         {/* Signed commits (specs/app/user-info-settings.feature.md "Signed
-            commits"): the GitHub urls whose commits the app signs, and the
-            passphrase of the SSH key that signs them. */}
+            commits"): whether the app signs the open folder's commits, and
+            the passphrase of the SSH key that signs them. */}
         <SignedCommits
-          repos={Array.isArray(settingsPayload.signedCommitRepos) ? (settingsPayload.signedCommitRepos as string[]) : []}
+          signing={settingsPayload.commitSigning}
           passphraseKept={settingsPayload.signingPassphrase === true}
-          onSave={(repos) => patchSettings({ signedCommitRepos: repos })}
           onPassphraseKept={(kept) => setSettingsPayload((p) => ({ ...p, signingPassphrase: kept }))}
         />
       </PageSection>

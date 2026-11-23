@@ -1,9 +1,11 @@
 // Automates specs/app/user-info-settings.feature.md "Signed commits": some
-// repositories only take signed commits, so Settings lists the GitHub urls
-// whose commits the app signs, and a commit to a repository on the list is
-// signed the way git on this computer signs — its key, and its git user as
-// the author, since a signature only verifies for the email its key was
-// made for.
+// repositories only take signed commits, and the app finds out which by
+// itself — git's own config signs there, the newest commits on the remote
+// are all signed, or the remote refused a push for want of a signature,
+// which it remembers in the settings file's list of GitHub urls. A commit
+// in such a repository is signed the way git on this computer signs — its
+// key, and its git user as the author, since a signature only verifies for
+// the email its key was made for.
 //
 // The signatures here are SSH ones: a throwaway key made by ssh-keygen, named
 // in the test repository's own config. Nothing reads the developer's git
@@ -13,26 +15,34 @@
 
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { $ } from "bun";
 import { handleApi, reloader } from "../src/server/api";
-import { commitAndPush, pull, pushProblem, setGitEngine, syncSavedChanges } from "../src/server/git";
+import { commitAndPush, pull, push, pushProblem, setGitEngine, signingSettled, syncSavedChanges } from "../src/server/git";
+import { parseCommit, resignWaiting } from "../src/server/git/resign";
 import {
   BUILT_IN_CANNOT_SIGN,
   LOCKED_KEY_HINT,
+  REFUSED_PUSH_HINT,
+  SIGNED_HISTORY_DEPTH,
   SIGNING_HINT,
   SIGN_CONFIG,
+  allSigned,
+  forgetSigning,
   lockedKey,
   makesCommit,
   maySign,
   normalizeSignedCommitRepos,
+  onSignedRepoLearned,
   parseRepoScope,
+  rememberSigned,
   scopeUrl,
   setSignedCommitRepos,
+  signatureRefusal,
   signingHint,
-  signsAnyCommits,
+  signingReason,
   signsCommitsIn,
   signsCommitsTo,
 } from "../src/server/git/signing";
@@ -100,6 +110,7 @@ afterEach(async () => {
   gh = null;
   setGitEngine(null);
   setSignedCommitRepos([]);
+  forgetSigning();
   // The store remembers what it read: forget it with the home it was read from.
   setSecretBackend("commit-signing", null);
   await rm(root, { recursive: true, force: true });
@@ -231,7 +242,6 @@ test("the list is kept as written urls, each once", () => {
 
 test("a remote is signed when a listed url covers its repository, its owner or its host", () => {
   setSignedCommitRepos([LISTED, "https://github.com/team", "https://github.example.com"]);
-  expect(signsAnyCommits()).toBe(true);
   // The repository, however its remote is written, whatever the case.
   expect(signsCommitsTo("https://github.com/acme/specs.git")).toBe(true);
   expect(signsCommitsTo("git@github.com:Acme/Specs.git")).toBe(true);
@@ -247,11 +257,288 @@ test("a remote is signed when a listed url covers its repository, its owner or i
   expect(signsCommitsTo(null)).toBe(false);
 });
 
-test("with nothing listed no commit is signed", async () => {
+test("with nothing listed, and nothing in git to say so, no commit is signed", async () => {
   const repo = await repoWithOrigin(LISTED, { key: false });
-  expect(signsAnyCommits()).toBe(false);
   expect(signsCommitsTo(LISTED)).toBe(false);
+  expect(await signingReason(repo)).toBeNull();
   expect(await signsCommitsIn(repo)).toBe(false);
+});
+
+// --- What tells the app -------------------------------------------------------------
+
+test.skipIf(!SSH_KEYGEN)("where git's own config signs, the app signs too, as this computer's git user", async () => {
+  const repo = await repoWithOrigin("https://github.com/acme/other.git");
+  await git(repo, "config", "commit.gpgsign", "true");
+  signedInWithGh();
+
+  expect(await signingReason(repo)).toBe("git-config");
+  await Bun.write(join(repo, "specs/one.feature.md"), "# One\n");
+  await commitAndPush(repo, "specs/one.feature.md", "Add one");
+
+  // Signed by git's rule, and authored by the key's own git user: left to
+  // the GitHub account, the signature would be for somebody else's email.
+  expect(await signature(repo)).toBe("G");
+  expect(await author(repo)).toBe("Repo Config <repo@example.com>");
+});
+
+test("what git said about a folder stands for a while, rather than being asked at every commit", async () => {
+  const repo = await repoWithOrigin("https://github.com/acme/other.git", { key: false });
+  expect(await signingReason(repo)).toBeNull();
+  await git(repo, "config", "commit.gpgsign", "true");
+  expect(await signingReason(repo)).toBeNull();
+  forgetSigning();
+  expect(await signingReason(repo)).toBe("git-config");
+  // The list is the app's own, and is in effect at once.
+  await git(repo, "config", "--unset", "commit.gpgsign");
+  forgetSigning();
+  expect(await signingReason(repo)).toBeNull();
+  setSignedCommitRepos(["https://github.com/acme"]);
+  expect(await signingReason(repo)).toBe("listed");
+});
+
+test("a log is signed when every commit in it carries a signature, and there is one", () => {
+  const commit = (sha: string, signed: boolean, message = "Add one") =>
+    `commit ${sha}\ntree ${"a".repeat(40)}\nauthor A <a@example.com> 1700000000 +0100\ncommitter A <a@example.com> 1700000000 +0100\n${
+      signed ? "gpgsig -----BEGIN SSH SIGNATURE-----\n U1NIU0lH\n -----END SSH SIGNATURE-----\n" : ""
+    }\n    ${message}\n`;
+  expect(allSigned(commit("1".repeat(40), true) + "\n" + commit("2".repeat(40), true))).toBe(true);
+  expect(allSigned(commit("1".repeat(40), true) + "\n" + commit("2".repeat(40), false))).toBe(false);
+  // A message that talks about signatures is indented, and is no header.
+  expect(allSigned(commit("1".repeat(40), false, "gpgsig is what a signed commit has"))).toBe(false);
+  expect(allSigned("")).toBe(false);
+});
+
+test.skipIf(!SSH_KEYGEN)("where the newest commits on the remote are all signed, the app signs too — on a computer that has a key", async () => {
+  const { a, b } = await twoClones(root);
+  await giveSigningKey(b, "test@example.com");
+  setGitEngine("cli");
+  // The remote's history as cloned: nobody signed anything.
+  expect(await signingReason(a)).toBeNull();
+
+  // A teammate who signs pushes as many commits as the app looks at.
+  for (let n = 1; n <= SIGNED_HISTORY_DEPTH; n++) {
+    await Bun.write(join(b, `specs/theirs-${n}.feature.md`), `# Theirs ${n}\n`);
+    await git(b, "add", ".");
+    await git(b, "-c", "commit.gpgsign=true", "commit", "-m", `theirs ${n}`);
+  }
+  await git(b, "push");
+  expect((await pull(a)).ok).toBe(true);
+
+  // Without a key this computer could not keep to it, and must still save.
+  forgetSigning();
+  expect(await signingReason(a)).toBeNull();
+  await giveSigningKey(a, "test@example.com");
+  forgetSigning();
+  expect(await signingReason(a)).toBe("history");
+
+  await Bun.write(join(a, "specs/mine.feature.md"), "# Mine\n");
+  expect((await syncSavedChanges(a)).pushed).toBe(true);
+  expect(await signature(a)).toBe("G");
+
+  // One unsigned commit among the newest, and it is no rule any more.
+  await Bun.write(join(b, "specs/unsigned.feature.md"), "# Unsigned\n");
+  await git(b, "pull");
+  await git(b, "add", ".");
+  await git(b, "commit", "-m", "unsigned");
+  await git(b, "push");
+  expect((await pull(a)).ok).toBe(true);
+  forgetSigning();
+  expect(await signingReason(a)).toBeNull();
+});
+
+// --- A push refused for want of a signature -----------------------------------------
+
+// What a GitHub branch that requires signatures does, as a hook of the bare
+// origin: a push holding a commit without a signature is refused, in
+// GitHub's words. Only git and the shell's own words — the tests' PATH
+// holds git alone.
+const SIGNATURES_REQUIRED = `#!/bin/sh
+while read old new ref; do
+  case "$old" in *[!0]*) range="$old..$new" ;; *) range="$new" ;; esac
+  for commit in $(git rev-list "$range"); do
+    case "$(git cat-file commit "$commit")" in
+      *"
+gpgsig "*) ;;
+      *)
+        echo "error: GH006: Protected branch update failed for $ref." >&2
+        echo "error: Commits must have verified signatures." >&2
+        exit 1
+        ;;
+    esac
+  done
+done
+`;
+
+async function requireSignatures(originDir: string): Promise<void> {
+  await mkdir(join(originDir, "hooks"), { recursive: true });
+  await rm(join(originDir, "hooks", "pre-receive"), { force: true });
+  await symlink(cachedExecutable(SIGNATURES_REQUIRED), join(originDir, "hooks", "pre-receive"));
+}
+
+test("a refused push is recognized by the host's words about signatures", () => {
+  expect(
+    signatureRefusal(
+      "remote: error: GH006: Protected branch update failed for refs/heads/main.\nremote: error: Commits must have verified signatures.",
+    ),
+  ).toBe(true);
+  expect(
+    signatureRefusal(
+      "remote: error: GH013: Repository rule violations found for refs/heads/main.\nremote: - Commits must have verified signatures.\nremote:   Found 1 violation:",
+    ),
+  ).toBe(true);
+  expect(signatureRefusal("remote: GitLab: Commit must be signed with a GPG key")).toBe(true);
+  expect(signatureRefusal("remote: Permission to acme/specs.git denied to octocat.")).toBe(false);
+  expect(signatureRefusal("! [rejected] main -> main (non-fast-forward)")).toBe(false);
+});
+
+test("a commit object is read for what making it again needs", () => {
+  const raw =
+    `tree ${"a".repeat(40)}\nparent ${"b".repeat(40)}\nparent ${"c".repeat(40)}\n` +
+    "author Ada Lovelace <ada@example.com> 1700000000 +0100\ncommitter Octo Cat <octo@example.com> 1700000001 +0000\n" +
+    "\nMerge theirs\n\ngpgsig is not a header down here\n";
+  expect(parseCommit(raw)).toEqual({
+    tree: "a".repeat(40),
+    parents: ["b".repeat(40), "c".repeat(40)],
+    author: { name: "Ada Lovelace", email: "ada@example.com", date: "@1700000000 +0100" },
+    message: "Merge theirs\n\ngpgsig is not a header down here\n",
+    signed: false,
+  });
+  expect(parseCommit(raw.replace("\n\nMerge", "\ngpgsig -----BEGIN SSH SIGNATURE-----\n abc\n -----END SSH SIGNATURE-----\n\nMerge"))!.signed).toBe(true);
+  expect(parseCommit("not a commit")).toBeNull();
+});
+
+test("a repository that refused unsigned commits is remembered once, by its url, and a remote without one for as long as the app runs", async () => {
+  const kept: string[] = [];
+  const writer = onSignedRepoLearned(async (url) => void kept.push(url));
+  try {
+    const repo = await repoWithOrigin("git@github.com:acme/specs.git", { key: false });
+    expect(await signingReason(repo)).toBeNull();
+    expect(await rememberSigned(repo)).toBe(LISTED);
+    // In effect at once, handed to the settings file's writer, and not twice.
+    expect(await signingReason(repo)).toBe("listed");
+    expect(await rememberSigned(repo)).toBe(LISTED);
+    expect(kept).toEqual([LISTED]);
+
+    // A remote that is a folder on this computer has no url the list could hold.
+    const { a } = await twoClones(root);
+    expect(await rememberSigned(a)).toBeNull();
+    expect(await signingReason(a)).toBe("listed");
+    expect(kept).toEqual([LISTED]);
+    forgetSigning();
+    expect(await signingReason(a)).toBeNull();
+  } finally {
+    onSignedRepoLearned(writer);
+  }
+});
+
+test.skipIf(!SSH_KEYGEN)("only commits the remote lacks are signed again, and only while one of them is unsigned", async () => {
+  const { a } = await twoClones(root);
+  await giveSigningKey(a, "test@example.com");
+  const head = async () => (await git(a, "rev-parse", "HEAD")).stdout.toString().trim();
+  const seeded = await head();
+
+  // Nothing waits: the commits the remote holds are nobody's to make again.
+  expect(await resignWaiting(a)).toBe(0);
+  expect(await head()).toBe(seeded);
+
+  await Bun.write(join(a, "specs/waiting.feature.md"), "# Waiting\n");
+  await git(a, "add", ".");
+  await git(a, "commit", "-m", "waiting");
+  expect(await resignWaiting(a)).toBe(1);
+  expect(await signature(a)).toBe("G");
+  expect((await git(a, "rev-parse", "HEAD~1")).stdout.toString().trim()).toBe(seeded);
+
+  // All signed now: a second refusal — a key the host does not know — makes nothing again.
+  const signed = await head();
+  expect(await resignWaiting(a)).toBe(0);
+  expect(await head()).toBe(signed);
+});
+
+test.skipIf(!SSH_KEYGEN)("a push refused for want of a signature is remembered, and the waiting commits are signed and pushed", async () => {
+  const { a, originDir } = await twoClones(root);
+  await writeState({ dataRepo: a }, root);
+  // `a` is a GitHub repository's clone: its origin is the url, and git
+  // reaches the bare origin on disk in its place.
+  await git(a, "config", "remote.origin.url", LISTED);
+  await git(a, "config", `url.${originDir}.insteadOf`, LISTED);
+  await giveSigningKey(a, "test@example.com");
+  await requireSignatures(originDir);
+  setGitEngine("cli");
+  expect(await signingReason(a)).toBeNull();
+
+  // Two commits made before anyone knew, by somebody else's hand, and an
+  // edit that is saved but not committed yet.
+  for (const n of [1, 2]) {
+    await Bun.write(join(a, `specs/waiting-${n}.feature.md`), `# Waiting ${n}\n`);
+    await git(a, "add", ".");
+    await git(a, "-c", "user.name=Ada Lovelace", "-c", "user.email=ada@example.com", "commit", "-m", `waiting ${n}\n\nwith a body`);
+  }
+  await Bun.write(join(a, "specs/unsaved.feature.md"), "# Not committed yet\n");
+  const before = (await git(a, "log", "-2", "--format=%an <%ae>|%at|%B")).stdout.toString();
+
+  const refused = await push(a);
+  expect(refused.pushed).toBe(false);
+  expect(refused.failure).toContain("Commits must have verified signatures");
+  expect(pushProblem(a)).toContain(REFUSED_PUSH_HINT);
+  await signingSettled();
+
+  // Remembered: in effect, and in the settings file for the next start.
+  expect(await signingReason(a)).toBe("listed");
+  expect((await readState(root)).signedCommitRepos).toEqual([LISTED]);
+  // The same two commits — message, author, author date — now signed, and
+  // on the remote; what was not committed is where it was.
+  expect((await git(a, "log", "-2", "--format=%an <%ae>|%at|%B")).stdout.toString()).toBe(before);
+  expect(await signature(a, "HEAD")).toBe("G");
+  expect(await signature(a, "HEAD~1")).toBe("G");
+  expect((await git(a, "rev-parse", "origin/main")).stdout.toString()).toBe((await git(a, "rev-parse", "HEAD")).stdout.toString());
+  expect(pushProblem(a)).toBeNull();
+  expect((await git(a, "status", "--porcelain")).stdout.toString().trim()).toBe("?? specs/unsaved.feature.md");
+
+  // From now on a save is signed when it is made, and goes straight through.
+  const synced = await syncSavedChanges(a);
+  expect(synced.pushed).toBe(true);
+  expect(await signature(a)).toBe("G");
+});
+
+test.skipIf(!SSH_KEYGEN)("where the waiting commits cannot be signed, the push problem stands and the branch has not moved", async () => {
+  const { a, originDir } = await twoClones(root);
+  await writeState({ dataRepo: a }, root);
+  await git(a, "config", "remote.origin.url", LISTED);
+  await git(a, "config", `url.${originDir}.insteadOf`, LISTED);
+  await giveSigningKey(a, "test@example.com");
+  await git(a, "config", "user.signingkey", join(root, "no-such-key.pub"));
+  await requireSignatures(originDir);
+  setGitEngine("cli");
+
+  await Bun.write(join(a, "specs/waiting.feature.md"), "# Waiting\n");
+  await git(a, "add", ".");
+  await git(a, "commit", "-m", "waiting");
+  const head = (await git(a, "rev-parse", "HEAD")).stdout.toString();
+
+  expect((await push(a)).pushed).toBe(false);
+  await signingSettled();
+
+  expect((await git(a, "rev-parse", "HEAD")).stdout.toString()).toBe(head);
+  expect(pushProblem(a)).toContain("Commits must have verified signatures");
+  expect(pushProblem(a)).toContain(REFUSED_PUSH_HINT);
+  // Still remembered: the next commit is signed, or says why it cannot be.
+  expect(await signingReason(a)).toBe("listed");
+});
+
+test("Settings is told why the open folder's commits are signed", async () => {
+  const repo = await repoWithOrigin("https://github.com/acme/other.git", { key: false });
+  await writeState({ dataRepo: repo }, root);
+  const reason = async () =>
+    ((await (await send("GET", "/api/state")).json()) as { commitSigning: string | null }).commitSigning;
+
+  expect(await reason()).toBeNull();
+  await git(repo, "config", "commit.gpgsign", "true");
+  forgetSigning();
+  expect(await reason()).toBe("git-config");
+  await git(repo, "config", "--unset", "commit.gpgsign");
+  forgetSigning();
+  setSignedCommitRepos(["https://github.com/acme/other"]);
+  expect(await reason()).toBe("listed");
 });
 
 // --- The setting --------------------------------------------------------------------
@@ -372,8 +659,13 @@ test("the built-in git cannot sign, so it refuses a commit to a listed repositor
   // No unsigned commit was left behind for the remote to turn away.
   expect((await $`git -C ${repo} rev-parse --verify --quiet HEAD`.quiet().nothrow()).exitCode).not.toBe(0);
 
-  // Off the list, the same engine commits as before.
+  // Off the list, the same engine commits as before — also where signing
+  // is only git's own habit, which this engine cannot keep to: nobody is
+  // stopped from saving for it.
   setSignedCommitRepos([]);
+  await git(repo, "config", "commit.gpgsign", "true");
+  forgetSigning();
+  expect(await signingReason(repo)).toBe("git-config");
   await commitAndPush(repo, "specs/one.feature.md", "Add one");
   expect((await git(repo, "log", "-1", "--format=%s")).stdout.toString().trim()).toBe("Add one");
 });

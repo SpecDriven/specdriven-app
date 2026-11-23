@@ -31,6 +31,7 @@ import { getLogger } from "../telemetry";
 import type { RunOptions, RunResult } from "../run";
 import type { GitBackend, PathMove, PullResult, SyncResult, WriteAccess } from "./backend";
 import { isRepoRoot } from "./repoRoot";
+import { resignWaiting } from "./resign";
 import { BUILT_IN_CANNOT_SIGN, SIGN_CONFIG, makesCommit, maySign, signingHint, signsCommitsIn } from "./signing";
 import { signingEnv, signingTimeoutMs } from "./signingKey";
 import { localTurn, remoteTurn } from "./turns";
@@ -986,6 +987,9 @@ export function createGitBackend({
     hasUpstream,
     writeAccess,
     commitAllAndPublish,
+    // The bundled engine cannot sign. The commits are made by the git
+    // binary itself, in the folder's local turn: the branch moves.
+    ...(name === "js" ? {} : { resign: (repoDir: string) => local(repoDir, () => resignWaiting(repoDir)) }),
   };
 }
 

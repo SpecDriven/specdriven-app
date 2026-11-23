@@ -1,13 +1,13 @@
 import { useState } from "react";
-import { normalizeSignedCommitRepos, parseRepoScope, scopeUrl } from "../server/git/repoScope";
 
 // Settings → Git & GitHub's Signed commits (specs/app/user-info-settings
-// .feature.md "Signed commits"): the GitHub urls whose commits the app
-// signs — a repository, an owner or a host — and the passphrase of the SSH
-// key that signs them, for a key no agent holds. The server signs with the
-// key in this computer's git config (src/server/git/signing.ts) and keeps
-// the passphrase apart from the settings file (signingKey.ts); it is never
-// sent back, so the field only ever shows what is being typed.
+// .feature.md "Signed commits"): whether the app signs its commits in the
+// open folder, and why — it finds that out itself (src/server/git
+// /signing.ts) — and the passphrase of the SSH key that signs them, for a
+// key no agent holds. The server signs with the key in this computer's git
+// config and keeps the passphrase apart from the settings file
+// (signingKey.ts); it is never sent back, so the field only ever shows what
+// is being typed.
 
 /** What saving a passphrase answered: whether it was tried on a key, and which. */
 export interface PassphraseSaved {
@@ -39,62 +39,38 @@ export async function deleteSigningPassphrase(): Promise<boolean> {
 }
 
 /**
- * The list with `entry` added, or why it cannot be: not a url, or on the
- * list already. The url is kept as the server writes it.
+ * Whether the open folder's commits are signed, and what told the app so
+ * (the server's `commitSigning`): git's config, the remote's latest
+ * commits, or the settings file's list, where the app notes a remote that
+ * refused unsigned commits. Anything else reads as not signed.
  */
-export function addSignedRepo(repos: readonly string[], entry: string): { repos: string[] } | { error: string } {
-  const scope = parseRepoScope(entry);
-  if (!scope) {
-    return {
-      error:
-        "Enter a GitHub url: a repository (https://github.com/owner/repo), an owner (https://github.com/owner) or a host.",
-    };
+export function signingWords(reason: unknown): string {
+  switch (reason) {
+    case "git-config":
+      return "The open folder's commits are signed: git's config on this computer says so (commit.gpgsign).";
+    case "history":
+      return "The open folder's commits are signed: the latest commits on its remote are, and git has a signing key.";
+    case "listed":
+      return "The open folder's commits are signed: its repository is on the settings file's list (signedCommitRepos), where the app notes a remote that refused unsigned commits.";
+    default:
+      return "The open folder's commits are not signed.";
   }
-  const url = scopeUrl(scope);
-  const next = normalizeSignedCommitRepos([...repos, url]);
-  return next.length === normalizeSignedCommitRepos(repos).length ? { error: `${url} is on the list already.` } : { repos: next };
-}
-
-/** What a listed url covers, in words. */
-export function scopeWords(url: string): string {
-  const depth = parseRepoScope(url)?.path.length;
-  return depth === 0 ? "every repository on this host" : depth === 1 ? "every repository of this owner" : "this repository";
 }
 
 export function SignedCommits({
-  repos,
+  signing,
   passphraseKept,
-  onSave,
   onPassphraseKept,
 }: {
-  repos: string[];
+  /** Why the open folder's commits are signed (the server's `commitSigning`); null where they are not. */
+  signing: unknown;
   /** Whether the server keeps a passphrase for the signing key. */
   passphraseKept: boolean;
-  /** Save the whole list; false when the server refused (it says why elsewhere on the page). */
-  onSave: (repos: string[]) => Promise<boolean>;
   onPassphraseKept: (kept: boolean) => void;
 }) {
-  const [draft, setDraft] = useState("");
-  const [status, setStatus] = useState<string | null>(null);
   const [passphrase, setPassphrase] = useState("");
   const [keyStatus, setKeyStatus] = useState<{ text: string; error: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
-
-  const add = async () => {
-    if (!draft.trim()) return;
-    const result = addSignedRepo(repos, draft);
-    if ("error" in result) {
-      setStatus(result.error);
-      return;
-    }
-    setStatus(null);
-    if (await onSave(result.repos)) setDraft("");
-  };
-
-  const remove = async (url: string) => {
-    setStatus(null);
-    await onSave(repos.filter((r) => r !== url));
-  };
 
   const savePassphrase = async () => {
     if (!passphrase) return;
@@ -129,43 +105,14 @@ export function SignedCommits({
     <div className="settings-row auth-section signed-commits">
       <span className="auth-title">Signed commits</span>
       <p className="hint">
-        Some repositories only take signed commits. The app signs its commits to the ones listed here with the
-        signing key in this computer&apos;s git config (<code>user.signingkey</code>, <code>gpg.format</code>), as this
-        computer&apos;s git user.
+        Some repositories only take signed commits. The app signs its commits wherever git on this computer does
+        (<code>commit.gpgsign</code>), where the latest commits on a repository&apos;s remote are all signed, and once
+        a remote has refused unsigned ones — with the signing key in this computer&apos;s git config (
+        <code>user.signingkey</code>, <code>gpg.format</code>), as this computer&apos;s git user.
       </p>
-      <div className="paste-token confluence-tokens">
-        {repos.length > 0 && (
-          <ul className="confluence-wikis signed-repos">
-            {repos.map((url) => (
-              <li key={url}>
-                <span>
-                  <strong>{url}</strong>
-                  <span className="hint"> — {scopeWords(url)}</span>
-                </span>
-                <button className="link" onClick={() => void remove(url)} aria-label={`Stop signing commits to ${url}`}>
-                  Remove
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-        <div className="auth-row">
-          <input
-            aria-label="GitHub url whose commits are signed"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void add();
-            }}
-            placeholder="https://github.com/owner/repo"
-          />
-          <button className="btn btn-secondary" disabled={!draft.trim()} onClick={() => void add()}>
-            Add
-          </button>
-        </div>
-        <span className="hint">A repository, an owner (all of its repositories) or a whole GitHub host.</span>
-        {status && <p className="error">{status}</p>}
-      </div>
+      <p className="hint signing-status" role="status">
+        {signingWords(signing)}
+      </p>
       <div className="paste-token confluence-tokens signing-passphrase">
         <span className="settings-row-hint">
           SSH key passphrase — for a signing key that is locked with one and not held by an ssh-agent:

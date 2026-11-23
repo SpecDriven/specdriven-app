@@ -87,8 +87,10 @@ import {
   saveSigningPassphrase,
   setAppSignIn,
   setGitEngine,
+  onSignedRepoLearned,
   setSignedCommitRepos,
   signingPassphrase,
+  signingReason,
   writeAccessOf,
 } from "./git";
 import {
@@ -1193,6 +1195,9 @@ async function stateFields(state: SpecDrivenState) {
     // Whether a passphrase for the SSH signing key is kept
     // (src/server/git/signingKey.ts) — never the passphrase itself.
     signingPassphrase: !isHostedMode() && !isDemoMode() && (await signingPassphrase()) !== null,
+    // Why the app signs its commits in the open folder (src/server/git
+    // /signing.ts), or null where it signs none: Settings says which.
+    commitSigning: await commitSigningField(state),
     ...(await authFields()),
   };
 }
@@ -2120,6 +2125,33 @@ const postAuthToken: Handler = async (req) => {
   }
 };
 
+/** The open folder, when it is a git repository of its own: where the app's commits are made. */
+async function openRepoDir(state: SpecDrivenState): Promise<string | null> {
+  const open = codeRepoMode(state) ? state.openCodeRepo! : specsOpen(state) ? dataRepoDir(state.dataRepo!, getAppRoot()) : null;
+  return open && (await isRepoRoot(open)) ? open : null;
+}
+
+/** Why commits are signed in the open folder; null where none are, and where nothing signs at all. */
+async function commitSigningField(state: SpecDrivenState): Promise<string | null> {
+  if (isHostedMode() || isDemoMode()) return null;
+  const dir = await openRepoDir(state).catch(() => null);
+  const reason = dir ? await signingReason(dir).catch(() => null) : null;
+  // The built-in engine signs nothing: only a repository on the list makes
+  // a difference there — it refuses to commit to one.
+  return currentEngine() === "js" && reason !== "listed" ? null : reason;
+}
+
+// A repository whose remote refused unsigned commits (src/server/git
+// /signing.ts) joins the settings file's list, so the app still signs there
+// after a restart. Read afresh: the file may have changed since the push.
+onSignedRepoLearned(async (url) => {
+  const state = await readState(getAppRoot());
+  const repos = normalizeSignedCommitRepos([...normalizeSignedCommitRepos(state.signedCommitRepos), url]);
+  state.signedCommitRepos = repos;
+  await writeState(state, getAppRoot());
+  setSignedCommitRepos(repos);
+});
+
 // The SSH signing key's passphrase (specs/app/user-info-settings.feature.md
 // "Signed commits", src/server/git/signingKey.ts): kept on this device for
 // the app to sign with, tried on the key git signs with in the open folder
@@ -2131,9 +2163,7 @@ const putSigningPassphrase: Handler = async (req) => {
   const passphrase = body.passphrase as string;
   // git config is read where the commits are made: the open folder's own
   // config, and an `includeIf "gitdir:…"` rule, may name the key.
-  const state = await readState(getAppRoot());
-  const open = codeRepoMode(state) ? state.openCodeRepo! : specsOpen(state) ? dataRepoDir(state.dataRepo!, getAppRoot()) : null;
-  const dir = open && (await isRepoRoot(open)) ? open : null;
+  const dir = await openRepoDir(await readState(getAppRoot()));
   const check = await checkSigningPassphrase(passphrase, dir);
   if (check.outcome === "wrong") {
     return json({ error: `That passphrase does not unlock ${check.key}` }, 400);

@@ -2,7 +2,7 @@
 // own gh installation cannot change which git engine the suite runs on
 // (tests/helpers/binPath.ts).
 
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setPermanentMarketplacesForTests } from "../../src/plugins/marketplace";
@@ -17,6 +17,16 @@ isolatePath();
 // folder (2026-11-09). Every test gets an empty home of its own; the tests
 // that need a particular one still set SPECDRIVEN_HOME themselves.
 process.env.SPECDRIVEN_HOME = mkdtempSync(join(tmpdir(), "specdriven-test-home-"));
+
+// The developer's own git config stays out of every test: the app signs its
+// commits wherever git's config does (src/server/git/signing.ts), and a
+// `commit.gpgsign` there would sign — and re-author — the commits of every
+// test that makes one; a signing setup that cannot run (no gpg, a locked
+// key) would fail them all. An empty file, as on a build machine that has
+// none; the tests of a global config point git at their own.
+const gitConfigDir = mkdtempSync(join(tmpdir(), "specdriven-test-gitconfig-"));
+writeFileSync(join(gitConfigDir, "gitconfig"), "");
+process.env.GIT_CONFIG_GLOBAL = join(gitConfigDir, "gitconfig");
 
 // File logging (src/server/telemetry.ts) is on by default; tests must not
 // write into the developer's real ~/.specdriven/logs. Tests of the file sink

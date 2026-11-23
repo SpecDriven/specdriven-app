@@ -29,7 +29,7 @@ import { cloneFailure, createGitBackend, gitTimeouts, signInHint, withoutUserinf
 import type { GitRun } from "./cli";
 import { isHostedMode } from "../hostedMode";
 import { nodeFileSystem, plainFileSystem } from "./nodeFs";
-import { BUILT_IN_CANNOT_SIGN, signsCommitsIn } from "./signing";
+import { BUILT_IN_CANNOT_SIGN, signingReason } from "./signing";
 
 /**
  * Always true: the engine ships with the app. It exists so the engine layer
@@ -165,13 +165,15 @@ async function identity(): Promise<IdentityOverride> {
  * by jsClone. The `process.cwd()` fallback only exists to satisfy the GitRun
  * signature — this engine is never run with a null directory.
  *
- * just-git cannot sign, so where commits are signed (signing.ts) a commit
- * is refused: an unsigned one would be turned away by the remote, and stay
- * on this computer for good. What was saved stays in the working tree, and
+ * just-git cannot sign, so in a repository known to take only signed
+ * commits (signing.ts: on the list, by hand or after a refused push) a
+ * commit is refused: an unsigned one would be turned away by the remote,
+ * and stay on this computer for good. Where signing is only git's habit —
+ * its config, the history — this engine commits unsigned, as it always did. What was saved stays in the working tree, and
  * is committed once an engine that signs is in use.
  */
 const jsRun: GitRun = async (repoDir, ...args) => {
-  if (repoDir !== null && args[0] === "commit" && (await signsCommitsIn(repoDir))) {
+  if (repoDir !== null && args[0] === "commit" && (await signingReason(repoDir)) === "listed") {
     return { exitCode: 1, stdout: "", stderr: BUILT_IN_CANNOT_SIGN } satisfies RunResult;
   }
   // A hosted worker's repositories hold no symlinks (nodeFs.ts plainFileSystem).
