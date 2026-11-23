@@ -5107,7 +5107,8 @@ export function matchApi(method: string, pathname: string) {
  * none of them writes to the data repo. The data viewer reads the store's
  * bytes as they are, migrating nothing, so it is exactly what helps then.
  */
-const OUTDATED_ALLOWED = /^\/api\/(state|reload|choose-folder|folder-kind|logs|auth|data)(\/|$)/;
+// app-update: the update screen's Update button installs a newer app from here.
+const OUTDATED_ALLOWED = /^\/api\/(state|reload|choose-folder|folder-kind|logs|auth|data|app-update)(\/|$)/;
 
 /** Serve an API request, or null when the path is not an API route. */
 export function handleApi(req: Request, opts: { workspace?: Workspace } = {}): Promise<Response | null> {

@@ -165,7 +165,7 @@ test("the API refuses writes to a blocked folder and marks its reads", async () 
   });
 });
 
-test("switching folders, Sync, sign-in, the log and the data viewer still work", async () => {
+test("switching folders, Sync, sign-in, the log, the data viewer and updating the app still work", async () => {
   await writeState({ dataRepo: repos.a, reloadFrequencySeconds: 0 }, root);
   await teammateRaisesFormat();
   await git(repos.a, "pull");
@@ -177,6 +177,7 @@ test("switching folders, Sync, sign-in, the log and the data viewer still work",
     new Request("http://localhost/api/reload", { method: "POST" }),
     new Request("http://localhost/api/logs"),
     new Request("http://localhost/api/data/tables"),
+    new Request("http://localhost/api/app-update"),
     new Request("http://localhost/api/auth/github/poll", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

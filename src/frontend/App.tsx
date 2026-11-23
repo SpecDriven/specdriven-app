@@ -9610,7 +9610,7 @@ export function App() {
     );
 
   // specs/app/data-format.feature.md: the folder holds data a newer app
-  // wrote; nothing else is shown until the user updates or switches folders.
+  // wrote; nothing else is shown until the user updates.
   if (outdated && !needsRepo)
     return (
       <AppOutdated
@@ -9627,11 +9627,6 @@ export function App() {
           } finally {
             setCheckingOutdated(false);
           }
-        }}
-        onOtherFolder={() => {
-          setOutdated(null);
-          setRepoError(null);
-          setNeedsRepo(true);
         }}
       />
     );
