@@ -3,11 +3,12 @@
 // running, the newest release once checked, Install & restart where the
 // desktop app can replace itself — with the installer's output as it builds
 // — and the installer one-liner where it cannot, as the data-too-new
-// screen offers it (src/frontend/AppOutdated.tsx).
+// screen offers it (src/frontend/AppOutdated.tsx), which runs the same
+// update through useUpdateFlow and UpdateStatus.
 
 import { useEffect, useState } from "react";
 import { AppPageLayout, PageSection } from "./AppPage";
-import { currentPlatform, upgradeInstructions, type UpgradePlatform } from "./AppOutdated";
+import { currentPlatform, upgradeInstructions, type UpgradePlatform } from "./upgradeHow";
 import {
   appUpdate,
   logTail,
@@ -84,15 +85,18 @@ export function UpdateStatus({
   store,
   platform,
   onControl,
+  only = () => true,
 }: {
   store: UpdateStore;
   platform: UpgradePlatform;
   onControl: (control: UpdateControl) => void;
+  /** The controls to offer — the update screen keeps its own Check again. */
+  only?: (control: UpdateControl) => boolean;
 }) {
   const stage = updateStage(store);
   const index = store.index;
   const canInstall = Boolean(index?.canInstall);
-  const controls = updateControls(stage, canInstall);
+  const controls = updateControls(stage, canInstall).filter(only);
   const install = index?.install ?? null;
   const showLog = install && (stage.kind === "installing" || stage.kind === "failed") && install.log.length > 0;
   return (
@@ -148,18 +152,10 @@ export function upgradePlatform(index: UpdateIndex | null): UpgradePlatform {
   return index.platform === "win32" ? "windows" : "unix";
 }
 
-export function UpdatesPage({ onClose, platform: given }: { onClose: () => void; platform?: UpgradePlatform }) {
+/** The store, polled while the installer runs, and what each UpdateStatus button does. */
+export function useUpdateFlow(): { store: UpdateStore; onControl: (control: UpdateControl) => void } {
   const store = useAppUpdate();
-  const platform = given ?? upgradePlatform(store.index);
   const installing = store.index?.install.phase === "installing";
-
-  // The machine's state first, then the check — Check for Updates… was
-  // chosen to find out — unless an install is already under way.
-  useEffect(() => {
-    void appUpdate.load().then((index) => {
-      if (index && index.install.phase === "idle" && !index.check) void appUpdate.check();
-    });
-  }, []);
 
   // While the installer runs, its output and outcome come by polling.
   useEffect(() => {
@@ -174,6 +170,20 @@ export function UpdatesPage({ onClose, platform: given }: { onClose: () => void;
     else if (control === "install" && latest) void appUpdate.install(latest);
     else if (control === "restart") void appUpdate.restart();
   };
+  return { store, onControl };
+}
+
+export function UpdatesPage({ onClose, platform: given }: { onClose: () => void; platform?: UpgradePlatform }) {
+  const { store, onControl } = useUpdateFlow();
+  const platform = given ?? upgradePlatform(store.index);
+
+  // The machine's state first, then the check — Check for Updates… was
+  // chosen to find out — unless an install is already under way.
+  useEffect(() => {
+    void appUpdate.load().then((index) => {
+      if (index && index.install.phase === "idle" && !index.check) void appUpdate.check();
+    });
+  }, []);
 
   return (
     <AppPageLayout title="Updates" sections={[{ id: SECTION, title: "Release" }]} onClose={onClose}>

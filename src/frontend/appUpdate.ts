@@ -107,6 +107,17 @@ export const appUpdate = {
       return false;
     }
   },
+  /**
+   * The update screen's Update (specs/app/data-format.feature.md): the
+   * machine's state, a check, and the install when a newer release can
+   * install here — or nothing more once an install is under way or done.
+   */
+  async updateNow(): Promise<void> {
+    const index = await appUpdate.load();
+    if (!index || index.install.phase === "installing" || index.install.phase === "ready") return;
+    const check = await appUpdate.check();
+    if (check?.newer && index.canInstall) await appUpdate.install(check.latest);
+  },
   /** Restart into the installed version; the shell says whether it could. */
   async restart(): Promise<ActivationResult | null> {
     set({ ...state, error: null, manual: null });
