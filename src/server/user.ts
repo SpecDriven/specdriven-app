@@ -10,7 +10,6 @@ import {
   ghAccount,
   ghAccountInUse,
   isRepoRoot,
-  signsAnyCommits,
   signsCommitsIn,
 } from "./git";
 import { dataRepoDir } from "./repo";
@@ -107,7 +106,7 @@ async function commitAuthor(
   name: string,
   email: string | null,
 ): Promise<{ name: string | null; email: string | null }> {
-  if (!signsAnyCommits() || currentEngine() === "js") return { name, email };
+  if (currentEngine() === "js") return { name, email };
   const repo = await dataRepoFolder();
   if (!repo || !(await signsCommitsIn(repo))) return { name, email };
   return {
