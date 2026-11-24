@@ -970,12 +970,14 @@ async function syncHostPlugins(state: SpecDrivenState, opts: { seed?: boolean } 
   const open = workspaces();
   // A hosted worker shares its container with other users' workers, so it
   // runs the built-in plugins alone: a plugin folder is code (hostedMode.ts).
-  // So does the read-only site, which runs no code but the app's: its data
-  // folder is whatever the public repo holds.
+  // The read-only site reads its own home's plugins folder, like the demo —
+  // what it installed from the marketplace at start (readOnly.ts
+  // installReadOnlyPlugins) — and never its data folder, which is whatever
+  // the public repo holds, nor the profile's explicit folders.
   return syncPlugins(raw, {
     // The folder's first look at its data, for the calls that open it.
     seed: opts.seed === true,
-    sources: !isHostedMode() && !isReadOnlyMode(),
+    sources: !isHostedMode(),
     paths: !isDemoMode() && !isReadOnlyMode(),
     dataDir: isDemoMode() || isReadOnlyMode() ? null : await currentDataDir(),
     ...(open.length > 0

@@ -596,9 +596,10 @@ from [SpecDriven/specs-specdriven](https://github.com/SpecDriven/specs-specdrive
   first of all, gets `403 This site is read-only` before its handler runs.
   Only the built-in Roadmap plugin and the Event Models are mounted. The site
   installs the Event Models (`event-model`) from SpecDriven's marketplace at
-  start, in the background (`READ_ONLY_MARKETPLACE_PLUGINS`); the rest —
-  plugin folders, other marketplace installs and agent plugins — is off, so
-  a file in the repo can't run code.
+  start, in the background (`READ_ONLY_MARKETPLACE_PLUGINS`), into its own
+  home's plugins folder, the only plugin folder it reads; the rest — the
+  repo's plugin folders, other marketplace installs and agent plugins — is
+  off, so a file in the repo can't run code.
 - **Several projects:** `SPECDRIVEN_READONLY_PROJECTS` lists the
   repositories to show. With more than one, a ▾ next to the folder name
   lists them and the visitor picks one. The choice is kept in a
