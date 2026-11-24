@@ -15,6 +15,7 @@
 // the user module and the gateway only need to ask "is this the read-only
 // site?", and readOnly.ts reaches the sync tick and the plugin loader.
 
+import type { PreinstalledPlugin } from "../plugins/host/preinstall";
 import type { Workspace } from "./workspace";
 
 type Env = Record<string, string | undefined>;
@@ -31,8 +32,21 @@ export const DEFAULT_READ_ONLY_REPO = "https://github.com/SpecDriven/specs-specd
 export const DEFAULT_READ_ONLY_BRANCH = "main";
 export const DEFAULT_READ_ONLY_REFRESH_SECONDS = 60;
 
-/** The plugins the site shows, in tab order: Specs and the roadmap. */
-export const READ_ONLY_PLUGINS: readonly string[] = ["specs", "roadmap"];
+/**
+ * The marketplace plugins the site installs at start (readOnly.ts
+ * installReadOnlyPlugins), by the index row's name and the id its manifest
+ * declares: the Event Models, which show a repo's `models/` read-only.
+ */
+export const READ_ONLY_MARKETPLACE_PLUGINS: readonly PreinstalledPlugin[] = [
+  { marketplace: "specdriven", name: "event-model", id: "event-model" },
+];
+
+/** The plugins the site shows: Specs, the roadmap and the Event Models. */
+export const READ_ONLY_PLUGINS: readonly string[] = [
+  "specs",
+  "roadmap",
+  ...READ_ONLY_MARKETPLACE_PLUGINS.map((p) => p.id),
+];
 
 /**
  * The visitor every page names: a public site has no account behind it, and
@@ -154,7 +168,7 @@ export function readReadOnlyConfig(env: Env = process.env): ReadOnlyConfig {
  * The routes the site answers, as `METHOD pattern` the way they are
  * registered (src/server/api.ts coreRoutes, the roadmap plugin's in
  * src/plugins/builtin/pages/host.ts, the loader's in src/plugins/host/
- * loader.ts). Reads only, and only of what the site shows; everything else
+ * loader.ts, the Event Models' in the event-model plugin's src/host.ts). Reads only, and only of what the site shows; everything else
  * — every write, the logs, the data viewer, settings, sign-in, agents — is
  * refused before its handler runs.
  */
@@ -170,6 +184,10 @@ const ALLOWED = new Set([
   "GET /api/pull-request",
   "GET /api/roadmap",
   "GET /api/roadmap/:file",
+  // The Event Models: the list, one model, its Event Modeling JSON export.
+  "GET /api/models",
+  "GET /api/models/:file",
+  "GET /api/models/:file/export",
   "GET /api/plugins/events",
   // The agent pane's session list, which the client reads at start: empty here.
   "GET /api/agent/chat",

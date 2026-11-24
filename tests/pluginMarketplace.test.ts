@@ -20,6 +20,8 @@ import { readState, writeState } from "../src/server/state";
 import { pluginStates, rescanPlugins, stopWatching, syncPlugins } from "../src/plugins/host/loader";
 import { setBuildDisabled } from "../src/plugins/host/build";
 import { DEMO_MARKETPLACE_PLUGINS, installDemoPlugins } from "../src/server/demo";
+import { installReadOnlyPlugins, readOnlyMarketplaces } from "../src/server/readOnly";
+import { DEFAULT_MARKETPLACES } from "../src/plugins/marketplace";
 import { marketplacesHome, pluginsHome } from "../src/plugins/host/sources";
 import {
   INSTALL_RECORD_FILE,
@@ -729,6 +731,22 @@ test("the hosted demo installs the Event Models from the marketplace at start an
   await rm(market, { recursive: true, force: true });
   await installDemoPlugins([{ name: "specdriven", source: market }]);
   expect(await installedFolders()).toEqual(["event-model"]);
+});
+
+test("the read-only site installs the Event Models from its marketplace at start", async () => {
+  const market = join(work, "market-read-only");
+  await marketplaceRepo(market, [{ name: "event-model", source: "./plugins/event-model", version: "2.0.1" }], { "event-model": { version: "2.0.1" } });
+  expect(readOnlyMarketplaces({})).toBe(DEFAULT_MARKETPLACES);
+  expect(readOnlyMarketplaces({ SPECDRIVEN_READONLY_MARKETPLACE: market })).toEqual([{ name: "specdriven", source: market }]);
+  await writeState({ plugins: { enabled: ["event-model"], seen: ["event-model"] } } as never, root);
+  await installReadOnlyPlugins(readOnlyMarketplaces({ SPECDRIVEN_READONLY_MARKETPLACE: market }));
+  expect(await installedFolders()).toContain("event-model");
+  const state = await json(await api("GET", "/api/state"));
+  expect(state.body.plugins.find((p: any) => p.id === "event-model")).toMatchObject({
+    enabled: true,
+    active: true,
+    install: { marketplace: "specdriven", name: "event-model", version: "2.0.1" },
+  });
 });
 
 // The start (src/server/api.ts applyStartupState, specs/app/plugins.feature.md
