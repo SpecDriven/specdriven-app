@@ -32,8 +32,12 @@ import type {
   ContextSlice,
   EffortLevel,
   ImageUpload,
+  McpCatalog,
   McpServerAction,
+  McpServerDetail,
+  McpServerDraft,
   McpServersAnswer,
+  McpServerUsage,
   PermissionMode,
   SlashCommandInfo,
 } from "../server/agentTypes";
@@ -55,8 +59,12 @@ export type {
   ContextDetail,
   ContextSlice,
   EffortLevel,
+  McpCatalog,
   McpServerAction,
+  McpServerDetail,
+  McpServerDraft,
   McpServersAnswer,
+  McpServerUsage,
   PermissionMode,
   SlashCommandInfo,
 };
@@ -1740,6 +1748,40 @@ export const agentChat = {
       method: "POST",
       body: JSON.stringify({ server, action }),
     });
+  },
+  // The "MCP servers…" dialog (specs/agents/agent-pane.feature.md "MCP
+  // servers before a session"): an agent's servers for the folder a new
+  // session would work in — `cwd` when the new-session screen picked one,
+  // else the folder a session starts in by default.
+  /** The servers, what each costs in context and how much it was used. */
+  mcpCatalog(agent: ChatAgent, cwd?: string): Promise<McpCatalog> {
+    const query = cwd ? `?cwd=${encodeURIComponent(cwd)}` : "";
+    return call<McpCatalog>(`/api/agent/agents/${encodeURIComponent(agent)}/mcp${query}`);
+  },
+  /** One action on one server; the answer is the catalog afterwards and,
+      for a sign-in, the page to open. */
+  mcpCatalogAction(agent: ChatAgent, server: string, action: McpServerAction, cwd?: string): Promise<McpCatalog> {
+    return call<McpCatalog>(`/api/agent/agents/${encodeURIComponent(agent)}/mcp`, {
+      method: "POST",
+      body: JSON.stringify({ server, action, ...(cwd ? { cwd } : {}) }),
+    });
+  },
+  addMcpServer(agent: ChatAgent, server: McpServerDraft, cwd?: string): Promise<McpCatalog> {
+    return call<McpCatalog>(`/api/agent/agents/${encodeURIComponent(agent)}/mcp/servers`, {
+      method: "POST",
+      body: JSON.stringify({ server, ...(cwd ? { cwd } : {}) }),
+    });
+  },
+  removeMcpServer(agent: ChatAgent, name: string, cwd?: string): Promise<McpCatalog> {
+    const query = new URLSearchParams({ name, ...(cwd ? { cwd } : {}) });
+    return call<McpCatalog>(`/api/agent/agents/${encodeURIComponent(agent)}/mcp/servers?${query}`, { method: "DELETE" });
+  },
+  /** The dialog shut: the agent may stop what it kept running for it. */
+  async releaseMcp(agent: ChatAgent, cwd?: string): Promise<void> {
+    await call(`/api/agent/agents/${encodeURIComponent(agent)}/mcp/release`, {
+      method: "POST",
+      body: JSON.stringify(cwd ? { cwd } : {}),
+    }).catch(() => undefined);
   },
   /** Switch a running session's effort; the server makes it the default too. */
   async setEffort(id: string, effort: EffortLevel | null): Promise<void> {

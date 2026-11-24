@@ -174,16 +174,21 @@ import {
   launchDesktopSession,
   SESSION_TITLE_MAX,
   sessionsDirectory,
+  sessionWorkDir,
 } from "./agent";
 import type { SessionPlace, SpecInput } from "./agent";
 import { CLAUDE_WEB_TARGET } from "../frontend/claudeWeb";
 import { folderGitInfo, WORKTREES_SUBDIR } from "./agentWorktree";
 import { refreshSource, sourceStatus } from "./agentSource";
+import type { AgentMcpPlace } from "./agentChat";
 import {
   ChatError,
+  addAgentMcpServer,
   agentChoices,
+  agentMcpCatalog,
   agentReportedModels,
   answerPermission,
+  changeAgentMcpServer,
   changeChatMcpServer,
   chatMcpServers,
   checkImages,
@@ -197,6 +202,8 @@ import {
   listChatSessions,
   reconnectAgent,
   reconnectAgents,
+  releaseAgentMcp,
+  removeAgentMcpServer,
   closeOtherProjects,
   refreshChatContext,
   resolveProvider,
@@ -4147,6 +4154,17 @@ function chatError(e: unknown): Response {
   return json({ error: (e as Error).message }, 500);
 }
 
+/** The folder a request picked to work in — `~` stands for the home
+    folder — or undefined when it picked none; the refusal for a path that
+    is not absolute. */
+function pickedCwd(value: unknown): string | undefined | Response {
+  if (value === undefined || value === null || value === "") return undefined;
+  const raw = typeof value === "string" ? value.trim() : "";
+  const expanded = raw === "~" || raw.startsWith("~/") ? homedir() + raw.slice(1) : raw;
+  if (!isAbsolute(expanded)) return json({ error: "cwd must be an absolute path" }, 400);
+  return resolve(expanded);
+}
+
 const postAgentChat = withWorkFolder(async (folder, req) => {
   const body = (await req.json().catch(() => ({}))) as {
     name?: unknown;
@@ -4174,13 +4192,8 @@ const postAgentChat = withWorkFolder(async (folder, req) => {
     agent = body.agent;
   }
   // The folder to work in; absent is the code repo, else the data repo.
-  let cwd: string | undefined;
-  if (body.cwd !== undefined) {
-    const raw = typeof body.cwd === "string" ? body.cwd.trim() : "";
-    const expanded = raw === "~" || raw.startsWith("~/") ? homedir() + raw.slice(1) : raw;
-    if (!isAbsolute(expanded)) return json({ error: "cwd must be an absolute path" }, 400);
-    cwd = resolve(expanded);
-  }
+  const cwd = pickedCwd(body.cwd);
+  if (cwd instanceof Response) return cwd;
   const place =
     folder.kind === "code"
       ? await codeRepoPlace(folder.dir, agent, cwd)
@@ -4512,6 +4525,85 @@ const postAgentChatMcp: Handler = async (req, params) => {
     return chatError(e);
   }
 };
+
+// The pane's "MCP servers…" dialog (specs/agents/agent-pane.feature.md "MCP
+// servers before a session"): the servers a session of the agent would get
+// in a folder, asked of the agent with no session running. The folder is
+// the one the new-session screen picked (`cwd`), resolved as a session
+// start resolves it; a server's name travels in the body, or the query of
+// a DELETE — names carry more than a path segment takes.
+
+/** Where the dialog's session would work, or the refusal a start would get. */
+async function agentMcpPlace(folder: WorkFolder, agent: string, cwd: unknown): Promise<AgentMcpPlace | Response> {
+  if (!agents.get(agent)) return json({ error: `No agent plugin provides "${agent}"` }, 404);
+  const picked = pickedCwd(cwd);
+  if (picked instanceof Response) return picked;
+  const place =
+    folder.kind === "code" ? await codeRepoPlace(folder.dir, agent, picked) : await agentPanePlace(folder.dir, agent, picked);
+  if (place instanceof Response) return place;
+  return {
+    cwd: sessionWorkDir(place),
+    dataRepo: folder.kind === "code" ? null : place.dataRepo,
+    sessionsDir: await sessionsDirectory(getAppRoot()),
+  };
+}
+
+const getAgentMcp = withWorkFolder(async (folder, req, params) => {
+  const place = await agentMcpPlace(folder, params.agent!, new URL(req.url).searchParams.get("cwd"));
+  if (place instanceof Response) return place;
+  try {
+    return json(await agentMcpCatalog(params.agent!, place));
+  } catch (e) {
+    return chatError(e);
+  }
+});
+
+const postAgentMcp = withWorkFolder(async (folder, req, params) => {
+  const body = (await req.json().catch(() => ({}))) as { cwd?: unknown; server?: unknown; action?: unknown };
+  const action = MCP_SERVER_ACTIONS.find((a) => a === body.action);
+  if (typeof body.server !== "string" || !body.server) return json({ error: "server is required" }, 400);
+  if (!action) return json({ error: `action must be one of ${MCP_SERVER_ACTIONS.join(", ")}` }, 400);
+  const place = await agentMcpPlace(folder, params.agent!, body.cwd);
+  if (place instanceof Response) return place;
+  try {
+    return json(await changeAgentMcpServer(params.agent!, place, body.server, action));
+  } catch (e) {
+    return chatError(e);
+  }
+});
+
+const postAgentMcpServer = withWorkFolder(async (folder, req, params) => {
+  const body = (await req.json().catch(() => ({}))) as { cwd?: unknown; server?: unknown };
+  const place = await agentMcpPlace(folder, params.agent!, body.cwd);
+  if (place instanceof Response) return place;
+  try {
+    return json(await addAgentMcpServer(params.agent!, place, body.server));
+  } catch (e) {
+    return chatError(e);
+  }
+});
+
+const deleteAgentMcpServer = withWorkFolder(async (folder, req, params) => {
+  const query = new URL(req.url).searchParams;
+  const name = query.get("name");
+  if (!name) return json({ error: "name is required" }, 400);
+  const place = await agentMcpPlace(folder, params.agent!, query.get("cwd"));
+  if (place instanceof Response) return place;
+  try {
+    return json(await removeAgentMcpServer(params.agent!, place, name));
+  } catch (e) {
+    return chatError(e);
+  }
+});
+
+// The dialog shut: the agent lets go of what it kept running for it.
+const postAgentMcpRelease = withWorkFolder(async (folder, req, params) => {
+  const body = (await req.json().catch(() => ({}))) as { cwd?: unknown };
+  const place = await agentMcpPlace(folder, params.agent!, body.cwd);
+  if (place instanceof Response) return json({ ok: true });
+  await releaseAgentMcp(params.agent!, place);
+  return json({ ok: true });
+});
 
 // The models an agent offers and what a new session starts on, for the
 // pane's model and effort pickers; null for an agent with none.
@@ -5107,6 +5199,11 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/agent/chat/:id/context", unlessHosted(postAgentChatContext)],
   ["GET", "/api/agent/chat/:id/mcp", unlessHosted(getAgentChatMcp)],
   ["POST", "/api/agent/chat/:id/mcp", unlessHosted(postAgentChatMcp)],
+  ["GET", "/api/agent/agents/:agent/mcp", unlessHosted(getAgentMcp)],
+  ["POST", "/api/agent/agents/:agent/mcp", unlessHosted(postAgentMcp)],
+  ["POST", "/api/agent/agents/:agent/mcp/servers", unlessHosted(postAgentMcpServer)],
+  ["DELETE", "/api/agent/agents/:agent/mcp/servers", unlessHosted(deleteAgentMcpServer)],
+  ["POST", "/api/agent/agents/:agent/mcp/release", unlessHosted(postAgentMcpRelease)],
   ["GET", "/api/agent/agents/:agent/choices", unlessHosted(getAgentChoices)],
   ["POST", "/api/agent/agents/:agent/reconnect", unlessHosted(postAgentReconnect)],
   ["PUT", "/api/agent/agents/:agent/defaults", unlessHosted(putAgentDefaults)],

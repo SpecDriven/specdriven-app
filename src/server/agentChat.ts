@@ -18,11 +18,14 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { resolveRefs, sessionWorkDir, withRefs } from "./agent";
 import { agentMcpServers } from "./agentMcp";
+import { countMcpUse, folderMcpCounts, usageByServer } from "./mcpUsage";
 import { cleanUpWorktree, createWorktree, discardWorktree, sessionGitContext, WorktreeError } from "./agentWorktree";
 import type { WorktreeCleanup } from "./agentWorktree";
 import type { SessionPlace } from "./agent";
 import type {
   AgentHost,
+  AgentMcpAdmin,
+  AgentMcpContext,
   AgentProvider,
   AgentReadyInfo,
   AgentSession,
@@ -48,8 +51,11 @@ import type {
   ChatStatus,
   ChatWorktree,
   ContextDetail,
+  McpCatalog,
+  McpManageCapability,
   McpServerAction,
   McpServersAnswer,
+  McpToolCounts,
   PermissionAnswer,
   PermissionMode,
   EffortLevel,
@@ -57,6 +63,7 @@ import type {
   SlashCommandInfo,
 } from "./agentTypes";
 import {
+  checkMcpDraft,
   isFinalStatus,
   MAX_IMAGE_BYTES,
   MAX_IMAGES_PER_MESSAGE,
@@ -129,6 +136,13 @@ interface ChatSession {
   /** The repo's git line (agentWorktree.ts sessionGitContext), told with
       the first turn that is no `/command`, then dropped. */
   gitContext?: string;
+  /** The MCP tools the agent called, counted as its output goes by
+      (src/server/mcpUsage.ts); the record keeps them. */
+  mcpCounts: McpToolCounts;
+  /** The MCP calls whose result is still out, by tool-use id. */
+  mcpPending: Map<string, string>;
+  /** The count moved since the record was last written. */
+  mcpDirty: boolean;
 }
 
 // The registry hangs off globalThis: `bun --hot` swaps modules but keeps
@@ -171,6 +185,7 @@ function emit(session: ChatSession, body: ChatEventBody, now: Date = new Date())
   // replay needs, and with every MCP tool listed it is not small.
   if (body.kind === "context") session.log = session.log.filter((e) => e.kind !== "context");
   session.log.push(event);
+  if (countMcpUse(session.mcpCounts, session.mcpPending, body, event.at)) session.mcpDirty = true;
   for (const listener of session.listeners) {
     try {
       listener(event);
@@ -221,11 +236,15 @@ function recordOf(session: ChatSession) {
         }
       : {}),
     status: m.status,
+    // Every MCP tool the session called (src/server/mcpUsage.ts); {} says
+    // it was counted and called none.
+    mcpUsage: session.mcpCounts,
     specs: [],
   };
 }
 
 function saveRecord(session: ChatSession): Promise<void> {
+  session.mcpDirty = false;
   session.saving = session.saving
     .then(() => writeTextFile(session.recordPath, JSON.stringify(recordOf(session), null, 2) + "\n"))
     .catch(() => {
@@ -313,6 +332,8 @@ function hostFor(session: ChatSession): AgentHost {
       // A card still open belongs to a turn that is over.
       denyAllPending(session, "interrupt", "The turn ended");
       session.busy = false;
+      // What the turn called of its MCP servers goes into the record.
+      if (session.mcpDirty) void saveRecord(session);
       // A message that waited for this turn goes now, and the session
       // works on.
       if (sendNextWaiting(session)) return;
@@ -648,6 +669,9 @@ export async function createChatSession(opts: CreateChatOptions): Promise<ChatSe
     recordPath: join(sessionDir, "session.json"),
     images: new Map(pasted.kept),
     saving: Promise.resolve(),
+    mcpCounts: {},
+    mcpPending: new Map(),
+    mcpDirty: false,
   };
   registry().set(id, session);
   installShutdownHook();
@@ -1095,6 +1119,132 @@ export async function changeChatMcpServer(id: string, name: string, action: McpS
     url = (await askAgent(provider, `start the sign-in for "${name}"`, () => agent.authenticateMcpServer!(name))).url;
   }
   return { servers: await list(), ...(url ? { url } : {}) };
+}
+
+// --- MCP servers before a session ------------------------------------------------
+//
+// specs/agents/agent-pane.feature.md "MCP servers before a session": the
+// pane's "MCP servers…" dialog asks the agent itself, with no session — the
+// servers a session started in a folder would get. The app adds its own
+// count of how each was used (src/server/mcpUsage.ts).
+
+/** The folder the dialog is about, and where the session records are. */
+export interface AgentMcpPlace {
+  /** Where a new session would work. */
+  cwd: string;
+  dataRepo: string | null;
+  /** <settings dir>/sessions — see sessionsDirectory in agent.ts. */
+  sessionsDir: string;
+}
+
+interface McpAdmin {
+  provider: AgentProvider;
+  mcp: AgentMcpAdmin;
+  can: McpManageCapability;
+  ctx: AgentMcpContext;
+}
+
+async function mcpAdmin(agent: ChatAgent, place: AgentMcpPlace): Promise<McpAdmin> {
+  const provider = resolveProvider(agent);
+  const can = provider.capabilities.mcpManage;
+  if (!can || !provider.mcp) {
+    throw new ChatError(409, `${provider.label} does not manage its MCP servers before a session`);
+  }
+  const mcpServers = await agentMcpServers();
+  return {
+    provider,
+    mcp: provider.mcp,
+    can,
+    ctx: { cwd: place.cwd, dataRepo: place.dataRepo, ...(mcpServers.length ? { mcpServers } : {}) },
+  };
+}
+
+/** The agent's list, with the app's count of each server's use. */
+async function catalogOf(admin: McpAdmin, place: AgentMcpPlace, url?: string): Promise<McpCatalog> {
+  const { provider, mcp, ctx } = admin;
+  const list = await askAgent(provider, "list its MCP servers", () => mcp.list(ctx));
+  const live = [...registry().values()].map((s) => ({
+    id: s.meta.id,
+    agent: s.meta.agent,
+    folder: s.meta.worktree?.folder ?? s.meta.cwd,
+    startedAt: s.meta.startedAt,
+    counts: s.mcpCounts,
+  }));
+  const sessions = await folderMcpCounts(place.sessionsDir, provider.id, place.cwd, live);
+  return {
+    servers: list.servers,
+    ...(typeof list.contextWindow === "number" ? { contextWindow: list.contextWindow } : {}),
+    usage: usageByServer(
+      sessions,
+      list.servers.map((s) => s.name),
+    ),
+    ...(sessions[0]?.startedAt ? { usageSince: sessions[0].startedAt } : {}),
+    ...(url ? { url } : {}),
+  };
+}
+
+/** An agent's MCP servers for a folder, as a session started there would get them. */
+export async function agentMcpCatalog(agent: ChatAgent, place: AgentMcpPlace): Promise<McpCatalog> {
+  return catalogOf(await mcpAdmin(agent, place), place);
+}
+
+/**
+ * One of the dialog's actions on a server — on, off, connect again, start
+ * its sign-in — answered with the catalog as it stands afterwards. Only a
+ * server the agent lists is acted on, and only in a way the list offers.
+ */
+export async function changeAgentMcpServer(
+  agent: ChatAgent,
+  place: AgentMcpPlace,
+  name: string,
+  action: McpServerAction,
+): Promise<McpCatalog> {
+  const admin = await mcpAdmin(agent, place);
+  const { provider, mcp, ctx } = admin;
+  const server = (await askAgent(provider, "list its MCP servers", () => mcp.list(ctx))).servers.find((s) => s.name === name);
+  if (!server) throw new ChatError(404, `${provider.label} has no MCP server named "${name}"`);
+  const cannot = (what: string) => new ChatError(409, `${provider.label} cannot ${what} "${name}"`);
+  if ((action === "enable" || action === "disable") && !server.canToggle) throw cannot(action);
+  if (action === "authenticate" && !server.canAuthenticate) throw cannot("start a sign-in for");
+  const what = action === "authenticate" ? `start the sign-in for "${name}"` : `${action} "${name}"`;
+  const answer = await askAgent(provider, what, () => mcp.act(ctx, name, action));
+  const url = action === "authenticate" && answer && typeof answer.url === "string" ? answer.url : undefined;
+  return catalogOf(admin, place, url);
+}
+
+/** Add the server a form described; the draft is checked here, against
+    what the agent takes and the names it already lists. */
+export async function addAgentMcpServer(agent: ChatAgent, place: AgentMcpPlace, value: unknown): Promise<McpCatalog> {
+  const admin = await mcpAdmin(agent, place);
+  const { provider, mcp, ctx, can } = admin;
+  const listed = (await askAgent(provider, "list its MCP servers", () => mcp.list(ctx))).servers.map((s) => s.name);
+  const draft = checkMcpDraft(value, can, listed);
+  if (typeof draft === "string") throw new ChatError(400, draft);
+  await askAgent(provider, `add "${draft.name}"`, () => mcp.add(ctx, draft));
+  return catalogOf(admin, place);
+}
+
+/** Delete a server the list says can be deleted, from where the list says it is kept. */
+export async function removeAgentMcpServer(agent: ChatAgent, place: AgentMcpPlace, name: string): Promise<McpCatalog> {
+  const admin = await mcpAdmin(agent, place);
+  const { provider, mcp, ctx } = admin;
+  const server = (await askAgent(provider, "list its MCP servers", () => mcp.list(ctx))).servers.find((s) => s.name === name);
+  if (!server) throw new ChatError(404, `${provider.label} has no MCP server named "${name}"`);
+  if (!server.canDelete || !server.scope) throw new ChatError(409, `${provider.label} cannot delete "${name}"`);
+  const scope = server.scope;
+  await askAgent(provider, `delete "${name}"`, () => mcp.remove(ctx, name, scope));
+  return catalogOf(admin, place);
+}
+
+/** The dialog shut: the agent may let go of what it kept running for it. */
+export async function releaseAgentMcp(agent: ChatAgent, place: AgentMcpPlace): Promise<void> {
+  const provider = agents.get(agent);
+  if (!provider?.mcp?.release) return;
+  try {
+    await provider.mcp.release({ cwd: place.cwd, dataRepo: place.dataRepo });
+  } catch {
+    // Nothing waits on it.
+  }
 }
 
 /** The models an agent offers and what a new session starts on; null for

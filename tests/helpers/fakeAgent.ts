@@ -5,6 +5,7 @@
 
 import type {
   AgentHost,
+  AgentMcpAdmin,
   AgentProvider,
   AgentSession,
   AgentStartOptions,
@@ -34,7 +35,7 @@ export interface FakeSession extends AgentSession {
   refreshes: number;
 }
 
-export interface FakeProviderOptions extends Partial<Omit<AgentProvider, "start" | "capabilities">> {
+export interface FakeProviderOptions extends Partial<Omit<AgentProvider, "start" | "capabilities" | "mcp">> {
   capabilities?: Partial<AgentCapabilities>;
   /** start() rejects with this. */
   startError?: Error;
@@ -50,6 +51,9 @@ export interface FakeProviderOptions extends Partial<Omit<AgentProvider, "start"
   contextUsage?: (detail: ContextDetail) => Promise<ChatContextUsage | null>;
   /** The sessions' MCP methods (mcpServers and the actions): absent, they have none. */
   mcp?: Pick<AgentSession, "mcpServers" | "setMcpServerEnabled" | "reconnectMcpServer" | "authenticateMcpServer">;
+  /** The provider's own MCP hook (AgentProvider.mcp), for the "MCP
+      servers…" dialog: absent, it has none. */
+  mcpAdmin?: AgentMcpAdmin;
 }
 
 export function fakeProvider(options: FakeProviderOptions = {}): { provider: AgentProvider; sessions: FakeSession[] } {
@@ -79,6 +83,7 @@ export function fakeProvider(options: FakeProviderOptions = {}): { provider: Age
     ...(options.choices ? { choices: options.choices } : {}),
     ...(options.setDefaults ? { setDefaults: options.setDefaults } : {}),
     ...(options.reconnect ? { reconnect: options.reconnect } : {}),
+    ...(options.mcpAdmin ? { mcp: options.mcpAdmin } : {}),
     async start(opts) {
       if (options.startError) throw options.startError;
       const session: FakeSession = {
