@@ -375,6 +375,12 @@ body {
   flex: 0 1 10rem;
 }
 
+/* A url with no token field beside it (Settings → Claude / Codex → API)
+   takes the row's width, so the whole address shows. */
+.paste-token input.paste-token-host:only-of-type {
+  flex: 1;
+}
+
 /* Settings → Confluence (specs/external-links/confluence-wiki.feature.md):
    the wikis with a token, each with Remove. */
 .confluence-wikis {
