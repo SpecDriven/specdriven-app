@@ -706,7 +706,7 @@ test("the hosted demo browses the marketplaces, never refreshed, and changes not
 
 test("the hosted demo installs the Event Models from the marketplace at start and lists them on", async () => {
   const market = join(work, "market");
-  await marketplaceRepo(market, [{ name: "models", source: "./plugins/models", version: "1.0.0" }], { models: { version: "1.0.0" } });
+  await marketplaceRepo(market, [{ name: "event-model", source: "./plugins/event-model", version: "1.0.0" }], { "event-model": { version: "1.0.0" } });
   process.env.DEMO_MODE = "1";
   await writeState(
     { plugins: { enabled: DEMO_MARKETPLACE_PLUGINS.map((p) => p.id), marketplaces: [{ name: "specdriven", source: market }] } } as never,
@@ -714,21 +714,21 @@ test("the hosted demo installs the Event Models from the marketplace at start an
   );
   // Listed before the install lands: reported, not mounted.
   let state = await json(await api("GET", "/api/state"));
-  expect(state.body.plugins.find((p: any) => p.id === "models")).toMatchObject({ enabled: true, active: false });
+  expect(state.body.plugins.find((p: any) => p.id === "event-model")).toMatchObject({ enabled: true, active: false });
 
   await installDemoPlugins([{ name: "specdriven", source: market }]);
   state = await json(await api("GET", "/api/state"));
-  expect(state.body.plugins.find((p: any) => p.id === "models")).toMatchObject({
+  expect(state.body.plugins.find((p: any) => p.id === "event-model")).toMatchObject({
     enabled: true,
     active: true,
-    install: { marketplace: "specdriven", name: "models", version: "1.0.0" },
+    install: { marketplace: "specdriven", name: "event-model", version: "1.0.0" },
   });
-  expect((await json(await api("GET", "/api/models"))).body).toEqual({ version: "1.0.0" });
+  expect((await json(await api("GET", "/api/event-model"))).body).toEqual({ version: "1.0.0" });
 
   // A restart finds it installed and fetches nothing.
   await rm(market, { recursive: true, force: true });
   await installDemoPlugins([{ name: "specdriven", source: market }]);
-  expect(await installedFolders()).toEqual(["models"]);
+  expect(await installedFolders()).toEqual(["event-model"]);
 });
 
 // The start (src/server/api.ts applyStartupState, specs/app/plugins.feature.md

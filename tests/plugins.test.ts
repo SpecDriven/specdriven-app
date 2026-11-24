@@ -363,18 +363,18 @@ test("an older file with folders but no list gives them the defaults; one with r
   expect(migrateProfile({}, builtinManifests)).toBe(false);
 });
 
-// The Event Models left the tree for the marketplace (the `models` plugin
-// of SpecDriven/plugins): the old switch still reads as the plugin's id, and
+// The Event Models left the tree for the marketplace (the `event-model` plugin
+// of SpecDriven/plugins): the old `models` switch still reads as its id, and
 // Settings → Plugins names it and says to install it.
 test("the retired Models switch lists the plugin, which reports as not installed", async () => {
   expect(readProfile({ models: true }, profileManifests)).toEqual({
-    enabled: ["specs", "notebook", "self-fix", "models"],
+    enabled: ["specs", "notebook", "self-fix", "event-model"],
     migrated: true,
   });
   // Not a built-in's switch: the file holds no older list of built-ins.
   expect(readProfile({ models: true }, builtinManifests)).toEqual({ enabled: ["specs"], migrated: false });
   await syncPlugins({ models: true });
-  const row = pluginStates().find((p) => p.id === "models")!;
+  const row = pluginStates().find((p) => p.id === "event-model")!;
   expect(row).toMatchObject({ displayName: "Event models", installed: false, enabled: true, active: false });
   expect(row.error).toMatch(/install it from the marketplace/);
   expect(matchApi("GET", "/api/models")).toBeNull();

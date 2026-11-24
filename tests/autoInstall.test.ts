@@ -45,7 +45,7 @@ const rows: MarketplacePlugin[] = [
   { name: "agent-claude", source: "./plugins/agent-claude", description: "Claude", agent: { id: "claude", command: "claude" } },
   { name: "agent-codex", source: "./plugins/agent-codex", description: "Codex", agent: { id: "codex", command: "codex" } },
   { name: "agent-pi", source: "./plugins/agent-pi", description: "Pi", agent: { id: "pi", command: "pi" } },
-  { name: "models", source: "./plugins/models", description: "Event models" },
+  { name: "event-model", source: "./plugins/event-model", description: "Event models" },
 ];
 
 test("the index's agent field is read when it names an id and a command", () => {
@@ -228,7 +228,7 @@ test("the start's refresh pulls the default marketplace always and the others on
   expect(pulled).toEqual([["plugins"]]);
   pulled.length = 0;
 
-  const result = await refreshMarketplacesOnStart({}, { ...deps, externalPlugins: () => ["models"] });
+  const result = await refreshMarketplacesOnStart({}, { ...deps, externalPlugins: () => ["event-model"] });
   expect(result).toEqual({ refreshed: ["specdriven"], errors: ["other: offline"] });
   expect(pulled).toEqual([["specdriven", "other"]]);
   expect(lines.some((l) => l.includes("other not refreshed on start"))).toBe(true);
@@ -237,7 +237,7 @@ test("the start's refresh pulls the default marketplace always and the others on
   pulled.length = 0;
   await refreshMarketplacesOnStart(
     { plugins: { marketplaces: [other] } },
-    { refresh: deps.refresh, log: () => {}, externalPlugins: () => ["models"] },
+    { refresh: deps.refresh, log: () => {}, externalPlugins: () => ["event-model"] },
   );
   expect(pulled).toEqual([["other"]]);
 });
