@@ -4,6 +4,12 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.301 — 2026-11-24
+
+- The public specs site shows the Event Models, read-only ([#511](https://github.com/SpecDriven/specdriven-app/pull/511))
+- The Event Models plugin is event-model in the marketplace now ([#510](https://github.com/SpecDriven/specdriven-app/pull/510))
+- Settings → Claude / Codex → API: the url field takes the row's width ([#509](https://github.com/SpecDriven/specdriven-app/pull/509))
+
 ## v0.1.300 — 2026-11-23
 
 - The app finds out by itself where commits are signed; Settings no longer asks for GitHub urls ([#508](https://github.com/SpecDriven/specdriven-app/pull/508))
