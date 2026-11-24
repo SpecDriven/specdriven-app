@@ -4,6 +4,11 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.302 — 2026-11-24
+
+- The public specs site mounts the Event Models it installs ([#513](https://github.com/SpecDriven/specdriven-app/pull/513))
+- The agent pane's ⋯ menu opens an agent's MCP servers before a session: on and off, sign-in, add, delete, context cost and usage ([#512](https://github.com/SpecDriven/specdriven-app/pull/512))
+
 ## v0.1.301 — 2026-11-24
 
 - The public specs site shows the Event Models, read-only ([#511](https://github.com/SpecDriven/specdriven-app/pull/511))
