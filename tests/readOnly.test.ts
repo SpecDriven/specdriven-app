@@ -121,6 +121,8 @@ const origin = join(work, "origin");
 /** The site's second project, named "other" in the list. */
 const second = join(work, "second");
 const root = join(work, "root");
+/** The marketplace the site installs the Event Models from: a stand-in for SpecDriven's. */
+const marketplace = join(work, "marketplace");
 let proc: ReturnType<typeof Bun.spawn> | undefined;
 let base = "";
 
@@ -137,7 +139,58 @@ async function commit(file: string, text: string, message: string, repo = origin
   await mkdir(join(repo, file, ".."), { recursive: true });
   await writeFile(join(repo, file), text);
   await $`git -C ${repo} add -A`.quiet();
-  await $`git -C ${repo} -c user.name=t -c user.email=t@t commit -q -m ${message}`.quiet();
+  await $`git -C ${repo} -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q -m ${message}`.quiet();
+}
+
+/**
+ * A marketplace whose event-model ships prebuilt, as the real one does: a
+ * host half answering GET /api/models with its version, so a test can tell
+ * it is mounted.
+ */
+async function eventModelMarketplace() {
+  await mkdir(marketplace);
+  await $`git -C ${marketplace} init -q -b main`.quiet();
+  const dir = "plugins/event-model";
+  await writeFile(
+    join(marketplace, "marketplace.json"),
+    JSON.stringify({
+      name: "specdriven",
+      owner: { name: "Fixture", url: "https://example.com" },
+      plugins: [{ name: "event-model", source: `./${dir}`, version: "2.0.1" }],
+    }),
+  );
+  await mkdir(join(marketplace, dir, "dist"), { recursive: true });
+  await writeFile(
+    join(marketplace, dir, "dist", "client.js"),
+    `export default { name: "event-model", apply() {} };`,
+  );
+  await writeFile(
+    join(marketplace, dir, "dist", "host.js"),
+    `export default { name: "event-model", inject: ["routes"], apply(ctx) {
+      ctx.effect(() => ctx.need("routes").add("GET", "/api/models", () => Response.json({ models: [], version: "2.0.1" })));
+      ctx.effect(() => ctx.need("routes").add("POST", "/api/models", () => Response.json({ created: true })));
+    } };`,
+  );
+  await commit(
+    `${dir}/package.json`,
+    JSON.stringify({
+      name: "event-model",
+      version: "2.0.1",
+      type: "module",
+      specdriven: {
+        id: "event-model",
+        api: "1",
+        displayName: "Event Models",
+        description: "Event Models on a canvas",
+        host: "./dist/host.js",
+        client: "./dist/client.js",
+        paths: ["/models"],
+        permissions: ["data:read", "data:write"],
+      },
+    }),
+    "event-model 2.0.1",
+    marketplace,
+  );
 }
 
 beforeAll(async () => {
@@ -148,6 +201,7 @@ beforeAll(async () => {
   await commit("specs/shop/checkout.feature.md", FEATURE, "checkout");
   await commit("roadmap/next.md", "# Next\n\nWhat comes next.\n", "roadmap");
   await commit("specs/library/loans.feature.md", "# Loans\n", "loans", second);
+  await eventModelMarketplace();
   const port = 20000 + Math.floor(Math.random() * 20000);
   base = `http://127.0.0.1:${port}`;
   proc = Bun.spawn([process.execPath, "src/index.ts"], {
@@ -159,8 +213,8 @@ beforeAll(async () => {
       SPECDRIVEN_ROOT: root,
       SPECDRIVEN_LOG_FILE: "0",
       SPECDRIVEN_NO_AUTO_INSTALL: "1",
-      // No marketplace there: the Event Models' install fails, offline.
-      SPECDRIVEN_READONLY_MARKETPLACE: join(work, "no-marketplace"),
+      // The Event Models come from the stand-in marketplace, offline.
+      SPECDRIVEN_READONLY_MARKETPLACE: marketplace,
       SPECDRIVEN_HOST: "127.0.0.1",
       PORT: String(port),
       NODE_ENV: "production",
@@ -197,8 +251,6 @@ test("the state says read-only, names the repo and no one signed in", async () =
   expect(state.agents).toEqual([]);
   expect((state.user as { name: string }).name).toBe("Visitor");
   const enabled = (state.plugins as { id: string; enabled: boolean }[]).filter((p) => p.enabled).map((p) => p.id);
-  // The Event Models are listed though their install failed here (the test's
-  // marketplace is missing): reported, not mounted.
   expect(enabled).toEqual(["specs", "roadmap", "event-model"]);
   // The site's own list, stamped on the settings of the open snapshot: it
   // names Specs itself and says so, so the list is read as written — Specs,
@@ -211,6 +263,27 @@ test("the state says read-only, names the repo and no one signed in", async () =
   expect(stored.plugins.format).toBe(PROFILE_FORMAT);
   expect(stored.plugins.repos[stored.dataRepo]).toEqual({ enabled: ["specs", "roadmap", "event-model"] });
 });
+
+test("the Event Models are installed from the marketplace at start and mounted; a write to a model is still refused", async () => {
+  // In the background: Specs answered before the install finished.
+  type Row = { id: string; active?: boolean; source?: string; install?: { marketplace: string; version: string } };
+  let row: Row | undefined;
+  for (let i = 0; i < 300 && !row?.active; i++) {
+    const state = (await (await fetch(`${base}/api/state`)).json()) as { plugins: Row[] };
+    row = state.plugins.find((p) => p.id === "event-model");
+    if (!row?.active) await Bun.sleep(100);
+  }
+  expect(row).toMatchObject({ active: true, source: "home", install: { marketplace: "specdriven", version: "2.0.1" } });
+  const models = await fetch(`${base}/api/models`);
+  expect(models.status).toBe(200);
+  expect(await models.json()).toEqual({ models: [], version: "2.0.1" });
+  const create = await fetch(`${base}/api/models`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  });
+  expect(create.status).toBe(403);
+}, 40_000);
 
 test("features and the roadmap are served", async () => {
   const listing = (await (await fetch(`${base}/api/features`)).json()) as { features: { fileName: string }[] };
