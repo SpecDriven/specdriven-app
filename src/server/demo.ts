@@ -68,7 +68,7 @@ function demoSource(): string {
  * name in the marketplace and the id its manifest declares.
  */
 export const DEMO_MARKETPLACE_PLUGINS: readonly { marketplace: string; name: string; id: string }[] = [
-  { marketplace: "specdriven", name: "models", id: "models" },
+  { marketplace: "specdriven", name: "event-model", id: "event-model" },
 ];
 
 const DEMO_SETTINGS: Partial<SpecDrivenState> = {

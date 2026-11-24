@@ -27,7 +27,7 @@ export function builtinManifest(id: string): PluginManifest | undefined {
 
 /**
  * Built-ins that left the tree for the marketplace — the Event Models, now
- * the `models` plugin of the SpecDriven/plugins index, and the three coding
+ * the `event-model` plugin of the SpecDriven/plugins index, and the three coding
  * agents (specs/agents/agent-plugins.feature.md), which the app installs by
  * itself where it finds their commands. Kept for the profile alone: a
  * settings file from before plugins with the old switch on (`models: true`)
@@ -37,7 +37,7 @@ export function builtinManifest(id: string): PluginManifest | undefined {
  */
 export const retiredManifests: readonly PluginManifest[] = [
   {
-    id: "models",
+    id: "event-model",
     api: "1",
     displayName: "Event models",
     description: "Event Models drawn on a canvas, sliced into specs",
