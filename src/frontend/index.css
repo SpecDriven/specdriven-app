@@ -7804,6 +7804,368 @@ button.page-archive-head:hover {
   }
 }
 
+/* --- MCP servers before a session (specs/agents/agent-pane.feature.md "MCP
+   servers before a session"; src/frontend/McpServersDialog.tsx) ---------- */
+
+/* The header's ⋯ on the new-session screen: its menu hangs under it, at
+   the pane's right edge. */
+.agent-head-menu {
+  position: relative;
+  display: flex;
+}
+
+.agent-head-menu-list {
+  top: calc(100% + 0.25rem);
+  right: 0;
+  min-width: 11rem;
+}
+
+/* A wide dialog: the servers on the left, the one picked on the right.
+   Its height is fixed so picking another server does not resize it. */
+.dialog.mcp-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(58rem, 94vw);
+  height: min(40rem, 85vh);
+  height: min(40rem, 85dvh);
+  padding: 1.1rem 1.25rem 1.25rem;
+}
+
+.mcp-dialog-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.mcp-dialog-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.mcp-dialog-where {
+  margin: 0.15rem 0 0;
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcp-dialog-head .btn {
+  flex: none;
+  gap: 0.3rem;
+}
+
+.mcp-dialog-totals {
+  min-height: 1.2rem;
+  margin: 0.6rem 0 0.75rem;
+  color: var(--text-2);
+  font-size: 0.8125rem;
+}
+
+.mcp-dialog-error {
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.mcp-dialog-body {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(14rem, 18rem) minmax(0, 1fr);
+  gap: 1rem;
+  min-height: 0;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+ul.mcp-dialog-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin: 0;
+  padding: 0 0.25rem 0 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.mcp-dialog-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.5rem;
+  padding: 0.2rem 0.45rem;
+  border-radius: var(--radius-md);
+}
+
+.mcp-dialog-list li:hover {
+  background: var(--hover);
+}
+
+.mcp-dialog-list li[data-selected] {
+  background: var(--accent-soft);
+}
+
+/* The name and its line under it are the button that picks the server. */
+.agent-mcp-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+  padding: 0.15rem 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.agent-mcp-pick:focus-visible {
+  outline: none;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+.mcp-dialog-list .agent-rail-item-name {
+  color: var(--text-1);
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+/* The switch is an input inside a dialog: none of the text fields' box. */
+.mcp-dialog .agent-mcp-switch input,
+.mcp-dialog input[type="radio"] {
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+}
+
+.mcp-dialog-detail {
+  min-width: 0;
+  padding-right: 0.25rem;
+  overflow-y: auto;
+}
+
+.mcp-dialog-empty {
+  padding-top: 0.4rem;
+}
+
+.mcp-detail-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+}
+
+.mcp-detail h4,
+.mcp-add-form h4 {
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-1);
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcp-detail-status {
+  flex: none;
+  color: var(--text-2);
+  font-size: 0.75rem;
+}
+
+.mcp-detail-status[data-status="failed"] {
+  color: var(--danger-fg);
+}
+
+.mcp-detail-error {
+  margin-top: 0.4rem;
+  overflow-wrap: anywhere;
+}
+
+.mcp-detail h5 {
+  margin: 1rem 0 0.35rem;
+  color: var(--text-2);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.mcp-detail p {
+  margin: 0;
+  font-size: 0.8125rem;
+}
+
+.mcp-detail p.hint {
+  font-size: 0.75rem;
+}
+
+.mcp-detail-usage,
+.mcp-detail-context p {
+  color: var(--text-1);
+}
+
+.mcp-detail-since {
+  margin-top: 0.2rem;
+}
+
+.mcp-detail-facts {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0.7rem 0 0;
+}
+
+.mcp-detail-facts > div {
+  display: grid;
+  grid-template-columns: 6.5rem minmax(0, 1fr);
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+}
+
+.mcp-detail-facts dt {
+  color: var(--text-2);
+}
+
+.mcp-detail-facts dd {
+  margin: 0;
+  color: var(--text-1);
+  overflow-wrap: anywhere;
+}
+
+/* One server's share of the context window, in the colour the session
+   popover's meter gives MCP tools. */
+.mcp-detail-bar {
+  height: 6px;
+  margin-bottom: 0.4rem;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--meter-free);
+}
+
+.mcp-detail-bar span {
+  display: block;
+  min-width: 2px;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--meter-1);
+}
+
+.mcp-detail-tools-scroll {
+  overflow-x: auto;
+}
+
+.mcp-detail-tools {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+}
+
+.mcp-detail-tools th {
+  padding: 0.25rem 0.4rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-2);
+  font-weight: 500;
+  text-align: left;
+}
+
+.mcp-detail-tools td {
+  max-width: 18rem;
+  padding: 0.25rem 0.4rem;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcp-detail-tools td:first-child {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+}
+
+.mcp-detail-tools .num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.mcp-detail-deferred {
+  color: var(--text-3);
+}
+
+.mcp-detail-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1.1rem;
+}
+
+.mcp-detail-confirm {
+  margin-right: auto;
+  color: var(--text-1);
+  font-size: 0.8125rem;
+}
+
+.mcp-add-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.mcp-add-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  color: var(--text-2);
+  font-size: 0.75rem;
+}
+
+.mcp-add-form textarea {
+  min-height: 0;
+}
+
+.mcp-add-choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.mcp-add-choice legend {
+  margin-bottom: 0.3rem;
+  padding: 0;
+  color: var(--text-2);
+  font-size: 0.75rem;
+}
+
+.mcp-add-form .mcp-add-choice label {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--text-1);
+  font-size: 0.8125rem;
+  font-weight: 400;
+}
+
+.mcp-add-choice .hint {
+  flex-basis: 100%;
+}
+
+.mcp-add-choice .hint[data-scope="project"] {
+  color: var(--status-proposed);
+}
+
+/* A narrow window: the list over the details, the dialog as tall as it gets. */
+@media (max-width: 720px) {
+  .mcp-dialog-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(6rem, 35%) minmax(0, 1fr);
+  }
+}
+
 /* --- Session tabs (specs/agents/agent-pane.feature.md "Each session has
    its own tab, at most five") ------------------------------------------- */
 

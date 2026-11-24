@@ -22,6 +22,7 @@ import {
   GitBranch,
   Globe,
   Layers,
+  MoreHorizontal,
   PanelRightClose,
   Pin,
   Plug,
@@ -39,6 +40,7 @@ import { ModelPicker } from "./AgentModelPicker";
 import { Menu, type MenuItem } from "./Menu";
 import type { ConfirmOptions, PromptOptions } from "./ModalPrompts";
 import { SourceCheckDialog } from "./SourceCheckDialog";
+import { McpServersDialog } from "./McpServersDialog";
 import { SessionRailButton } from "./SessionRail";
 import { accountChipDetail, accountChipKind, accountChipWord } from "./agentAccount";
 import { Tooltip } from "./Tooltip";
@@ -260,6 +262,12 @@ export function AgentPane({
   /** The agent picked on the new-session screen; null is the first usable. */
   const [draftAgentId, setDraftAgentId] = useState<string | null>(null);
   const draftAgent = pickedAgent(store.agents, draftAgentId);
+  /** The folder picked on the new-session screen; null keeps the default
+      (code repo, else data repo). Kept here so the header's "MCP servers…"
+      speaks of the same folder; a pick made in the last open folder is not
+      this one's. */
+  const [draftFolder, setDraftFolder] = useState<string | null>(null);
+  useEffect(() => setDraftFolder(null), [dataRepo]);
   // Asks for any folder; null when canceled or there is no prompt.
   const askFolder = prompt
     ? async (initial: string): Promise<string | null> =>
@@ -283,6 +291,8 @@ export function AgentPane({
         store={store}
         session={session}
         draftAgent={draftAgent}
+        draftFolder={draftFolder ?? codeRepo ?? dataRepo}
+        draftCwd={draftFolder && draftFolder !== (codeRepo ?? dataRepo) ? draftFolder : undefined}
         demo={demo}
         homeDir={homeDir}
         onClose={onClose}
@@ -310,6 +320,8 @@ export function AgentPane({
           store={store}
           agentId={draftAgentId}
           onPickAgent={setDraftAgentId}
+          folder={draftFolder}
+          onPickFolder={setDraftFolder}
           demo={demo}
           codeRepo={codeRepo}
           dataRepo={dataRepo}
@@ -439,6 +451,8 @@ function AgentHeader({
   store,
   session,
   draftAgent,
+  draftFolder = null,
+  draftCwd,
   demo,
   homeDir,
   onClose,
@@ -448,6 +462,10 @@ function AgentHeader({
   session: SessionState | null;
   /** The agent the new-session screen has picked, while no session is open. */
   draftAgent: AgentDescriptor | null;
+  /** The folder a session started from that screen would work in. */
+  draftFolder?: string | null;
+  /** That folder, when the screen picked one other than the default. */
+  draftCwd?: string;
   demo: boolean;
   homeDir: string | null;
   onClose: () => void;
@@ -488,6 +506,11 @@ function AgentHeader({
       {/* An agent with an account: the plug or the person, always one of the two —
           with or without a session (specs/agents/agent-pane.feature.md S13). */}
       {chipAgent?.capabilities.hasAccount && <AccountChip agent={chipAgent.id} account={meta?.account} />}
+      {/* Before a session: what the agent can be asked with none running
+          (specs/agents/agent-pane.feature.md "MCP servers before a session"). */}
+      {!meta && draftAgent?.capabilities.mcpManage && (
+        <AgentMenu agent={draftAgent} folder={draftFolder} cwd={draftCwd} homeDir={homeDir} />
+      )}
       {meta && busy && agent?.capabilities.canInterrupt && (
         <Tooltip label="Stop this turn">
           <button
@@ -510,6 +533,61 @@ function AgentHeader({
           <PanelRightClose size={15} aria-hidden="true" />
         </button>
       </Tooltip>
+    </div>
+  );
+}
+
+/**
+ * The header's ⋯ menu on the new-session screen: what the picked agent
+ * answers with no session running. One item today — "MCP servers…", which
+ * opens the dialog for the folder a session would start in — shown for an
+ * agent that manages its MCP servers before a session
+ * (capabilities.mcpManage).
+ */
+function AgentMenu({
+  agent,
+  folder,
+  cwd,
+  homeDir,
+}: {
+  agent: AgentDescriptor;
+  folder: string | null;
+  cwd?: string;
+  homeDir: string | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const [mcp, setMcp] = useState(false);
+  const items: MenuItem[] = [
+    {
+      id: "mcp",
+      label: "MCP servers…",
+      icon: <Plug size={14} aria-hidden="true" />,
+      onSelect: () => setMcp(true),
+    },
+  ];
+  return (
+    <div className="agent-head-menu">
+      <Tooltip label={`More for ${agent.label}`}>
+        <button
+          type="button"
+          className="ibtn"
+          aria-label={`More for ${agent.label}`}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          onClick={() => setOpen((o) => !o)}
+        >
+          <MoreHorizontal size={15} aria-hidden="true" />
+        </button>
+      </Tooltip>
+      <Menu
+        open={open}
+        onClose={() => setOpen(false)}
+        label={`More for ${agent.label}`}
+        items={items}
+        className="agent-head-menu-list"
+        containerSelector=".agent-head-menu"
+      />
+      {mcp && <McpServersDialog agent={agent} folder={folder} cwd={cwd} homeDir={homeDir} onClose={() => setMcp(false)} />}
     </div>
   );
 }
@@ -1050,6 +1128,8 @@ function EmptyState({
   store,
   agentId,
   onPickAgent,
+  folder,
+  onPickFolder: setFolder,
   demo,
   codeRepo,
   dataRepo,
@@ -1064,6 +1144,10 @@ function EmptyState({
   /** The agent picked here (kept by the pane, so its header can name it); null is the first. */
   agentId: string | null;
   onPickAgent: (id: string) => void;
+  /** A folder picked here (kept by the pane, for its header's "MCP
+      servers…"); null keeps the default (code repo, else data repo). */
+  folder: string | null;
+  onPickFolder: (folder: string) => void;
   demo: boolean;
   codeRepo: string | null;
   dataRepo: string | null;
@@ -1076,8 +1160,6 @@ function EmptyState({
 }) {
   // Only the agents whose CLI is on PATH; with one, there is nothing to pick.
   const agents = usableAgents(store.agents);
-  /** A folder picked here; null keeps the default (code repo, else data repo). */
-  const [folder, setFolder] = useState<string | null>(null);
   /** A mode picked here; null is the agent's default. */
   const [mode, setMode] = useState<PermissionMode | null>(null);
   /** Whether the session gets a worktree: the last pick, kept on this device. */

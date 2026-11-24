@@ -22,9 +22,13 @@ import type {
   AgentOutput,
   ChatAccount,
   ChatContextUsage,
+  AgentMcpList,
   ChatMcpServer,
   ChatStatus,
   ContextDetail,
+  McpScope,
+  McpServerAction,
+  McpServerDraft,
   McpSignIn,
   NoteCode,
   PermissionMode,
@@ -70,6 +74,38 @@ export interface AgentProvider {
       (a proxy, a gateway) checks it, retrying a moment, and says whether it
       answered; null when there is nothing to try (an account sign-in). */
   reconnect?(ctx: { cwd: string }): Promise<AgentReconnect | null>;
+  /** The agent's MCP servers with no session running
+      (specs/agents/agent-pane.feature.md "MCP servers before a session"):
+      capabilities.mcpManage says it is there. */
+  mcp?: AgentMcpAdmin;
+}
+
+/** The folder an "MCP servers…" dialog is about: where a new session
+    would work, the specifications folder behind it, and the servers the
+    app would hand that session (src/server/agentMcp.ts). */
+export interface AgentMcpContext {
+  cwd: string;
+  dataRepo: string | null;
+  mcpServers?: AgentMcpServer[];
+}
+
+/**
+ * What a provider does about its MCP servers before a session: the same
+ * servers, in the same state, a session started in `ctx.cwd` would get.
+ * The provider may keep a process of its agent running between calls;
+ * `release` says the dialog is shut and it can go. Throw an
+ * AgentError(409, …) to refuse a call, with the words the dialog shows.
+ */
+export interface AgentMcpAdmin {
+  list(ctx: AgentMcpContext): Promise<AgentMcpList>;
+  /** Turn a server on or off, connect it again, or start its sign-in —
+      then the page to open in the browser, when there is one. */
+  act(ctx: AgentMcpContext, name: string, action: McpServerAction): Promise<McpSignIn | void>;
+  /** Keep a new server where the draft says (the core has checked it). */
+  add(ctx: AgentMcpContext, draft: McpServerDraft): Promise<void>;
+  /** Forget a server the list marked canDelete, from the scope it gave. */
+  remove(ctx: AgentMcpContext, name: string, scope: McpScope): Promise<void>;
+  release?(ctx: AgentMcpContext): void | Promise<void>;
 }
 
 /** What a provider's reconnect found. */

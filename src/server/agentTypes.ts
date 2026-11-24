@@ -397,6 +397,10 @@ export interface AgentCapabilities {
       popover's actions on them (AgentSession.mcpServers and the three
       beside it); absent is no, and the popover shows no MCP servers. */
   mcpServers?: boolean;
+  /** Whether the agent lists, changes, adds and deletes its MCP servers
+      with no session running (AgentProvider.mcp), and where it can add
+      one; absent is no, and the pane offers no "MCP servers…". */
+  mcpManage?: McpManageCapability;
 }
 
 // --- Model and effort --------------------------------------------------------
@@ -598,3 +602,189 @@ export interface McpServersAnswer {
   /** After "authenticate": the sign-in page to open. */
   url?: string;
 }
+
+// --- MCP servers before a session ----------------------------------------------
+//
+// specs/agents/agent-pane.feature.md "MCP servers before a session": the
+// pane's "MCP servers…" dialog lists the servers a new session in a folder
+// would get, with what each costs in context and how much it was used, and
+// adds and deletes them. The agent answers it with no session running
+// (AgentProvider.mcp, src/plugins/host/agents.ts).
+
+/** Where an agent keeps a server it was told to add: for this folder
+    only, for every folder of the user, or in a file the repo shares. */
+export type McpScope = "local" | "user" | "project";
+
+export const MCP_SCOPES: readonly McpScope[] = ["local", "user", "project"];
+
+/** How a server is reached: a command over stdio, or a url. */
+export type McpTransport = "stdio" | "http" | "sse";
+
+export const MCP_TRANSPORTS: readonly McpTransport[] = ["stdio", "http", "sse"];
+
+/** What an agent that manages its MCP servers before a session takes
+    (AgentCapabilities.mcpManage): where it can add one, and of which kind. */
+export interface McpManageCapability {
+  scopes: readonly McpScope[];
+  transports: readonly McpTransport[];
+}
+
+/** One tool of an MCP server. */
+export interface McpToolInfo {
+  /** The tool's own name, without the `mcp__<server>__` in front. */
+  name: string;
+  description?: string;
+  /** What its definition takes of the context window. */
+  tokens?: number;
+  /** Whether a session starts with the definition in its context; false
+      for one the agent loads only when it looks for it. */
+  loaded?: boolean;
+}
+
+/**
+ * One MCP server as the dialog shows it: what the popover's row says of
+ * it, and everything else the agent knows. Never a secret: the environment
+ * and the headers a server is started with are given by name only.
+ */
+export interface McpServerDetail extends ChatMcpServer {
+  /** Where it is kept, when that is a place the agent can delete it from. */
+  scope?: McpScope;
+  /** "stdio", "http", "sse", or the agent's own word for another kind. */
+  transport?: string;
+  command?: string;
+  args?: string[];
+  url?: string;
+  envNames?: string[];
+  headerNames?: string[];
+  /** What the server calls itself, and its version, once connected. */
+  serverName?: string;
+  version?: string;
+  toolList?: McpToolInfo[];
+  /** What its tools take of the context window: `loaded` from a session's
+      first turn on, `deferred` only once the agent loads them. */
+  context?: { loaded: number; deferred: number };
+  /** Whether the dialog may delete it. */
+  canDelete: boolean;
+}
+
+/** A server the dialog's form asks the agent to add. */
+export interface McpServerDraft {
+  name: string;
+  scope: McpScope;
+  transport: McpTransport;
+  /** stdio: the command, its arguments and its environment. */
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  /** http and sse: the address and the headers sent with every request. */
+  url?: string;
+  headers?: Record<string, string>;
+}
+
+/** The letters a server's name may have, as Claude Code takes them. */
+const MCP_NAME = /^[A-Za-z0-9_-]{1,64}$/;
+
+function stringMap(value: unknown, what: string): Record<string, string> | string {
+  if (value === undefined || value === null) return {};
+  if (typeof value !== "object" || Array.isArray(value)) return `${what} must be names and values`;
+  const out: Record<string, string> = {};
+  for (const [key, v] of Object.entries(value as Record<string, unknown>)) {
+    const name = key.trim();
+    if (!name) continue;
+    if (typeof v !== "string") return `${what} "${name}" must have a text value`;
+    if (/[\r\n]/.test(name) || /[\r\n]/.test(v)) return `${what} "${name}" must be one line`;
+    out[name] = v;
+  }
+  return out;
+}
+
+/**
+ * A draft as a form or a request body gives it, checked: the draft, or
+ * the words of what is wrong with it. `can` is what the agent takes;
+ * `taken` are the names it already lists.
+ */
+export function checkMcpDraft(
+  value: unknown,
+  can: McpManageCapability,
+  taken: readonly string[] = [],
+): McpServerDraft | string {
+  if (!value || typeof value !== "object") return "server is required";
+  const raw = value as Record<string, unknown>;
+  const name = typeof raw.name === "string" ? raw.name.trim() : "";
+  if (!name) return "Give the server a name";
+  if (!MCP_NAME.test(name)) return "A server's name can only have letters, numbers, hyphens and underscores";
+  if (taken.includes(name)) return `There is already an MCP server named "${name}"`;
+  const scope = can.scopes.find((s) => s === raw.scope);
+  if (!scope) return `scope must be one of ${can.scopes.join(", ")}`;
+  const transport = can.transports.find((t) => t === raw.transport);
+  if (!transport) return `transport must be one of ${can.transports.join(", ")}`;
+  if (transport === "stdio") {
+    const command = typeof raw.command === "string" ? raw.command.trim() : "";
+    if (!command) return "Give the command that starts the server";
+    const args = raw.args === undefined || raw.args === null ? [] : raw.args;
+    if (!Array.isArray(args) || args.some((a) => typeof a !== "string")) return "args must be a list of words";
+    const env = stringMap(raw.env, "Environment variable");
+    if (typeof env === "string") return env;
+    return {
+      name,
+      scope,
+      transport,
+      command,
+      ...(args.length ? { args: args as string[] } : {}),
+      ...(Object.keys(env).length ? { env } : {}),
+    };
+  }
+  const url = typeof raw.url === "string" ? raw.url.trim() : "";
+  if (!url) return "Give the server's url";
+  let parsed: URL | null = null;
+  try {
+    parsed = new URL(url);
+  } catch {
+    parsed = null;
+  }
+  if (!parsed || (parsed.protocol !== "https:" && parsed.protocol !== "http:")) {
+    return "The url must start with https:// or http://";
+  }
+  const headers = stringMap(raw.headers, "Header");
+  if (typeof headers === "string") return headers;
+  return { name, scope, transport, url, ...(Object.keys(headers).length ? { headers } : {}) };
+}
+
+/** How often one tool was called, and how often the call failed. */
+export interface McpToolUsage {
+  calls: number;
+  errors: number;
+}
+
+/** How much one MCP server was used in the folder's sessions. */
+export interface McpServerUsage extends McpToolUsage {
+  /** The sessions that called it at least once. */
+  sessions: number;
+  /** When it was last called. */
+  lastAt?: string;
+  /** By tool, under the tool's own name. */
+  tools: Record<string, McpToolUsage>;
+}
+
+/** What an agent says of its MCP servers with no session running. */
+export interface AgentMcpList {
+  servers: McpServerDetail[];
+  /** The size of the context window the costs are a share of. */
+  contextWindow?: number;
+}
+
+/** What the dialog shows: the agent's list, and the app's own count of
+    how each server was used (src/server/mcpUsage.ts). */
+export interface McpCatalog extends AgentMcpList {
+  /** By server name; a server never called has no entry. */
+  usage: Record<string, McpServerUsage>;
+  /** When the oldest session the count covers started; absent while no
+      session in the folder has been counted. */
+  usageSince?: string;
+  /** After "authenticate": the sign-in page to open. */
+  url?: string;
+}
+
+/** A session's count of its MCP tool calls, by the tool's full name
+    (`mcp__<server>__<tool>`), as its record keeps it. */
+export type McpToolCounts = Record<string, McpToolUsage & { lastAt: string }>;

@@ -662,35 +662,61 @@ export function McpServerList({
   );
 }
 
-function McpServerRow({
+/**
+ * One server's line: how it stands, its sign-in or reconnect, its switch.
+ * With `onSelect` — the "MCP servers…" dialog's list — the name and what
+ * stands under it are one button that picks the server, and `selected`
+ * marks the one picked.
+ */
+export function McpServerRow({
   server,
   busy,
   link,
   onAction,
+  selected = false,
+  onSelect,
 }: {
   server: ChatMcpServer;
   busy: boolean;
   link?: string;
   onAction: (server: string, action: McpServerAction) => void;
+  selected?: boolean;
+  onSelect?: (server: string) => void;
 }) {
   const words = mcpStatusWords(server);
   const sub = [server.source, words].filter(Boolean).join(" · ");
   const on = server.status !== "disabled";
   return (
-    <li data-server={server.name} data-status={server.status}>
+    <li data-server={server.name} data-status={server.status} data-selected={selected || undefined}>
       <span className="agent-dot agent-mcp-dot" data-mcp={server.status} aria-hidden="true" />
       <span className="agent-mcp-main">
-        <span className="agent-rail-item-name" title={server.name}>
-          {server.name}
-        </span>
-        {server.status === "failed" && server.error ? (
-          <Tooltip label={server.error}>
-            <span className="agent-mcp-sub" tabIndex={0}>
-              {sub}
+        {onSelect ? (
+          <button
+            type="button"
+            className="agent-mcp-pick"
+            aria-current={selected ? "true" : undefined}
+            onClick={() => onSelect(server.name)}
+          >
+            <span className="agent-rail-item-name" title={server.name}>
+              {server.name}
             </span>
-          </Tooltip>
+            <span className="agent-mcp-sub">{sub}</span>
+          </button>
         ) : (
-          <span className="agent-mcp-sub">{sub}</span>
+          <>
+            <span className="agent-rail-item-name" title={server.name}>
+              {server.name}
+            </span>
+            {server.status === "failed" && server.error ? (
+              <Tooltip label={server.error}>
+                <span className="agent-mcp-sub" tabIndex={0}>
+                  {sub}
+                </span>
+              </Tooltip>
+            ) : (
+              <span className="agent-mcp-sub">{sub}</span>
+            )}
+          </>
         )}
         {link && server.status === "needs-auth" && (
           <a className="agent-mcp-link" href={link} target="_blank" rel="noopener noreferrer">

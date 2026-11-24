@@ -17,8 +17,8 @@
 // through the host's own requestPermission, so a visitor sees the gate work.
 
 import { randomUUID } from "node:crypto";
-import type { AgentHost, AgentProvider, AgentSession, AgentStartOptions } from "../plugins/host/agents";
-import { fromPlugin } from "../plugins/host/agents";
+import type { AgentHost, AgentMcpAdmin, AgentProvider, AgentSession, AgentStartOptions } from "../plugins/host/agents";
+import { AgentError, fromPlugin } from "../plugins/host/agents";
 import type {
   AgentImage,
   ChatContextUsage,
@@ -26,9 +26,12 @@ import type {
   ContextDetail,
   ContextItem,
   ContextSlice,
+  McpServerDetail,
+  McpToolInfo,
   PermissionMode,
   SlashCommandInfo,
 } from "./agentTypes";
+import { MCP_SCOPES, MCP_TRANSPORTS } from "./agentTypes";
 
 /** The model the header shows: obviously not a real one. */
 export const SIMULATED_MODEL = "claude-simulated";
@@ -116,6 +119,107 @@ const SIMULATED_MCP_TOOLS: Readonly<Record<string, number>> = { confluence: 3, s
 
 /** How long a simulated sign-in takes before the server connects. */
 const SIMULATED_SIGN_IN_MS = 2500;
+
+// --- MCP servers before a session ---------------------------------------------
+//
+// The "MCP servers…" dialog in the demo (specs/agents/agent-pane.feature.md
+// "MCP servers before a session"): the same four servers a simulated
+// session starts with, with made-up details, kept in memory per folder —
+// nothing is read from or written to any agent's settings.
+
+/** What the dialog says of each simulated server beyond its row. */
+const SIMULATED_MCP_DETAILS: Readonly<Record<string, Partial<McpServerDetail>>> = {
+  confluence: { transport: "stdio", command: "specdriven", args: ["mcp", "confluence"], envNames: ["CONFLUENCE_TOKEN"], serverName: "specdriven-confluence", version: "1.0.0" },
+  specdriven: { scope: "project", transport: "stdio", command: "bunx", args: ["@specdriven/mcp"], serverName: "specdriven", version: "0.4.2" },
+  linear: { scope: "user", transport: "http", url: "https://mcp.linear.app/mcp", serverName: "linear", version: "2.1.0" },
+  figma: { scope: "user", transport: "http", url: "http://127.0.0.1:3845/mcp", headerNames: ["X-Figma-Token"] },
+};
+
+/** The tools a simulated server gives while it is connected. */
+function simulatedMcpTools(name: string, count: number): McpToolInfo[] {
+  const own = MCP_TOOL_ITEMS.filter((t) => t.detail === name).map((t) => ({ name: t.name, tokens: t.tokens, loaded: true }));
+  if (own.length > 0) return own;
+  return Array.from({ length: count }, (_, i) => ({ name: `${name}_tool_${i + 1}`, tokens: 420 + ((i * 97) % 380), loaded: false }));
+}
+
+function simulatedMcpDetail(server: ChatMcpServer, extra: Partial<McpServerDetail> = {}): McpServerDetail {
+  const detail: McpServerDetail = { ...server, ...extra, canDelete: extra.scope !== undefined };
+  if (server.status !== "connected") return detail;
+  const toolList = simulatedMcpTools(server.name, server.tools ?? 1);
+  const of = (loaded: boolean) => toolList.filter((t) => t.loaded === loaded).reduce((n, t) => n + (t.tokens ?? 0), 0);
+  return { ...detail, tools: toolList.length, toolList, context: { loaded: of(true), deferred: of(false) } };
+}
+
+const SIMULATED_MCP = Symbol.for("specdriven.demoAgent.mcp");
+
+/** The simulated servers by folder, with what was added and deleted there. */
+function simulatedMcpState(cwd: string): { server: ChatMcpServer; extra: Partial<McpServerDetail> }[] {
+  const g = globalThis as Record<symbol, unknown>;
+  const all = (g[SIMULATED_MCP] ??= new Map<string, { server: ChatMcpServer; extra: Partial<McpServerDetail> }[]>()) as Map<
+    string,
+    { server: ChatMcpServer; extra: Partial<McpServerDetail> }[]
+  >;
+  let state = all.get(cwd);
+  if (!state) {
+    state = simulatedMcpServers().map((server) => ({ server, extra: SIMULATED_MCP_DETAILS[server.name] ?? {} }));
+    all.set(cwd, state);
+  }
+  return state;
+}
+
+/** For the tests: every folder starts over. */
+export function forgetSimulatedMcp(): void {
+  delete (globalThis as Record<symbol, unknown>)[SIMULATED_MCP];
+}
+
+/** The demo's AgentProvider.mcp: on, off, a sign-in that just works, add and delete — all pretend. */
+export const simulatedMcpAdmin: AgentMcpAdmin = {
+  list(ctx) {
+    return Promise.resolve({
+      servers: simulatedMcpState(ctx.cwd).map((s) => simulatedMcpDetail(s.server, s.extra)),
+      contextWindow: SIMULATED_WINDOW,
+    });
+  },
+  act(ctx, name, action) {
+    const entry = simulatedMcpState(ctx.cwd).find((s) => s.server.name === name);
+    if (!entry) throw new AgentError(404, `No MCP server named "${name}"`);
+    const set = (patch: Partial<ChatMcpServer>) => {
+      delete entry.server.error;
+      delete entry.server.tools;
+      Object.assign(entry.server, patch);
+    };
+    const connected = () => set({ status: "connected", tools: SIMULATED_MCP_TOOLS[name] ?? 2, canAuthenticate: false });
+    if (action === "disable") set({ status: "disabled", canAuthenticate: false });
+    else if (action === "authenticate") {
+      // Nowhere to sign in to in the demo: it connects a moment later.
+      set({ status: "connecting", canAuthenticate: false });
+      void sleep(SIMULATED_SIGN_IN_MS, []).then(connected);
+      return Promise.resolve({});
+    } else connected();
+    return Promise.resolve();
+  },
+  add(ctx, draft) {
+    simulatedMcpState(ctx.cwd).push({
+      server: { name: draft.name, status: "connected", source: draft.scope, tools: 2, canToggle: true, canAuthenticate: false },
+      extra: {
+        scope: draft.scope,
+        transport: draft.transport,
+        ...(draft.command ? { command: draft.command } : {}),
+        ...(draft.args ? { args: draft.args } : {}),
+        ...(draft.env ? { envNames: Object.keys(draft.env) } : {}),
+        ...(draft.url ? { url: draft.url } : {}),
+        ...(draft.headers ? { headerNames: Object.keys(draft.headers) } : {}),
+      },
+    });
+    return Promise.resolve();
+  },
+  remove(ctx, name) {
+    const state = simulatedMcpState(ctx.cwd);
+    const at = state.findIndex((s) => s.server.name === name);
+    if (at >= 0) state.splice(at, 1);
+    return Promise.resolve();
+  },
+};
 
 /**
  * What the simulated agent reports after `turns` turns: the fixed parts of
@@ -546,8 +650,10 @@ export const simulatedProvider: AgentProvider = fromPlugin(
       contextUsage: "breakdown",
       thinking: true,
       mcpServers: true,
+      mcpManage: { scopes: MCP_SCOPES, transports: MCP_TRANSPORTS },
     },
     defaultPermissionMode: "auto",
+    mcp: simulatedMcpAdmin,
     start(opts) {
       const session = new SimulatedSession(opts);
       // Once the engine holds the session: the ready status and the first
