@@ -21,6 +21,7 @@ import { $ } from "bun";
 import { setFolderChooser } from "./folderChooser";
 import { getAppRoot } from "./paths";
 import {
+  READ_ONLY_MARKETPLACE_PLUGINS,
   READ_ONLY_PLUGINS,
   readReadOnlyConfig,
   setReadOnlySite,
@@ -30,6 +31,8 @@ import {
 } from "./readOnlyMode";
 import { PROFILE_FORMAT } from "../plugins/profile";
 import { ungatePlugins } from "../plugins/host/loader";
+import { preinstallPlugins } from "../plugins/host/preinstall";
+import { DEFAULT_MARKETPLACES, type MarketplaceRef } from "../plugins/marketplace";
 import { syncDataDir } from "./reload";
 import { resetSearchCache } from "./search";
 import { readState, writeState, type SpecDrivenState } from "./state";
@@ -41,8 +44,9 @@ export { isReadOnlyMode, READ_ONLY_REFUSAL, READ_ONLY_USER, readOnlyAllows } fro
  * Settings the site cannot run without, stamped on every snapshot: the
  * bundled git engine (no gh or credentials probed), no sync cron, no coding
  * agents, test links to GitHub rather than IntelliJ, and the plugin profile
- * of every open snapshot naming Specs and the roadmap alone — no other
- * built-in, and every plugin seen, so the loader adopts nothing it finds.
+ * of every open snapshot naming Specs, the roadmap and the Event Models
+ * alone — no other built-in, and every plugin seen, so the loader adopts
+ * nothing it finds.
  * The first project's snapshot is the folder the settings file names.
  */
 function siteSettings(dirs: string[]): Partial<SpecDrivenState> {
@@ -192,4 +196,28 @@ export async function setupReadOnly(env: Record<string, string | undefined> = pr
   if (config.refreshSeconds > 0) {
     setInterval(() => void refreshReadOnly(), config.refreshSeconds * 1000).unref?.();
   }
+}
+
+/**
+ * Where the site installs its marketplace plugins from: SpecDriven's own
+ * marketplace, or the one SPECDRIVEN_READONLY_MARKETPLACE names (a git url
+ * or a local path) under the same name — a fork, or a test's fixture.
+ */
+export function readOnlyMarketplaces(env: Record<string, string | undefined> = process.env): readonly MarketplaceRef[] {
+  const source = env.SPECDRIVEN_READONLY_MARKETPLACE?.trim();
+  return source ? [{ name: "specdriven", source }] : DEFAULT_MARKETPLACES;
+}
+
+/**
+ * Install the plugins READ_ONLY_MARKETPLACE_PLUGINS names into the site's
+ * home (src/plugins/host/preinstall.ts), from readOnlyMarketplaces().
+ * Started after setupReadOnly without being awaited: Specs and the roadmap
+ * answer meanwhile, and the Event Models tab shows once it has loaded. The
+ * operator's choice, from the marketplace — never a plugin the shown repos
+ * carry, so a file in a repo still runs no code.
+ */
+export function installReadOnlyPlugins(
+  marketplaces: readonly MarketplaceRef[] = readOnlyMarketplaces(),
+): Promise<void> {
+  return preinstallPlugins(READ_ONLY_MARKETPLACE_PLUGINS, marketplaces, "read-only");
 }

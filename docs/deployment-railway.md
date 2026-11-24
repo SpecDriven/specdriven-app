@@ -586,6 +586,7 @@ from [SpecDriven/specs-specdriven](https://github.com/SpecDriven/specs-specdrive
 
 - **What a visitor sees:** the app's own UI with the Specs tab (the feature
   tree, every feature and every scenario, rendered), the Roadmap tab, the
+  Event Models tab (each model's canvas, shown and inspected, not edited), the
   README and search. Every way to create, edit, move, publish or delete is
   hidden, and so are Sync, the folder switch, Settings, Plugins, the logs, the
   data viewer and the coding agents. A scenario's page is rendered, not an
@@ -593,8 +594,11 @@ from [SpecDriven/specs-specdriven](https://github.com/SpecDriven/specs-specdrive
 - **What the server allows:** a short list of GET routes
   (`src/server/readOnlyMode.ts` `ALLOWED`). Every other request, every write
   first of all, gets `403 This site is read-only` before its handler runs.
-  Only the built-in Roadmap plugin is mounted; plugin folders, marketplace
-  installs and agent plugins are off, so a file in the repo can't run code.
+  Only the built-in Roadmap plugin and the Event Models are mounted. The site
+  installs the Event Models (`event-model`) from SpecDriven's marketplace at
+  start, in the background (`READ_ONLY_MARKETPLACE_PLUGINS`); the rest —
+  plugin folders, other marketplace installs and agent plugins — is off, so
+  a file in the repo can't run code.
 - **Several projects:** `SPECDRIVEN_READONLY_PROJECTS` lists the
   repositories to show. With more than one, a ▾ next to the folder name
   lists them and the visitor picks one. The choice is kept in a
@@ -628,6 +632,7 @@ To deploy it:
    | `SPECDRIVEN_READONLY_REPO` | optional, one project; default `https://github.com/SpecDriven/specs-specdriven`. Not together with `SPECDRIVEN_READONLY_PROJECTS` |
    | `SPECDRIVEN_READONLY_BRANCH` | optional, default `main`; the branch of every project that names none |
    | `SPECDRIVEN_READONLY_REFRESH_SECONDS` | optional, default 60; `0` never refreshes |
+   | `SPECDRIVEN_READONLY_MARKETPLACE` | optional: a git url or path to install the Event Models from instead of SpecDriven's marketplace |
 
    `SPECDRIVEN_READONLY_PROJECTS` takes entries separated by commas, spaces
    or new lines, each `[<id>=]<repo>[#<branch>]`. The id is what the menu,

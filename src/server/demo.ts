@@ -28,11 +28,8 @@ import { setFolderChooser } from "./folderChooser";
 import { getAppRoot } from "./paths";
 import { resetSearchCache } from "./search";
 import { readState, writeState } from "./state";
-import { confirmInstall } from "../plugins/host/marketplace";
-import { rescanPlugins } from "../plugins/host/loader";
-import { discoverPlugins } from "../plugins/host/sources";
+import { preinstallPlugins, type PreinstalledPlugin } from "../plugins/host/preinstall";
 import { DEFAULT_MARKETPLACES, type MarketplaceRef } from "../plugins/marketplace";
-import { version as appVersion } from "../../package.json";
 import type { SpecDrivenState } from "./state";
 
 export { DEMO_ISSUES_REPO, DEMO_USER, isDemoMode } from "./demoMode";
@@ -67,7 +64,7 @@ function demoSource(): string {
  * The marketplace plugins the demo installs at start, by the index row's
  * name in the marketplace and the id its manifest declares.
  */
-export const DEMO_MARKETPLACE_PLUGINS: readonly { marketplace: string; name: string; id: string }[] = [
+export const DEMO_MARKETPLACE_PLUGINS: readonly PreinstalledPlugin[] = [
   { marketplace: "specdriven", name: "event-model", id: "event-model" },
 ];
 
@@ -172,28 +169,9 @@ export async function setupDemo(): Promise<void> {
 
 /**
  * Install the plugins DEMO_MARKETPLACE_PLUGINS names into the demo's home
- * (src/plugins/host/marketplace.ts: the marketplace cloned through the
- * app's git engine, the plugin staged, checked against this app and moved
- * into `plugins/`), skipping one already there — a restart keeps /tmp. The
- * operator chose them, so there is no consent step. Started after setupDemo
- * without being awaited: the server answers meanwhile, and the loader
- * mounts each plugin and tells open pages once its folder appears. A
- * plugin that cannot be fetched is logged and its tab stays away; the rest
- * of the demo is unaffected. `marketplaces` is for the tests.
+ * (src/plugins/host/preinstall.ts), skipping one already there. Started
+ * after setupDemo without being awaited. `marketplaces` is for the tests.
  */
-export async function installDemoPlugins(
-  marketplaces: readonly MarketplaceRef[] = DEFAULT_MARKETPLACES,
-): Promise<void> {
-  const present = await discoverPlugins({ dataDir: null, paths: [], appVersion });
-  for (const want of DEMO_MARKETPLACE_PLUGINS) {
-    if (present.some((p) => p.id === want.id && !p.error)) continue;
-    const entry = marketplaces.find((m) => m.name === want.marketplace);
-    try {
-      if (!entry) throw new Error(`no marketplace named "${want.marketplace}"`);
-      await confirmInstall(entry, want.name);
-    } catch (e) {
-      console.error(`[demo] could not install ${want.name} from ${want.marketplace}: ${(e as Error).message}`);
-    }
-  }
-  await rescanPlugins();
+export function installDemoPlugins(marketplaces: readonly MarketplaceRef[] = DEFAULT_MARKETPLACES): Promise<void> {
+  return preinstallPlugins(DEMO_MARKETPLACE_PLUGINS, marketplaces, "demo");
 }

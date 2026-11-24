@@ -83,6 +83,15 @@ test("only the reads the site shows are allowed", () => {
   for (const pattern of ["/api/state", "/api/features", "/api/features/:file", "/api/search", "/api/roadmap/:file"]) {
     expect(readOnlyAllows("GET", pattern)).toBe(true);
   }
+  // The Event Models: listed, opened and exported; never created, saved,
+  // deleted or sliced into a feature.
+  for (const pattern of ["/api/models", "/api/models/:file", "/api/models/:file/export"]) {
+    expect(readOnlyAllows("GET", pattern)).toBe(true);
+  }
+  expect(readOnlyAllows("POST", "/api/models")).toBe(false);
+  expect(readOnlyAllows("PUT", "/api/models/:file")).toBe(false);
+  expect(readOnlyAllows("DELETE", "/api/models/:file")).toBe(false);
+  expect(readOnlyAllows("POST", "/api/models/:file/slices/:slice/feature")).toBe(false);
   expect(readOnlyAllows("HEAD", "/api/features")).toBe(true);
   expect(readOnlyAllows("PUT", "/api/features/:file")).toBe(false);
   expect(readOnlyAllows("POST", "/api/features")).toBe(false);
@@ -150,6 +159,8 @@ beforeAll(async () => {
       SPECDRIVEN_ROOT: root,
       SPECDRIVEN_LOG_FILE: "0",
       SPECDRIVEN_NO_AUTO_INSTALL: "1",
+      // No marketplace there: the Event Models' install fails, offline.
+      SPECDRIVEN_READONLY_MARKETPLACE: join(work, "no-marketplace"),
       SPECDRIVEN_HOST: "127.0.0.1",
       PORT: String(port),
       NODE_ENV: "production",
@@ -186,17 +197,19 @@ test("the state says read-only, names the repo and no one signed in", async () =
   expect(state.agents).toEqual([]);
   expect((state.user as { name: string }).name).toBe("Visitor");
   const enabled = (state.plugins as { id: string; enabled: boolean }[]).filter((p) => p.enabled).map((p) => p.id);
-  expect(enabled).toEqual(["specs", "roadmap"]);
+  // The Event Models are listed though their install failed here (the test's
+  // marketplace is missing): reported, not mounted.
+  expect(enabled).toEqual(["specs", "roadmap", "event-model"]);
   // The site's own list, stamped on the settings of the open snapshot: it
-  // names Specs itself and says so, so the list is read as written — Specs
-  // and the roadmap, nothing picked from the snapshot's data.
+  // names Specs itself and says so, so the list is read as written — Specs,
+  // the roadmap and the Event Models, nothing picked from the snapshot's data.
   expect(enabled).toEqual([...READ_ONLY_PLUGINS]);
   const stored = (await readSettings(statePath(root))) as {
     dataRepo: string;
     plugins: { format: number; repos: Record<string, { enabled: string[]; checked?: boolean }> };
   };
   expect(stored.plugins.format).toBe(PROFILE_FORMAT);
-  expect(stored.plugins.repos[stored.dataRepo]).toEqual({ enabled: ["specs", "roadmap"] });
+  expect(stored.plugins.repos[stored.dataRepo]).toEqual({ enabled: ["specs", "roadmap", "event-model"] });
 });
 
 test("features and the roadmap are served", async () => {

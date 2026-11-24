@@ -39,7 +39,12 @@ if (isDemoMode()) {
 // Read-only mode (src/server/readOnlyMode.ts): the public spec site. Clone
 // the repo it shows and open its first snapshot before startup reads any
 // settings; a repo that cannot be cloned stops the start here.
-if (isReadOnlyMode()) await (await import("./server/readOnly")).setupReadOnly();
+// Then fetch its marketplace plugins (the Event Models) in the background.
+if (isReadOnlyMode()) {
+  const readOnly = await import("./server/readOnly");
+  await readOnly.setupReadOnly();
+  void readOnly.installReadOnlyPlugins();
+}
 
 // Hosted mode (src/server/hostedMode.ts): one user's worker behind the
 // gateway, which hands it that user's GitHub token in the environment — set
