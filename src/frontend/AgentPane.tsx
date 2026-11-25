@@ -506,10 +506,23 @@ function AgentHeader({
       {/* An agent with an account: the plug or the person, always one of the two —
           with or without a session (specs/agents/agent-pane.feature.md S13). */}
       {chipAgent?.capabilities.hasAccount && <AccountChip agent={chipAgent.id} account={meta?.account} />}
-      {/* Before a session: what the agent can be asked with none running
-          (specs/agents/agent-pane.feature.md "MCP servers before a session"). */}
-      {!meta && draftAgent?.capabilities.mcpManage && (
-        <AgentMenu agent={draftAgent} folder={draftFolder} cwd={draftCwd} homeDir={homeDir} />
+      {/* The ⋯ menu (specs/agents/agent-pane.feature.md "MCP servers before a
+          session"), with or without a turn running: for the open session, its
+          agent where it works — inside its worktree, if it has one; with none
+          open, the picked agent in the folder a session would start in. */}
+      {meta && agent?.capabilities.mcpManage ? (
+        <AgentMenu
+          key={`menu-${meta.id}`}
+          agent={agent}
+          folder={meta.worktree?.cwd ?? meta.cwd}
+          cwd={meta.worktree?.cwd ?? meta.cwd}
+          homeDir={homeDir}
+        />
+      ) : (
+        !meta &&
+        draftAgent?.capabilities.mcpManage && (
+          <AgentMenu agent={draftAgent} folder={draftFolder} cwd={draftCwd} homeDir={homeDir} />
+        )
       )}
       {meta && busy && agent?.capabilities.canInterrupt && (
         <Tooltip label="Stop this turn">
@@ -538,11 +551,10 @@ function AgentHeader({
 }
 
 /**
- * The header's ⋯ menu on the new-session screen: what the picked agent
- * answers with no session running. One item today — "MCP servers…", which
- * opens the dialog for the folder a session would start in — shown for an
- * agent that manages its MCP servers before a session
- * (capabilities.mcpManage).
+ * The header's ⋯ menu: what an agent answers apart from a session's turns. One
+ * item today — "MCP servers…", which opens the dialog for a folder: the open
+ * session's, else the one a session would start in — shown for an agent that
+ * manages its MCP servers before a session (capabilities.mcpManage).
  */
 function AgentMenu({
   agent,

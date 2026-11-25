@@ -79,7 +79,7 @@ import {
 import { McpServerRow } from "../src/frontend/SessionRail";
 import { Toaster } from "../src/frontend/Toasts";
 import { agentChat, forgetFolderInfos } from "../src/frontend/agentChat";
-import type { McpCatalog, McpServerDetail, McpServerDraft, McpServerUsage } from "../src/frontend/agentChat";
+import type { ChatSessionMeta, McpCatalog, McpServerDetail, McpServerDraft, McpServerUsage } from "../src/frontend/agentChat";
 import { MCP_SCOPES, MCP_TRANSPORTS, type McpManageCapability } from "../src/server/agentTypes";
 import { CLAUDE_AGENT, CODEX_AGENT, agent } from "./fixtures/agents";
 
@@ -529,6 +529,55 @@ test("the header's ⋯ menu offers MCP servers… before a session, for an agent
   expect(dialog()).toBeNull();
   expect(asked.at(-1)).toBe("POST /api/agent/agents/claude/mcp/release");
   unmount();
+});
+
+test("the header's ⋯ menu stays while a session is open, for that session's agent where it works", async () => {
+  const asked: string[] = [];
+  const meta: ChatSessionMeta = {
+    id: "s1",
+    name: "Tidy specs",
+    agent: "claude",
+    cwd: "/w/code",
+    worktree: { folder: "/w/code", repo: "/w/code", path: "/w/trees/tidy", cwd: "/w/trees/tidy", branch: "specdriven/tidy" },
+    dataRepo: "/w/data",
+    project: "/w/data",
+    startedAt: "2026-11-24T09:00:00.000Z",
+    status: "running",
+    permissionMode: "auto",
+    lastSeq: 1,
+  } as ChatSessionMeta;
+  globalThis.fetch = (async (input: string | URL, init: RequestInit = {}) => {
+    const url = String(input);
+    if (url.startsWith("/api/agent/agents/") && url.includes("/mcp")) {
+      asked.push(`${init.method ?? "GET"} ${url}`);
+      return Response.json({ servers: [STUB], contextWindow: 200_000, usage: {} } satisfies McpCatalog);
+    }
+    if (url === "/api/agent/chat/s1" && init.method === "DELETE") return Response.json({ ok: true });
+    if (url === "/api/agent/chat/s1") return Response.json({ meta, commands: [], events: [] });
+    if (url.startsWith("/api/agent/chat/s1/events")) return new Response(new ReadableStream<Uint8Array>());
+    if (url.startsWith("/api/agent/folder?")) return Response.json({ canWorktree: true, repo: "/w/code", branch: "main" });
+    return Response.json({ choices: null });
+  }) as unknown as typeof fetch;
+  agentChat.setAgents([CLAUDE]);
+  await agentChat.openSession("s1");
+  const { host, unmount } = mount(
+    <AgentPane compact={false} demo={false} codeRepo="/w/code" dataRepo="/w/data" homeDir="/w" onClose={() => {}} />,
+  );
+  await settle();
+  // A turn is running, and the menu is there beside the session's own buttons.
+  expect(host.querySelector('.agent-head button[aria-label="Stop"]')).not.toBeNull();
+  const more = host.querySelector<HTMLButtonElement>('.agent-head button[aria-label="More for Claude"]');
+  expect(more).not.toBeNull();
+  act(() => more!.click());
+  act(() => host.querySelector<HTMLElement>('.agent-head-menu [role="menuitem"]')!.click());
+  await settle();
+  // The session works in its worktree, so that is the folder asked about.
+  expect(dialog()!.querySelector(".mcp-dialog-where")!.textContent).toBe("Claude · ~/trees/tidy");
+  expect(asked).toEqual([`GET /api/agent/agents/claude/mcp?cwd=${encodeURIComponent("/w/trees/tidy")}`]);
+  act(() => dialog()!.querySelector<HTMLButtonElement>('button[aria-label="Close"]')!.click());
+  await settle();
+  unmount();
+  await agentChat.end("s1").catch(() => undefined);
 });
 
 test("an agent that does not manage its MCP servers has no ⋯ menu", async () => {
