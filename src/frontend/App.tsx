@@ -360,6 +360,25 @@ import {
 import type { EditState, Placement } from "./specs/scenarioEdit";
 import { provideSpecsHost } from "./specs/host";
 import {
+  resetTreeState,
+  setCollapsed,
+  setDragging,
+  setDropTarget,
+  setFeatureDropAt,
+  setFilter,
+  setFilterMenuOpen,
+  setFolderDrag,
+  setFolderDropAt,
+  setOutlined,
+  setScenarioDrag,
+  setScenarioDropAt,
+  setScenarioDropInto,
+  setSelectedFolder,
+  setTreeMenu,
+  setTreePicks,
+  useTreeState,
+} from "./specs/treeState";
+import {
   resetListing,
   setFeatureOrders,
   setFeatures,
@@ -1259,7 +1278,10 @@ export function App() {
   // The spec listing lives in a core store (src/frontend/specs/listing.ts)
   // the Specs tab reads too. A fresh App starts from nothing listed, as its
   // own state did: once, before the first read of the store.
-  useState(resetListing);
+  useState(() => {
+    resetListing();
+    resetTreeState();
+  });
   const { features, folders, folderDescriptions, folderOrders, featureOrders } = useSpecsListing();
   // Project members (src/server/members.ts): the data repo's
   // project-settings.yaml, as the feature's "Assigned" dropdown offers them.
@@ -1298,33 +1320,34 @@ export function App() {
   }, [features]);
   /** Whether an assignment change is in flight — the dropdown waits for it. */
   const [assignedSaving, setAssignedSaving] = useState(false);
-  /** Folder paths whose subtree is collapsed in the sidebar. */
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  /**
-   * Feature files whose scenario outline is expanded in the sidebar
-   * (specs/ui/navigation.feature.md "Scenario navigation"). Folders default to
-   * open because a repo has few of them; scenario outlines are many, so they
-   * default to closed and this tracks the ones opened — the mirror image of
-   * `collapsed`. Kept for the session, like the folder state.
-   */
-  const [outlined, setOutlined] = useState<Set<string>>(new Set());
+  // The tree's own state (src/frontend/specs/treeState.ts): folds, outlines,
+  // the folder picked, drags, the row menu, scenario picks and the filter.
+  const {
+    collapsed,
+    outlined,
+    selectedFolder,
+    dragging,
+    treePicks,
+    treeMenu,
+    dropTarget,
+    featureDropAt,
+    scenarioDrag,
+    scenarioDropAt,
+    scenarioDropInto,
+    folderDrag,
+    folderDropAt,
+    filter,
+    filterMenuOpen,
+  } = useTreeState();
   /** Sidebar width in px (specs/ui/ui.feature.md "Sidebar resize"). */
   const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth);
   /** True while the sidebar divider is being dragged. */
   const [resizingSidebar, setResizingSidebar] = useState(false);
-  /** Folder highlighted by a click; "+ New folder" creates inside it. */
-  const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
-  /** File name of the feature being dragged, if any. */
-  const [dragging, setDragging] = useState<string | null>(null);
   // Code gen sessions (specs/agents/claude.feature.md): specs checked in the
   // sidebar, and scenarios checked on their cards, go into a named session
   // that runs the coding agent. Per file the selection is the whole spec
   // ("all") or a set of scenario keys.
   const [specSelection, setSpecSelection] = useState<Map<string, "all" | Set<string>>>(new Map());
-  // Scenarios picked in the sidebar tree (specs/ui/navigation.feature.md
-  // "delete several scenarios at once"): ⌘/Ctrl-click toggles a row,
-  // Shift-click picks the range from the anchor. Keyed by treeScenarioKey.
-  const [treePicks, setTreePicks] = useState<Set<string>>(() => new Set());
   const treePickAnchor = useRef<string | null>(null);
   const [sessionRunning, setSessionRunning] = useState(false);
   /** The Start session dialog (src/frontend/StartSessionDialog.tsx), open or not. */
@@ -1343,46 +1366,6 @@ export function App() {
   const [sessionNotice, setSessionNotice] = useState<ReactNode>(null);
   /** A failed session's message, shown in an error box until dismissed. */
   const [sessionError, setSessionError] = useState<string | null>(null);
-  /** Sidebar entry whose "⋯" menu is open (file name), if any. */
-  const [treeMenu, setTreeMenu] = useState<string | null>(null);
-  /** True while the File submenu of the open tree menu is expanded. */
-  /** Folder path the drag is hovering over ("" = top level). */
-  const [dropTarget, setDropTarget] = useState<string | null>(null);
-  /**
-   * The sibling feature row a dragged feature would land beside (specs/ui/
-   * folders.feature.md "order features"), and on which edge. A feature
-   * dragged over a row in another folder drops into that folder instead.
-   */
-  const [featureDropAt, setFeatureDropAt] = useState<{ fileName: string; after: boolean } | null>(null);
-  /**
-   * A scenario being dragged — a row of the sidebar outline or a card of the
-   * feature page (specs/ui/navigation.feature.md "reorder scenarios by
-   * dragging them in the tree", "drag a scenario to another feature") — and
-   * the row or card edge it would land on, in its own feature or another.
-   * Apart from `dragging`, so the folders' drop zones never take it for a
-   * feature.
-   */
-  const [scenarioDrag, setScenarioDrag] = useState<{
-    file: string;
-    name: string;
-    version: number;
-    status: ScenarioStatus;
-  } | null>(null);
-  const [scenarioDropAt, setScenarioDropAt] = useState<{
-    file: string;
-    name: string;
-    version: number;
-    after: boolean;
-  } | null>(null);
-  /** The feature row a scenario dragged out of another feature is over. */
-  const [scenarioDropInto, setScenarioDropInto] = useState<string | null>(null);
-  /**
-   * A folder being dragged among its siblings (specs/ui/folders.feature.md
-   * "order folders"), and the sibling row edge it would land on. Apart from
-   * `dragging` too: a folder never drops into a folder, only beside one.
-   */
-  const [folderDrag, setFolderDrag] = useState<{ parent: string; path: string } | null>(null);
-  const [folderDropAt, setFolderDropAt] = useState<{ path: string; after: boolean } | null>(null);
   // Full-text search (specs/search.feature.md) lives in the command palette
   // (⌘K, src/frontend/CommandPalette.tsx): open, with the text it starts on.
   const [palette, setPalette] = useState<{ query: string } | null>(null);
@@ -1409,9 +1392,6 @@ export function App() {
   const compact = useMediaQuery(COMPACT_QUERY);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const drawerTrapRef = useFocusTrap(compact && drawerOpen);
-  /** The sidebar's filter, and its menu. */
-  const [filter, setFilter] = useState<TreeFilter>(NO_FILTER);
-  const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   /** A feature is being fetched — the skeleton shows until it lands. */
   const [featureLoading, setFeatureLoading] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
