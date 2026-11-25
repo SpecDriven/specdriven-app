@@ -2,13 +2,14 @@
 // plugin"): the tab, registered while the plugin is on in the open folder,
 // so it stands in the tab bar and on the rail where the profile's order
 // puts it and goes when the plugin is switched off. The feature tree and the
-// editor are still App's own: it renders them for this tab itself, and the
-// tab owns no url — a feature's is the app's.
+// editor are still built inside App.tsx, which hands them to this tab
+// through src/frontend/specs/host.ts; the tab renders them.
 
 import { FileText } from "lucide-react";
 import type { Context, Plugin } from "../../kernel";
 import type { TabPlugin } from "../../client/tabs";
 import { SPECS_PLUGIN } from "../../profile";
+import { specsHost } from "../../../frontend/specs/host";
 import { manifest } from "./manifest";
 
 /** The Specs tab's id, which is the plugin's. */
@@ -29,8 +30,8 @@ export const specsTab: TabPlugin<null> = {
     title: () => "Specs",
     home: null,
   },
-  // App draws the tree and the editor (src/frontend/App.tsx).
-  Sidebar: () => null,
+  // The tree, as App last built it.
+  Sidebar: () => <>{specsHost()?.sidebar ?? null}</>,
   Pane: () => null,
 };
 

@@ -356,6 +356,7 @@ import {
   withScenarioPolarity,
 } from "./specs/scenarioEdit";
 import type { EditState, Placement } from "./specs/scenarioEdit";
+import { provideSpecsHost } from "./specs/host";
 import {
   resetListing,
   setFeatureOrders,
@@ -10884,6 +10885,321 @@ export function App() {
         },
       ];
 
+  // The tree (specs/app/plugins.feature.md "Specs is a built-in plugin"):
+  // the Specs tab's sidebar panel, still built here and handed to the tab
+  // through src/frontend/specs/host.ts, which its Sidebar renders.
+  const specsSidebar = (
+    <div
+      className="side-panel"
+      role={barTabs.length > 1 ? "tabpanel" : undefined}
+      id="side-panel-specs"
+      aria-labelledby={barTabs.length > 1 ? "side-tab-specs" : undefined}
+    >
+    {/* A load that failed every retry offers the manual one: without it
+        the sidebar would sit empty until the next page load, and with
+        the cron refresh off (reloadFrequencySeconds 0) nothing else asks. */}
+    {loadError && (
+      <p className="error">
+        {loadError}{" "}
+        <button type="button" className="link" onClick={() => void loadFeatures()}>
+          Try again
+        </button>
+      </p>
+    )}
+    {/* The Features section head carries the filter: by status, by
+        assignee. Active filters show as chips that clear on click, on a
+        row of their own under the head so they never crowd its icons. */}
+    <SidebarSection
+      label={<>Features <StatusCounts {...statusTotals} /></>}
+      filter={<>
+        <Tooltip label="Filter features">
+          <button
+            type="button"
+            className={`chip${filtering ? " on" : ""}`}
+            aria-label="Filter features"
+            aria-haspopup="menu"
+            aria-expanded={filterMenuOpen}
+            onClick={() => setFilterMenuOpen((o) => !o)}
+          >
+            <ListFilter size={12} aria-hidden="true" /> Filter
+          </button>
+        </Tooltip>
+        <Menu
+          open={filterMenuOpen}
+          onClose={() => setFilterMenuOpen(false)}
+          label="Filter features"
+          className="filter-menu"
+          containerSelector=".filter-anchor"
+          items={[
+            {
+              id: "status",
+              label: "Status",
+              items: [
+                {
+                  id: "status-any",
+                  label: "Any status",
+                  checked: filter.status === null,
+                  onSelect: () => setFilter((f) => ({ ...f, status: null })),
+                },
+                ...(["draft", "proposed", "published"] as const).map((st) => ({
+                  id: `status-${st}`,
+                  label: st[0]!.toUpperCase() + st.slice(1),
+                  icon: <StatusIcon status={st} size={13} />,
+                  checked: filter.status === st,
+                  onSelect: () => setFilter((f) => ({ ...f, status: st })),
+                })),
+              ],
+            },
+            ...(assignments
+              ? [
+                  {
+                    id: "assignee",
+                    label: "Assignee",
+                    items: [
+                      {
+                        id: "assignee-any",
+                        label: "Anyone",
+                        checked: filter.assignee === null,
+                        onSelect: () => setFilter((f) => ({ ...f, assignee: null })),
+                      },
+                      ...members.map((m) => ({
+                        id: `assignee-${m.name}`,
+                        label: m.name,
+                        icon: (
+                          <span className="avatar chip-avatar" aria-hidden="true">
+                            {initialsOf(m.name)}
+                          </span>
+                        ),
+                        checked: filter.assignee === m.name,
+                        onSelect: () => setFilter((f) => ({ ...f, assignee: m.name })),
+                      })),
+                    ],
+                  },
+                ]
+              : []),
+            // One entry per attribute key the specs use: "Any …", each
+            // attribute by its names, and each with its value.
+            ...attributeFilterGroups(features, attributeDefs).map((group) => ({
+              id: `attribute-${group.key}`,
+              label: group.label,
+              items: group.items.map((item) => ({
+                id: `attribute-${item.id}`,
+                label: item.label,
+                title: item.label,
+                checked: sameAttributeFilter(filter.attribute, item.filter),
+                onSelect: () =>
+                  setFilter((f) => ({
+                    ...f,
+                    attribute: sameAttributeFilter(f.attribute, item.filter) ? null : item.filter,
+                  })),
+              })),
+            })),
+          ]}
+        />
+      </>}
+      /* The tree's actions (src/frontend/ActionIcons.tsx) sit on its
+          head rather than in rows of their own. New folder and New
+          feature create inside the clicked folder, and their tooltips
+          name it. Code gen session (specs/agents/claude.feature.md): check
+          whole specs in the tree or single scenarios on their cards,
+          then Start session asks for a name and where to run; the
+          count of checked specs rides on its button. Timing your own
+          work is the Pomodoro at the foot of the sidebar
+          (specs/app/pomodoro.feature.md), not a kind of session. */
+      actions={!locked && (<>
+        <Tooltip label={selectedFolder ? `New folder in "${selectedFolder}"` : "New folder"}>
+          <button type="button" className="ibtn" aria-label="New folder" onClick={createFolder}>
+            <NewFolderIcon size={15} />
+          </button>
+        </Tooltip>
+        <Tooltip
+          label={selectedFolder ? `New feature in "${selectedFolder}"` : "New feature"}
+          keys="c"
+        >
+          <button type="button" className="ibtn" aria-label="New feature" onClick={createFeature}>
+            <NewFeatureIcon size={15} />
+          </button>
+        </Tooltip>
+        {ahaImport && (
+          <Tooltip label={selectedFolder ? `Import from Aha! into "${selectedFolder}"` : "Import from Aha!"}>
+            <button
+              type="button"
+              className="ibtn"
+              aria-label="Import from Aha!"
+              onClick={() => setAhaImportOpen({ folder: selectedFolder })}
+            >
+              <Import size={15} />
+            </button>
+          </Tooltip>
+        )}
+        <Tooltip
+          label={
+            sessionRunning
+              ? "Session running…"
+              : hosted
+                ? sessionCount > 0 || selected
+                  ? `Open Claude Code with a prompt for ${sessionCount > 0 ? selectionLabel : "the open feature"}`
+                  : "Open Claude Code with a prompt"
+                : codeGen && sessionCount > 0
+                  ? `Start an AI session in ${codeGenTargetLabel(sessionTarget, agents)} with ${selectionLabel}`
+                  : "Start an AI session"
+          }
+        >
+          <button
+            type="button"
+            className={`ibtn session-btn${codeGen && specSelection.size > 0 ? " armed" : ""}${
+              sessionRunning ? " running" : ""
+            }`}
+            aria-label={
+              sessionRunning
+                ? "Session running…"
+                : hosted
+                  ? "Open Claude Code with a prompt"
+                  : `Start session…${codeGen && specSelection.size > 0 ? ` (${specSelection.size})` : ""}`
+            }
+            onClick={() => startSession()}
+            disabled={sessionRunning}
+          >
+            <StartSessionIcon size={15} />
+            {codeGen && specSelection.size > 0 && !sessionRunning && (
+              <span className="action-count" aria-hidden="true">
+                {specSelection.size}
+              </span>
+            )}
+          </button>
+        </Tooltip>
+      </>)}
+    >
+    {filtering && (
+      <div className="filter-chips">
+        {filter.status && (
+          <button
+            type="button"
+            className="chip on"
+            aria-label={`Clear the ${filter.status} filter`}
+            onClick={() => setFilter((f) => ({ ...f, status: null }))}
+          >
+            <StatusIcon status={filter.status} size={12} /> {filter.status}{" "}
+            <X size={11} aria-hidden="true" />
+          </button>
+        )}
+        {filter.assignee && (
+          <button
+            type="button"
+            className="chip on"
+            aria-label="Clear the assignee filter"
+            onClick={() => setFilter((f) => ({ ...f, assignee: null }))}
+          >
+            {filter.assignee === me ? "Mine" : filter.assignee} <X size={11} aria-hidden="true" />
+          </button>
+        )}
+        {filter.attribute && (
+          <button
+            type="button"
+            className="chip on attribute-filter-chip"
+            aria-label="Clear the attribute filter"
+            title={attributeFilterLabel(filter.attribute, attributeDefs)}
+            onClick={() => setFilter((f) => ({ ...f, attribute: null }))}
+          >
+            <Tag size={12} aria-hidden="true" />{" "}
+            <span className="filter-chip-label">{attributeFilterLabel(filter.attribute, attributeDefs)}</span>{" "}
+            <X size={11} aria-hidden="true" />
+          </button>
+        )}
+      </div>
+    )}
+    {/* What a session would run over, so a scenario checked on a card
+        two clicks away is still visible from here. */}
+    {codeGen && selectionLabel && !sessionRunning && (
+      <p className="session-notice">Selected: {selectionLabel}</p>
+    )}
+    {sessionNotice && <p className="session-notice">{sessionNotice}</p>}
+    </SidebarSection>
+    {/* Folder tree (specs/ui/folders.feature.md): folders are drop targets
+        for drag-moving features; the tree background is the top level. */}
+    {(
+      <div
+        className={`tree${(dragging !== null || folderDrag !== null) && dropTarget === "" ? " drop-target" : ""}`}
+        ref={treeRef}
+        role="tree"
+        aria-label="Features"
+        aria-multiselectable={locked ? undefined : true}
+        onKeyDown={onTreeKeyDown}
+        onClick={(e) => {
+          // A click on the bare background deselects the folder, so the
+          // next "+ New folder" creates at the top level again.
+          if (e.target === e.currentTarget) setSelectedFolder(null);
+        }}
+        onDragOver={(e) => {
+          // A folder from inside another folder moves to the top level
+          // here ("move a folder"); a top-level one is already there.
+          if (folderDrag !== null) {
+            if (!folderDropsInto(folderDrag, SPECS_FOLDER)) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            setDropTarget("");
+            return;
+          }
+          if (dragging === null) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+          setDropTarget("");
+        }}
+        onDragLeave={() => setDropTarget((t) => (t === "" ? null : t))}
+        onDrop={(e) => {
+          if (folderDrag !== null) {
+            if (!folderDropsInto(folderDrag, SPECS_FOLDER)) return;
+            e.preventDefault();
+            const dragged = folderDrag.path;
+            setFolderDrag(null);
+            setFolderDropAt(null);
+            setDropTarget(null);
+            void moveFolder(dragged, SPECS_FOLDER);
+            return;
+          }
+          if (dragging === null) return;
+          e.preventDefault();
+          void moveTo(dragging, "");
+        }}
+      >
+        {renderTree(buildTree(folders, features, folderDescriptions, folderOrders, featureOrders), 0)}
+        {features.length === 0 && folders.length === 0 && (
+          <p className="empty">No feature files yet</p>
+        )}
+      </div>
+    )}
+    {/* The scenarios picked in the tree (specs/ui/navigation.feature.md
+        "delete several scenarios at once"): how many, Delete, and a way
+        out — Esc does the same. Under the tree, not over it, so the
+        rows stay put while the next one is clicked. */}
+    {treePicksCount > 0 && (
+      <div className="tree-picks-bar" role="toolbar" aria-label="Selected scenarios">
+        <span className="tree-picks-count">
+          {treePicksCount} selected
+        </span>
+        <button
+          type="button"
+          className="btn btn-danger tree-picks-delete"
+          onClick={() => void deletePickedScenarios()}
+        >
+          <Trash2 size={13} aria-hidden="true" /> Delete
+        </button>
+        <Tooltip label="Clear the selection" keys="Esc">
+          <button
+            type="button"
+            className="ibtn"
+            aria-label="Clear the selection"
+            onClick={clearTreePicks}
+          >
+            <X size={13} aria-hidden="true" />
+          </button>
+        </Tooltip>
+      </div>
+    )}
+    </div>
+  );
+  provideSpecsHost({ sidebar: specsSidebar });
+
   return (
     <main
       className={`layout${resizingSidebar || resizingAgent ? " resizing" : ""}${sidebarCollapsed && !compact ? " collapsed" : ""}${compact ? " compact" : ""}${paneShown && !compact ? " agent-open" : ""}${editorOff ? " editor-hidden" : ""}${locked ? " read-only" : ""}`}
@@ -11416,316 +11732,6 @@ export function App() {
             ))}
           </div>
         )}
-        {specsShown && (
-        <div
-          className="side-panel"
-          role={barTabs.length > 1 ? "tabpanel" : undefined}
-          id="side-panel-specs"
-          aria-labelledby={barTabs.length > 1 ? "side-tab-specs" : undefined}
-        >
-        {/* A load that failed every retry offers the manual one: without it
-            the sidebar would sit empty until the next page load, and with
-            the cron refresh off (reloadFrequencySeconds 0) nothing else asks. */}
-        {loadError && (
-          <p className="error">
-            {loadError}{" "}
-            <button type="button" className="link" onClick={() => void loadFeatures()}>
-              Try again
-            </button>
-          </p>
-        )}
-        {/* The Features section head carries the filter: by status, by
-            assignee. Active filters show as chips that clear on click, on a
-            row of their own under the head so they never crowd its icons. */}
-        <SidebarSection
-          label={<>Features <StatusCounts {...statusTotals} /></>}
-          filter={<>
-            <Tooltip label="Filter features">
-              <button
-                type="button"
-                className={`chip${filtering ? " on" : ""}`}
-                aria-label="Filter features"
-                aria-haspopup="menu"
-                aria-expanded={filterMenuOpen}
-                onClick={() => setFilterMenuOpen((o) => !o)}
-              >
-                <ListFilter size={12} aria-hidden="true" /> Filter
-              </button>
-            </Tooltip>
-            <Menu
-              open={filterMenuOpen}
-              onClose={() => setFilterMenuOpen(false)}
-              label="Filter features"
-              className="filter-menu"
-              containerSelector=".filter-anchor"
-              items={[
-                {
-                  id: "status",
-                  label: "Status",
-                  items: [
-                    {
-                      id: "status-any",
-                      label: "Any status",
-                      checked: filter.status === null,
-                      onSelect: () => setFilter((f) => ({ ...f, status: null })),
-                    },
-                    ...(["draft", "proposed", "published"] as const).map((st) => ({
-                      id: `status-${st}`,
-                      label: st[0]!.toUpperCase() + st.slice(1),
-                      icon: <StatusIcon status={st} size={13} />,
-                      checked: filter.status === st,
-                      onSelect: () => setFilter((f) => ({ ...f, status: st })),
-                    })),
-                  ],
-                },
-                ...(assignments
-                  ? [
-                      {
-                        id: "assignee",
-                        label: "Assignee",
-                        items: [
-                          {
-                            id: "assignee-any",
-                            label: "Anyone",
-                            checked: filter.assignee === null,
-                            onSelect: () => setFilter((f) => ({ ...f, assignee: null })),
-                          },
-                          ...members.map((m) => ({
-                            id: `assignee-${m.name}`,
-                            label: m.name,
-                            icon: (
-                              <span className="avatar chip-avatar" aria-hidden="true">
-                                {initialsOf(m.name)}
-                              </span>
-                            ),
-                            checked: filter.assignee === m.name,
-                            onSelect: () => setFilter((f) => ({ ...f, assignee: m.name })),
-                          })),
-                        ],
-                      },
-                    ]
-                  : []),
-                // One entry per attribute key the specs use: "Any …", each
-                // attribute by its names, and each with its value.
-                ...attributeFilterGroups(features, attributeDefs).map((group) => ({
-                  id: `attribute-${group.key}`,
-                  label: group.label,
-                  items: group.items.map((item) => ({
-                    id: `attribute-${item.id}`,
-                    label: item.label,
-                    title: item.label,
-                    checked: sameAttributeFilter(filter.attribute, item.filter),
-                    onSelect: () =>
-                      setFilter((f) => ({
-                        ...f,
-                        attribute: sameAttributeFilter(f.attribute, item.filter) ? null : item.filter,
-                      })),
-                  })),
-                })),
-              ]}
-            />
-          </>}
-          /* The tree's actions (src/frontend/ActionIcons.tsx) sit on its
-              head rather than in rows of their own. New folder and New
-              feature create inside the clicked folder, and their tooltips
-              name it. Code gen session (specs/agents/claude.feature.md): check
-              whole specs in the tree or single scenarios on their cards,
-              then Start session asks for a name and where to run; the
-              count of checked specs rides on its button. Timing your own
-              work is the Pomodoro at the foot of the sidebar
-              (specs/app/pomodoro.feature.md), not a kind of session. */
-          actions={!locked && (<>
-            <Tooltip label={selectedFolder ? `New folder in "${selectedFolder}"` : "New folder"}>
-              <button type="button" className="ibtn" aria-label="New folder" onClick={createFolder}>
-                <NewFolderIcon size={15} />
-              </button>
-            </Tooltip>
-            <Tooltip
-              label={selectedFolder ? `New feature in "${selectedFolder}"` : "New feature"}
-              keys="c"
-            >
-              <button type="button" className="ibtn" aria-label="New feature" onClick={createFeature}>
-                <NewFeatureIcon size={15} />
-              </button>
-            </Tooltip>
-            {ahaImport && (
-              <Tooltip label={selectedFolder ? `Import from Aha! into "${selectedFolder}"` : "Import from Aha!"}>
-                <button
-                  type="button"
-                  className="ibtn"
-                  aria-label="Import from Aha!"
-                  onClick={() => setAhaImportOpen({ folder: selectedFolder })}
-                >
-                  <Import size={15} />
-                </button>
-              </Tooltip>
-            )}
-            <Tooltip
-              label={
-                sessionRunning
-                  ? "Session running…"
-                  : hosted
-                    ? sessionCount > 0 || selected
-                      ? `Open Claude Code with a prompt for ${sessionCount > 0 ? selectionLabel : "the open feature"}`
-                      : "Open Claude Code with a prompt"
-                    : codeGen && sessionCount > 0
-                      ? `Start an AI session in ${codeGenTargetLabel(sessionTarget, agents)} with ${selectionLabel}`
-                      : "Start an AI session"
-              }
-            >
-              <button
-                type="button"
-                className={`ibtn session-btn${codeGen && specSelection.size > 0 ? " armed" : ""}${
-                  sessionRunning ? " running" : ""
-                }`}
-                aria-label={
-                  sessionRunning
-                    ? "Session running…"
-                    : hosted
-                      ? "Open Claude Code with a prompt"
-                      : `Start session…${codeGen && specSelection.size > 0 ? ` (${specSelection.size})` : ""}`
-                }
-                onClick={() => startSession()}
-                disabled={sessionRunning}
-              >
-                <StartSessionIcon size={15} />
-                {codeGen && specSelection.size > 0 && !sessionRunning && (
-                  <span className="action-count" aria-hidden="true">
-                    {specSelection.size}
-                  </span>
-                )}
-              </button>
-            </Tooltip>
-          </>)}
-        >
-        {filtering && (
-          <div className="filter-chips">
-            {filter.status && (
-              <button
-                type="button"
-                className="chip on"
-                aria-label={`Clear the ${filter.status} filter`}
-                onClick={() => setFilter((f) => ({ ...f, status: null }))}
-              >
-                <StatusIcon status={filter.status} size={12} /> {filter.status}{" "}
-                <X size={11} aria-hidden="true" />
-              </button>
-            )}
-            {filter.assignee && (
-              <button
-                type="button"
-                className="chip on"
-                aria-label="Clear the assignee filter"
-                onClick={() => setFilter((f) => ({ ...f, assignee: null }))}
-              >
-                {filter.assignee === me ? "Mine" : filter.assignee} <X size={11} aria-hidden="true" />
-              </button>
-            )}
-            {filter.attribute && (
-              <button
-                type="button"
-                className="chip on attribute-filter-chip"
-                aria-label="Clear the attribute filter"
-                title={attributeFilterLabel(filter.attribute, attributeDefs)}
-                onClick={() => setFilter((f) => ({ ...f, attribute: null }))}
-              >
-                <Tag size={12} aria-hidden="true" />{" "}
-                <span className="filter-chip-label">{attributeFilterLabel(filter.attribute, attributeDefs)}</span>{" "}
-                <X size={11} aria-hidden="true" />
-              </button>
-            )}
-          </div>
-        )}
-        {/* What a session would run over, so a scenario checked on a card
-            two clicks away is still visible from here. */}
-        {codeGen && selectionLabel && !sessionRunning && (
-          <p className="session-notice">Selected: {selectionLabel}</p>
-        )}
-        {sessionNotice && <p className="session-notice">{sessionNotice}</p>}
-        </SidebarSection>
-        {/* Folder tree (specs/ui/folders.feature.md): folders are drop targets
-            for drag-moving features; the tree background is the top level. */}
-        {(
-          <div
-            className={`tree${(dragging !== null || folderDrag !== null) && dropTarget === "" ? " drop-target" : ""}`}
-            ref={treeRef}
-            role="tree"
-            aria-label="Features"
-            aria-multiselectable={locked ? undefined : true}
-            onKeyDown={onTreeKeyDown}
-            onClick={(e) => {
-              // A click on the bare background deselects the folder, so the
-              // next "+ New folder" creates at the top level again.
-              if (e.target === e.currentTarget) setSelectedFolder(null);
-            }}
-            onDragOver={(e) => {
-              // A folder from inside another folder moves to the top level
-              // here ("move a folder"); a top-level one is already there.
-              if (folderDrag !== null) {
-                if (!folderDropsInto(folderDrag, SPECS_FOLDER)) return;
-                e.preventDefault();
-                e.dataTransfer.dropEffect = "move";
-                setDropTarget("");
-                return;
-              }
-              if (dragging === null) return;
-              e.preventDefault();
-              e.dataTransfer.dropEffect = "move";
-              setDropTarget("");
-            }}
-            onDragLeave={() => setDropTarget((t) => (t === "" ? null : t))}
-            onDrop={(e) => {
-              if (folderDrag !== null) {
-                if (!folderDropsInto(folderDrag, SPECS_FOLDER)) return;
-                e.preventDefault();
-                const dragged = folderDrag.path;
-                setFolderDrag(null);
-                setFolderDropAt(null);
-                setDropTarget(null);
-                void moveFolder(dragged, SPECS_FOLDER);
-                return;
-              }
-              if (dragging === null) return;
-              e.preventDefault();
-              void moveTo(dragging, "");
-            }}
-          >
-            {renderTree(buildTree(folders, features, folderDescriptions, folderOrders, featureOrders), 0)}
-            {features.length === 0 && folders.length === 0 && (
-              <p className="empty">No feature files yet</p>
-            )}
-          </div>
-        )}
-        {/* The scenarios picked in the tree (specs/ui/navigation.feature.md
-            "delete several scenarios at once"): how many, Delete, and a way
-            out — Esc does the same. Under the tree, not over it, so the
-            rows stay put while the next one is clicked. */}
-        {treePicksCount > 0 && (
-          <div className="tree-picks-bar" role="toolbar" aria-label="Selected scenarios">
-            <span className="tree-picks-count">
-              {treePicksCount} selected
-            </span>
-            <button
-              type="button"
-              className="btn btn-danger tree-picks-delete"
-              onClick={() => void deletePickedScenarios()}
-            >
-              <Trash2 size={13} aria-hidden="true" /> Delete
-            </button>
-            <Tooltip label="Clear the selection" keys="Esc">
-              <button
-                type="button"
-                className="ibtn"
-                aria-label="Clear the selection"
-                onClick={clearTreePicks}
-              >
-                <X size={13} aria-hidden="true" />
-              </button>
-            </Tooltip>
-          </div>
-        )}
-        </div>
-        )}
         {/* Every plugin switched off in this folder, Specs included: the
             sidebar says where they are switched on. */}
         {!loading && barTabs.length === 0 && codeRepoDir === null && (
@@ -11737,10 +11743,10 @@ export function App() {
             to switch one on.
           </p>
         )}
-        {/* A plugin's tab (specs/app/plugins.feature.md) — a special folder's
-            page list or the Tests tab's plans and case library, say: the
-            tab's own sidebar. */}
-        {pluginTabs
+        {/* The shown tab's own sidebar (specs/app/plugins.feature.md) — the
+            feature tree, a special folder's page list or the Tests tab's
+            plans and case library, say. */}
+        {barTabs
           .filter((tab) => tab.id === shownTab)
           .map((tab) => (
             <tab.Sidebar
