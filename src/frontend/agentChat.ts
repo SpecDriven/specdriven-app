@@ -1148,9 +1148,17 @@ export function worktreeTooltip(info: FolderGitInfo | null): string {
   }
   if (info.branch !== info.base) {
     const on = info.branch && info.branch !== "HEAD" ? `is on ${info.branch}` : "has a detached HEAD";
-    return `Worktree · sessions start from ${info.base}, but this folder ${on} — switch it to ${info.base} first`;
+    return `Worktree · this folder ${on}: it is switched to ${info.base} and brought level with origin, then ${own} ${info.base}`;
   }
   return `Worktree · ${own} ${info.base}, once ${info.base} is level with origin`;
+}
+
+/** What starting a session did to the folder's checkout, for a toast; null when it did nothing. */
+export function worktreeSwitchedNote(meta: Pick<ChatSessionMeta, "worktree">): string | null {
+  const wt = meta.worktree;
+  if (!wt?.switchedFrom || !wt.base) return null;
+  const from = wt.switchedFrom === "HEAD" ? "a detached HEAD" : wt.switchedFrom;
+  return `Switched ${wt.repo} from ${from} to ${wt.base}, level with origin, for the worktree`;
 }
 
 /** What starting a session said about its worktree, for a toast; null says nothing. */
@@ -1564,6 +1572,8 @@ export const agentChat = {
     });
     await agentChat.openSession(meta.id);
     agentChat.openPane();
+    const switched = worktreeSwitchedNote(meta);
+    if (switched) toast.info(switched);
     const note = worktreeStartedNote(meta);
     // Kept on screen until dismissed: the worktree may be behind origin.
     if (note) toast.error(note);

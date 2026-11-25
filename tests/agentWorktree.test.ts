@@ -286,30 +286,82 @@ test("a worktree session starts from main level with origin, and a main that fel
   expect(meta.worktree!.unchecked).toBeUndefined();
 });
 
-test("a folder on another branch, or a main with commits origin lacks, is refused with nothing left behind", async () => {
+test("a folder on another branch is switched to main and brought level with origin before the worktree branches off", async () => {
+  register();
+  const other = await withOrigin(code, "code");
+  await git(code, "checkout", "-q", "-b", "feature");
+  await writeFile(join(code, "feature.ts"), "export {};\n");
+  await git(code, "add", ".");
+  await git(code, "commit", "-q", "-m", "feature work");
+  await advanceOrigin(other, "NEW.md", "new\n");
+  // An untracked file rides along: git leaves it where it is.
+  await writeFile(join(code, "scratch.txt"), "notes\n");
+  const meta = await start({ cwd: code, worktree: true });
+  const tip = await git(other, "rev-parse", "main");
+  expect(await git(code, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
+  expect(await git(code, "rev-parse", "main")).toBe(tip);
+  expect(await git(code, "log", "-1", "--format=%s", "feature")).toBe("feature work");
+  expect(await readFile(join(code, "scratch.txt"), "utf8")).toBe("notes\n");
+  expect(meta.worktree).toMatchObject({ base: "main", switchedFrom: "feature" });
+  expect(await git(meta.worktree!.path, "rev-parse", "HEAD")).toBe(tip);
+  expect(await exists(join(meta.worktree!.path, "feature.ts"))).toBe(false);
+  // Already on main: nothing is switched, and nothing is said.
+  const again = await start({ cwd: code, worktree: true });
+  expect(again.worktree!.switchedFrom).toBeUndefined();
+});
+
+test("a detached HEAD whose commit is on a branch is switched to main; a main with no local copy yet is made from origin's", async () => {
+  register();
+  const origin = await withOrigin(code, "code");
+  const clone = join(root, "code-clone");
+  await git(root, "clone", "-q", origin, clone);
+  await git(clone, "checkout", "-q", "-b", "feature");
+  await git(clone, "branch", "-q", "-D", "main");
+  await git(clone, "checkout", "-q", "--detach");
+  const meta = await start({ cwd: clone, worktree: true });
+  expect(await git(clone, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
+  expect(await git(clone, "rev-parse", "--abbrev-ref", "main@{upstream}")).toBe("origin/main");
+  expect(meta.worktree).toMatchObject({ base: "main", switchedFrom: "HEAD" });
+});
+
+test("what switching would lose or carry, and a main with commits origin lacks, is refused with nothing left behind", async () => {
   const fake = register();
   const other = await withOrigin(code, "code");
-  // Another branch checked out.
+  // Another branch with uncommitted changes to a tracked file: they would ride along onto main.
   await git(code, "checkout", "-q", "-b", "feature");
+  await writeFile(join(code, "README.md"), "mine, not committed\n");
   let res = await refused({ cwd: code, worktree: true });
   expect(res.status).toBe(409);
-  expect(res.error).toBe(`Worktree sessions start from main, but ${code} is on feature — switch it to main first`);
-  // A detached HEAD.
+  expect(res.error).toBe(
+    `Worktree sessions start from main, but ${code} is on feature with uncommitted changes — commit or stash them so it can be switched to main`,
+  );
+  expect(await git(code, "rev-parse", "--abbrev-ref", "HEAD")).toBe("feature");
+  expect(await readFile(join(code, "README.md"), "utf8")).toBe("mine, not committed\n");
+  await git(code, "checkout", "-q", "--", "README.md");
+  // A detached HEAD with a commit on no branch.
   await git(code, "checkout", "-q", "--detach");
+  await writeFile(join(code, "lost.ts"), "export {};\n");
+  await git(code, "add", ".");
+  await git(code, "commit", "-q", "-m", "on no branch");
+  const orphan = await git(code, "rev-parse", "HEAD");
   res = await refused({ cwd: code, worktree: true });
   expect(res.status).toBe(409);
-  expect(res.error).toContain("has a detached HEAD");
-  // On main, with a commit origin does not have.
+  expect(res.error).toContain("has a detached HEAD with commits on no branch");
+  expect(await git(code, "rev-parse", "HEAD")).toBe(orphan);
+  // A main with a commit origin does not have is refused before the folder is switched.
   await git(code, "checkout", "-q", "main");
   await writeFile(join(code, "local.ts"), "export {};\n");
   await git(code, "add", ".");
   await git(code, "commit", "-q", "-m", "local");
+  await git(code, "checkout", "-q", "feature");
   res = await refused({ cwd: code, worktree: true });
   expect(res.status).toBe(409);
   expect(res.error).toBe(
     "main has 1 commit that origin/main does not — push or remove it before starting a worktree session",
   );
+  expect(await git(code, "rev-parse", "--abbrev-ref", "HEAD")).toBe("feature");
   // Diverged: both sides have moved.
+  await git(code, "checkout", "-q", "main");
   await advanceOrigin(other, "NEW.md", "new\n");
   res = await refused({ cwd: code, worktree: true });
   expect(res.status).toBe(409);
@@ -345,9 +397,11 @@ test("with origin out of reach the worktree starts from main as last fetched, an
   expect(meta.worktree).toMatchObject({ base: "main" });
   expect(meta.worktree!.unchecked).toBeTruthy();
   expect(await git(meta.worktree!.path, "rev-parse", "HEAD")).toBe(await git(code, "rev-parse", "main"));
-  // The last fetch still decides: a branch that is not main is refused offline too.
+  // The last fetch still decides: a branch that is not main is switched to it offline too.
   await git(code, "checkout", "-q", "-b", "feature");
-  expect((await refused({ cwd: code, worktree: true })).status).toBe(409);
+  const offline = await start({ cwd: code, worktree: true });
+  expect(offline.worktree).toMatchObject({ base: "main", switchedFrom: "feature" });
+  expect(await git(code, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
 });
 
 test("the specifications folder, which the app keeps level itself, is neither fetched nor moved", async () => {
@@ -447,17 +501,17 @@ test("a coding session's agent is told the repository's default branch with its 
 test("a worktree session starts from the default branch origin names, and its agent is told the branch it is on", async () => {
   const fake = register();
   const origin = await developOrigin(code);
-  // On main, which is not origin's default: refused, naming develop.
-  const res = await refused({ cwd: code, worktree: true });
-  expect(res.status).toBe(409);
-  expect(res.error).toBe(`Worktree sessions start from develop, but ${code} is on main — switch it to develop first`);
+  // On main, which is not origin's default: switched to develop, made from origin's.
+  const switched = await start({ cwd: code, worktree: true });
+  expect(switched.worktree).toMatchObject({ base: "develop", switchedFrom: "main" });
+  expect(await git(code, "rev-parse", "--abbrev-ref", "HEAD")).toBe("develop");
   // A clone on develop starts.
   const clone = join(root, "develop-clone");
   await git(root, "clone", "-q", origin, clone);
   const meta = await start({ cwd: clone, worktree: true, prompt: "Fix it" });
   expect(meta.worktree).toMatchObject({ base: "develop" });
-  expect(fake.sessions[0]!.opts.prompt).toContain("default branch is `develop` (origin/develop)");
-  expect(fake.sessions[0]!.opts.prompt).toContain(
+  expect(fake.sessions.at(-1)!.opts.prompt).toContain("default branch is `develop` (origin/develop)");
+  expect(fake.sessions.at(-1)!.opts.prompt).toContain(
     `You are on \`${meta.worktree!.branch}\`, a branch of your own in a git worktree, made from \`develop\`.]`,
   );
 });

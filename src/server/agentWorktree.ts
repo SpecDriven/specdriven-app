@@ -8,11 +8,12 @@
 // gets worktrees without knowing about them.
 //
 // A session starts from up-to-date code: where the repo has an `origin`, the
-// folder must be on its main branch and that branch is brought level with
-// origin — fetched, and fast-forwarded when it fell behind — before the
-// worktree branches off it. What a fast-forward cannot fix (another branch
-// checked out, commits origin lacks) refuses the session and says why. The
-// specifications folder is left alone: the app keeps it level itself.
+// folder is switched to its main branch when it is on another, and that
+// branch is brought level with origin — fetched, and fast-forwarded when it
+// fell behind — before the worktree branches off it. What would lose or
+// carry work (uncommitted changes on another branch, commits origin lacks)
+// refuses the session and says why. The specifications folder is left
+// alone: the app keeps it level itself.
 //
 // Worktrees go under <settings dir>/worktrees/<repo>/<name>, outside the
 // repo: a worktree inside it would show up to the repo's own tools, and to
@@ -117,47 +118,110 @@ async function baseBranch(repo: string): Promise<string | null> {
 
 const commits = (n: number) => `${n} commit${n === 1 ? "" : "s"}`;
 
+/** What bringing a repo level with origin did, beyond the worktree itself. */
+interface Levelled {
+  /** Why origin could not be reached: the check ran against the last fetch. */
+  unchecked?: string;
+  /** The branch the folder was on before it was switched to the base. */
+  switchedFrom?: string;
+  /** The base branch the folder is on now, when it was switched to it. */
+  base?: string;
+}
+
 /**
  * Make sure the folder is on its main branch and that branch is level with
- * origin, before a worktree branches off it: fetch, then fast-forward a
- * branch that fell behind. Another branch checked out, commits origin lacks,
- * or a fast-forward git refuses (uncommitted changes in its way) throw — the
- * user's checkout is never switched, rebased or reset. A remote that cannot
- * be reached does not stop the session: the check runs against the last
- * fetch, and the reason comes back for the pane to show.
+ * origin, before a worktree branches off it: fetch, switch a folder on
+ * another branch (or a detached HEAD) to main, then fast-forward a main that
+ * fell behind — `git switch main && git pull`, done carefully. What would
+ * lose or carry work throws instead, with the checkout left as it was:
+ * uncommitted changes to tracked files while another branch is checked out
+ * (they would ride along onto main), a detached HEAD whose commits are on no
+ * branch, a main with commits origin lacks, or a switch or fast-forward git
+ * refuses. The checkout is never rebased or reset. A remote that cannot be
+ * reached does not stop the session: the check runs against the last fetch,
+ * and the reason comes back for the pane to show.
  */
-async function levelWithOrigin(repo: string, branch: string | undefined): Promise<string | undefined> {
-  if (!(await hasRemote(repo))) return undefined;
+async function levelWithOrigin(repo: string, branch: string | undefined): Promise<Levelled> {
+  if (!(await hasRemote(repo))) return {};
   const fetched = await git(repo, ["fetch", "--quiet", REMOTE]);
   const base = await baseBranch(repo);
-  if (!base) return undefined;
+  if (!base) return {};
   const upstream = `${REMOTE}/${base}`;
-  if (branch !== base) {
-    const on = !branch || branch === "HEAD" ? "has a detached HEAD" : `is on ${branch}`;
-    throw new WorktreeError(409, `Worktree sessions start from ${base}, but ${repo} ${on} — switch it to ${base} first`);
+  const switching = branch !== base;
+  const detached = !branch || branch === "HEAD";
+  const on = detached ? "has a detached HEAD" : `is on ${branch}`;
+  if (switching) {
+    const dirty = await git(repo, ["status", "--porcelain", "--untracked-files=no"]);
+    if (dirty.exitCode !== 0) {
+      throw new WorktreeError(500, `Could not read the state of ${repo}: ${firstLine(dirty)}`);
+    }
+    if (dirty.stdout.trim()) {
+      throw new WorktreeError(
+        409,
+        `Worktree sessions start from ${base}, but ${repo} ${on} with uncommitted changes — commit or stash them so it can be switched to ${base}`,
+      );
+    }
+    if (detached) {
+      const kept = await git(repo, [
+        "for-each-ref",
+        "--contains",
+        "HEAD",
+        "--count=1",
+        "--format=%(refname)",
+        "refs/heads",
+        "refs/remotes",
+      ]);
+      if (kept.exitCode !== 0 || !kept.stdout.trim()) {
+        throw new WorktreeError(
+          409,
+          `Worktree sessions start from ${base}, but ${repo} has a detached HEAD with commits on no branch — put them on a branch so it can be switched to ${base}`,
+        );
+      }
+    }
   }
-  const counted = await git(repo, ["rev-list", "--left-right", "--count", `${upstream}...HEAD`]);
-  const [behind = 0, ahead = 0] = counted.stdout.trim().split(/\s+/).map((n) => Number.parseInt(n, 10) || 0);
-  if (counted.exitCode !== 0) {
-    throw new WorktreeError(500, `Could not compare ${base} with ${upstream}: ${firstLine(counted)}`);
+  // Compare the local base branch, not HEAD: the folder may not be on it yet.
+  // A base branch with no local copy yet is made from origin's by the switch.
+  const local = await git(repo, ["rev-parse", "--verify", "--quiet", `refs/heads/${base}`]);
+  let behind = 0;
+  if (local.exitCode === 0) {
+    const counted = await git(repo, ["rev-list", "--left-right", "--count", `${upstream}...refs/heads/${base}`]);
+    if (counted.exitCode !== 0) {
+      throw new WorktreeError(500, `Could not compare ${base} with ${upstream}: ${firstLine(counted)}`);
+    }
+    const [b = 0, ahead = 0] = counted.stdout.trim().split(/\s+/).map((n) => Number.parseInt(n, 10) || 0);
+    behind = b;
+    if (ahead > 0) {
+      const also = behind > 0 ? ` and is ${commits(behind)} behind it` : "";
+      throw new WorktreeError(
+        409,
+        `${base} has ${commits(ahead)} that ${upstream} does not${also} — push or remove ${ahead === 1 ? "it" : "them"} before starting a worktree session`,
+      );
+    }
   }
-  if (ahead > 0) {
-    const also = behind > 0 ? ` and is ${commits(behind)} behind it` : "";
-    throw new WorktreeError(
-      409,
-      `${base} has ${commits(ahead)} that ${upstream} does not${also} — push or remove ${ahead === 1 ? "it" : "them"} before starting a worktree session`,
-    );
+  if (switching) {
+    const switched = await git(repo, ["switch", "--quiet", base]);
+    if (switched.exitCode !== 0) {
+      throw new WorktreeError(
+        409,
+        `Worktree sessions start from ${base}, but ${repo} ${on} and could not be switched to it: ${firstLine(switched)}`,
+      );
+    }
   }
   if (behind > 0) {
     const forwarded = await git(repo, ["merge", "--ff-only", "--quiet", upstream]);
     if (forwarded.exitCode !== 0) {
+      const now = switching ? ` (${repo} is on ${base} now)` : "";
       throw new WorktreeError(
         409,
-        `${base} is ${commits(behind)} behind ${upstream} and could not be fast-forwarded: ${firstLine(forwarded)}`,
+        `${base} is ${commits(behind)} behind ${upstream} and could not be fast-forwarded${now}: ${firstLine(forwarded)}`,
       );
     }
   }
-  return fetched.exitCode === 0 ? undefined : firstLine(fetched) || `${REMOTE} could not be reached`;
+  const unchecked = fetched.exitCode === 0 ? undefined : firstLine(fetched) || `${REMOTE} could not be reached`;
+  return {
+    ...(unchecked ? { unchecked } : {}),
+    ...(switching ? { switchedFrom: detached ? "HEAD" : branch, base } : {}),
+  };
 }
 
 /** Whether `folder` is in a git repo with a commit to branch from, and which. */
@@ -225,7 +289,8 @@ export async function createWorktree(opts: CreateWorktreeOptions): Promise<ChatW
   }
   const repo = info.repo;
   const synced = opts.synced !== undefined && within(repo, opts.synced);
-  const unchecked = synced ? undefined : await levelWithOrigin(repo, info.branch);
+  const levelled: Levelled = synced ? {} : await levelWithOrigin(repo, info.branch);
+  const from = levelled.base ?? info.branch;
   const suffix = opts.suffix ?? randomBytes(3).toString("hex");
   const leaf = `${worktreeSlug(opts.name)}-${suffix}`;
   const branch = `${WORKTREE_BRANCH_PREFIX}${leaf}`;
@@ -243,8 +308,9 @@ export async function createWorktree(opts: CreateWorktreeOptions): Promise<ChatW
     path,
     cwd,
     branch,
-    ...(info.branch && info.branch !== "HEAD" ? { base: info.branch } : {}),
-    ...(unchecked ? { unchecked } : {}),
+    ...(from && from !== "HEAD" ? { base: from } : {}),
+    ...(levelled.unchecked ? { unchecked: levelled.unchecked } : {}),
+    ...(levelled.switchedFrom ? { switchedFrom: levelled.switchedFrom } : {}),
   };
 }
 
