@@ -167,11 +167,13 @@ import {
 } from "../plugins/client/loader";
 import { coalesced } from "./coalesce";
 import {
+  tabHref,
   tabReachable,
   useRegistry,
   useTabStores,
   type PluginView,
   type TabApp,
+  type TabPlugin,
 } from "../plugins/client/tabs";
 import {
   sectionsAfter,
@@ -3187,6 +3189,25 @@ export function App() {
     setFeature(null);
     setSelectedScenario(null);
     if (location.pathname !== "/") history.pushState(null, "", "/");
+  };
+
+  /**
+   * A tab's door — its rail icon and its `g` chord (specs/app/plugins
+   * .feature.md): the tab's home view, pushed. A tab with no home view of
+   * its own (Specs, "Specs is a built-in plugin") turns the sidebar to
+   * itself instead, and another tab's view or an app page leaves for the
+   * README; the tab's own open view stays.
+   */
+  const openTab = (tab: TabPlugin) => {
+    if (tab.route.home !== null) {
+      void openPluginView(tab.id, tab.route.home, { push: true });
+      return;
+    }
+    selectSidebarTab(tab.id);
+    if (appPage || (pluginView && pluginView.tab !== tab.id)) {
+      goHome();
+      void loadReadme();
+    }
   };
 
   /**
@@ -8389,32 +8410,13 @@ export function App() {
         void loadReadme();
       },
     },
-    // The Specs tab (specs/app/roadmap.feature.md "The roadmap is a sidebar
-    // tab"): `g s` turns the sidebar to the tree, leaving a plugin's view
-    // for home, so the tree has a chord like every plugin's tab.
-    {
-      id: "go-specs",
-      keys: "g s",
-      label: "Go to the specs",
-      group: "Navigate",
-      // Only while Specs is on: a folder may have it switched off, and a
-      // code repository has no specs tab (specs/app/code-repo-mode.feature.md).
-      when: () => !quiet && specsOn,
-      palette: () => !quietBehindPalette && specsOn,
-      run: () => {
-        selectSidebarTab(SPECS_TAB);
-        // A plugin's view or an app page (Settings, Images) leaves for the
-        // README; a feature page stays, it is the tree's own.
-        if (pluginView || appPage) {
-          goHome();
-          void loadReadme();
-        }
-      },
-    },
-    // Each plugin's tab has its own `g` chord (specs/app/plugins.feature.md) —
-    // `g r`, `g t` and `g n` open the special folders on their first page. A
-    // tab with nothing to open (an empty folder) has no chord.
-    ...pluginTabs
+    // Each tab has its own `g` chord (specs/app/plugins.feature.md) — `g s`
+    // turns the sidebar to the tree, `g r`, `g t` and `g n` open the special
+    // folders on their first page. Only while the tab is on: a folder may
+    // have it switched off, and a code repository shows the Files tab alone
+    // (specs/app/code-repo-mode.feature.md). A tab with nothing to open (an
+    // empty folder) has no chord.
+    ...barTabs
       .filter((tab) => tab.shortcut)
       .map(
         (tab): Shortcut => ({
@@ -8424,7 +8426,7 @@ export function App() {
           group: "Navigate",
           when: () => !quiet && tabReachable(tab),
           palette: () => !quietBehindPalette && tabReachable(tab),
-          run: () => void openPluginView(tab.id, tab.route.home, { push: true }),
+          run: () => openTab(tab),
         }),
       ),
     // ...and the keys a tab adds of its own (⇧⌘F, search in files): the
@@ -10983,45 +10985,20 @@ export function App() {
               profile's order, lit the way the bar's tabs are (shownTab) — so
               collapsing the sidebar never loses the tree. A tab with nothing
               to open — an empty folder — has no icon on the rail. */}
-          {barTabs.filter((tab) => tab.id === SPECS_TAB || tabReachable(tab)).map((tab) =>
-            tab.id === SPECS_TAB ? (
-            // Specs (specs/app/plugins.feature.md "Specs is a built-in
-            // plugin"): the tree is App's own, and its door is home.
+          {barTabs.filter(tabReachable).map((tab) => (
             <Tooltip key={tab.id} label={tab.title} keys={tab.shortcut}>
               <a
-                href="/"
-                className={`rail-link${!pluginView && specsShown ? " active" : ""}`}
-                aria-label={tab.title}
-                onClick={(e) =>
-                  spaClick(e, () => {
-                    selectSidebarTab(SPECS_TAB);
-                    if (pluginView || appPage) {
-                      goHome();
-                      void loadReadme();
-                    }
-                  })
-                }
-              >
-                <tab.icon size={16} aria-hidden="true" />
-              </a>
-            </Tooltip>
-            ) : (
-            <Tooltip key={tab.id} label={tab.title} keys={tab.shortcut}>
-              <a
-                href={tab.route.path(tab.route.home)}
+                href={tabHref(tab)}
                 className={`rail-link${
                   pluginView?.tab === tab.id || (!pluginView && shownTab === tab.id) ? " active" : ""
                 }`}
                 aria-label={tab.title}
-                onClick={(e) =>
-                  spaClick(e, () => void openPluginView(tab.id, tab.route.home, { push: true }))
-                }
+                onClick={(e) => spaClick(e, () => openTab(tab))}
               >
                 <tab.icon size={16} aria-hidden="true" />
               </a>
             </Tooltip>
-            ),
-          )}
+          ))}
           <div className="rail-bottom">
             <PomodoroBar
               compact
@@ -11424,7 +11401,11 @@ export function App() {
                     // open yet, it opens the tab's home view — unless the tab
                     // is a list to pick from (a special folder's pages, or
                     // the feature tree).
-                    if (tab.opensOnSelect !== false && pluginViewRef.current?.tab !== tab.id) {
+                    if (
+                      tab.opensOnSelect !== false &&
+                      tab.route.home !== null &&
+                      pluginViewRef.current?.tab !== tab.id
+                    ) {
                       openPluginView(tab.id, tab.route.home, { push: true });
                     }
                   }}

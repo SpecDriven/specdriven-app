@@ -82,8 +82,13 @@ export interface TabPlugin<V = unknown> {
     key(view: V): string;
     /** The window title for a view, read from the tab's store. */
     title(view: V): string;
-    /** The view the tab opens on. */
-    home: V;
+    /**
+     * The view the tab opens on. Null for a tab with no home view of its own
+     * — Specs, whose door is the folder's README (specs/app/plugins.feature.md
+     * "Specs is a built-in plugin"): its rail icon, its `g` chord and its tab
+     * turn the sidebar to it and leave another tab's view for home.
+     */
+    home: V | null;
     /**
      * Turn a view that names no one thing — the tab itself, `/models` — into
      * the one it opens (the first model), or null when there is nothing to
@@ -263,9 +268,18 @@ export function useTabStores(list: TabPlugin[]): number {
   return useSyncExternalStore(subscribe, () => cell.n, () => 0);
 }
 
-/** Whether a tab has anything to open: its home resolves to a view. */
+/**
+ * Whether a tab has anything to open: its home resolves to a view. A tab
+ * with no home view always has its door — home, with its sidebar.
+ */
 export function tabReachable(tab: TabPlugin): boolean {
-  return !tab.route.resolve || tab.route.resolve(tab.route.home) !== null;
+  const { home, resolve } = tab.route;
+  return home === null || !resolve || resolve(home) !== null;
+}
+
+/** Where a tab's door leads: its home view's url, or home for a tab with none. */
+export function tabHref(tab: TabPlugin): string {
+  return tab.route.home === null ? "/" : tab.route.path(tab.route.home);
 }
 
 /** Which plugin view has the main pane. */
