@@ -460,6 +460,23 @@ describe("The Specs tab's behaviour, kept through its move into the plugin", () 
     await until(() => location.pathname === "/features/quotes", "the feature's url");
   });
 
+  test("the palette offers the Aha! import while its switch and Specs are on, and not with Specs off", async () => {
+    await setUp(BOTH);
+    expect((await putState({ ahaImport: true })).status).toBe(200);
+    await open("/");
+    await until(() => sidebarText().includes("Quotes"), "the tree");
+    await press("/");
+    await until(() => paletteLabels().includes("Import from Aha!…"), "the import among the commands");
+    await unmount();
+
+    expect((await putState({ plugins: { enabled: ["notebook"] } })).status).toBe(200);
+    await open("/");
+    await until(() => sidebarText().includes("Chose the queue"), "the notebook's list");
+    await press("/");
+    await until(() => paletteInput() !== null, "the palette");
+    expect(paletteLabels()).not.toContain("Import from Aha!…");
+  });
+
   test("a link to a feature that is not there says so and opens home", async () => {
     await setUp(BOTH);
     await open("/features/gone");

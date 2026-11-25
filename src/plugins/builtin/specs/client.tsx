@@ -59,6 +59,10 @@ export const specsTab: TabPlugin<SpecsView> = {
     search: (query, signal) => specsHost()?.search(query, signal) ?? [],
   },
   recent: (view) => specsHost()?.recent(view) ?? null,
+  // The imports into a spec folder, while their switches are on.
+  get shortcuts() {
+    return specsHost()?.shortcuts ?? [];
+  },
   Sidebar: () => <>{specsHost()?.sidebar ?? null}</>,
   Pane: () => <>{specsHost()?.pane ?? null}</>,
 };

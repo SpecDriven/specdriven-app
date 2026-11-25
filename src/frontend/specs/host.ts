@@ -11,7 +11,7 @@
 // plugin"). Each later move takes a field off it.
 
 import type { ReactNode } from "react";
-import type { OpenViewOptions, PaletteHit, RecentItem } from "../../plugins/client/tabs";
+import type { OpenViewOptions, PaletteHit, RecentItem, TabShortcut } from "../../plugins/client/tabs";
 import type { SpecsView } from "../../plugins/builtin/specs/route";
 
 export interface SpecsHost {
@@ -31,6 +31,8 @@ export interface SpecsHost {
   createFeature(): void;
   /** `c` on an open feature: a new scenario. */
   createInView: { label: string; run: (() => void) | null } | null;
+  /** The tab's own commands — the imports into a spec folder. */
+  shortcuts: TabShortcut[];
 }
 
 const NO_HOST: SpecsHost = {
@@ -42,6 +44,7 @@ const NO_HOST: SpecsHost = {
   recent: () => null,
   createFeature: () => {},
   createInView: null,
+  shortcuts: [],
 };
 
 let current: SpecsHost = NO_HOST;

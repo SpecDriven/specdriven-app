@@ -92,6 +92,24 @@ export interface RecentItem<V> {
   altView?: V;
 }
 
+/** A key, or a palette command, of a tab's own. */
+export interface TabShortcut {
+  id: string;
+  keys: string | string[];
+  label: string;
+  run(): void;
+  /** The cheat sheet's section; "Navigate" when absent. */
+  group?: string;
+  /** Only while this holds — Specs' imports while their switch is on, say. */
+  when?(): boolean;
+  /** Fires while typing in a field; absent is yes. */
+  inFields?: boolean;
+  /** Turns the sidebar to the tab first; absent is yes. */
+  reveal?: boolean;
+  /** The palette row's icon; a search glass when absent. */
+  icon?: ReactNode;
+}
+
 export interface TabPlugin<V = unknown> {
   /** The tab's id: the sidebar tab, the `go-<id>` shortcut, the palette scope. */
   id: string;
@@ -178,10 +196,11 @@ export interface TabPlugin<V = unknown> {
   };
   /**
    * Keys of the tab's own beyond its `g` chord — ⇧⌘F searches the code
-   * repository's files. App turns the sidebar to the tab, then runs it; the
-   * key works while typing, and the command palette lists it.
+   * repository's files; `[]` for a command only the palette offers. App
+   * turns the sidebar to the tab, then runs it; the key works while typing,
+   * and the command palette lists it.
    */
-  shortcuts?: { id: string; keys: string | string[]; label: string; run(): void }[];
+  shortcuts?: TabShortcut[];
   /**
    * Crumbs a feature page carries back into the module — an Event Model
    * whose slice links the feature, say. App makes each a link to the view.

@@ -552,13 +552,12 @@ function storeEditorHeight(key: string, h: number | null): void {
   }
 }
 
-/** A core tab, or a plugin's tab by its id (src/plugins/client/tabs.ts). */
-// The sidebar's tabs: Specs, the feature tree, and one tab per mounted
-// plugin — the special folders' page lists among them (src/plugins/builtin
-// /pages). They all share the one column, so the choice is remembered like
-// the sidebar width: a tab left open is meant to stay open, not to reset on
+// The sidebar's tabs, one per mounted plugin by its id (src/plugins/client/
+// tabs.ts) — Specs' feature tree, the special folders' page lists among
+// them. They all share the one column, so the choice is remembered like the
+// sidebar width: a tab left open is meant to stay open, not to reset on
 // every reload.
-type SidebarTab = typeof SPECS_TAB | (string & {});
+type SidebarTab = string;
 
 function readSidebarTab(): SidebarTab | null {
   try {
@@ -1719,13 +1718,6 @@ export function App() {
     () => registeredTabs.filter((tab) => (tab.id === FILES_TAB) === (codeRepoDir !== null)),
     [registeredTabs, codeRepoDir],
   );
-  // Specs is a plugin too (specs/app/plugins.feature.md "Specs is a built-in
-  // plugin"): its tab is registered while it is on in the open folder, and
-  // stands among the others where the profile puts it. The tree and the
-  // editor are App's own, so every other tab — the ones App renders through
-  // their plugin — is listed apart.
-  const specsOn = barTabs.some((tab) => tab.id === SPECS_TAB);
-  const pluginTabs = useMemo(() => barTabs.filter((tab) => tab.id !== SPECS_TAB), [barTabs]);
   // The Settings sections the plugins register (src/plugins/client/
   // settings.ts), and the state payload they read; each sits where its
   // order puts it among the core sections.
@@ -1777,9 +1769,7 @@ export function App() {
    */
   const shownTab: SidebarTab = sidebarTab !== null && barTabs.some((tab) => tab.id === sidebarTab)
     ? sidebarTab
-    : (barTabs[0]?.id ?? (codeRepoDir !== null ? FILES_TAB : SPECS_TAB));
-  /** The feature tree is the sidebar: Specs is on, and its tab is the one shown. */
-  const specsShown = specsOn && shownTab === SPECS_TAB;
+    : (barTabs[0]?.id ?? (codeRepoDir !== null ? FILES_TAB : ""));
   // Live sync (specs/datastore/automerge-store.feature.md): optional websocket
   // sync server; empty means off — git stays the only transport.
   const [syncServerUrl, setSyncServerUrl] = useState<string | null>(null);
@@ -2498,7 +2488,7 @@ export function App() {
     if (loading || needsRepo || codeRepoDir === null || pluginView || appPage) return;
     openPluginView(FILES_TAB, FILES_HOME);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, needsRepo, codeRepoDir, pluginView, appPage, pluginTabs]);
+  }, [loading, needsRepo, codeRepoDir, pluginView, appPage, barTabs]);
 
   // Window title follows what is open (specs/ui/navigation.feature.md) — chat
   // and email link previews show it.
@@ -8429,6 +8419,32 @@ export function App() {
       };
     },
     createFeature: () => void createFeature(),
+    // Imports into the selected spec folder (specs/external-links/aha-import
+    // .feature.md, OpenSpec's likewise), while their switches are on.
+    shortcuts: [
+      {
+        id: "import-aha",
+        keys: [],
+        label: selectedFolder ? `Import from Aha! into "${selectedFolder}"…` : "Import from Aha!…",
+        group: "Create",
+        inFields: false,
+        reveal: false,
+        icon: <Import size={14} />,
+        when: () => ahaImport && editing === null,
+        run: () => setAhaImportOpen({ folder: selectedFolder }),
+      },
+      {
+        id: "import-openspec",
+        keys: [],
+        label: selectedFolder ? `Import from OpenSpec into "${selectedFolder}"…` : "Import from OpenSpec…",
+        group: "Create",
+        inFields: false,
+        reveal: false,
+        icon: <Import size={14} />,
+        when: () => openSpecImport && editing === null,
+        run: () => setOpenSpecImportOpen({ folder: selectedFolder }),
+      },
+    ],
     createInView: editing
       ? { label: "New scenario after this one", run: canAddAfter ? () => void newScenarioAfterCurrent() : null }
       : onFeaturePage
@@ -8518,20 +8534,22 @@ export function App() {
     // ...and the keys a tab adds of its own (⇧⌘F, search in files): the
     // sidebar shows the tab first, whatever it showed and however it was put
     // away.
-    ...pluginTabs.flatMap((tab) =>
+    ...barTabs.flatMap((tab) =>
       (tab.shortcuts ?? []).map(
         (s): Shortcut => ({
           id: s.id,
           keys: s.keys,
           label: s.label,
-          group: "Navigate",
-          inFields: true,
-          when: () => !quiet,
-          palette: () => !quietBehindPalette,
+          group: s.group ?? "Navigate",
+          inFields: s.inFields ?? true,
+          when: () => !quiet && (s.when?.() ?? true),
+          palette: () => !quietBehindPalette && (s.when?.() ?? true),
           run: () => {
-            selectSidebarTab(tab.id);
-            if (compact) setDrawerOpen(true);
-            else if (sidebarCollapsed) toggleSidebar();
+            if (s.reveal !== false) {
+              selectSidebarTab(tab.id);
+              if (compact) setDrawerOpen(true);
+              else if (sidebarCollapsed) toggleSidebar();
+            }
             s.run();
           },
         }),
@@ -8640,24 +8658,6 @@ export function App() {
         // The shown tab's own "new": never a feature from the Tasks tab.
         else shownCreate?.run(tabApp, navigateIn(shownTab));
       },
-    },
-    {
-      id: "import-aha",
-      keys: [],
-      label: selectedFolder ? `Import from Aha! into "${selectedFolder}"…` : "Import from Aha!…",
-      group: "Create",
-      when: () => !quiet && ahaImport && specsOn && editing === null,
-      palette: () => !quietBehindPalette && ahaImport && specsOn && editing === null,
-      run: () => setAhaImportOpen({ folder: selectedFolder }),
-    },
-    {
-      id: "import-openspec",
-      keys: [],
-      label: selectedFolder ? `Import from OpenSpec into "${selectedFolder}"…` : "Import from OpenSpec…",
-      group: "Create",
-      when: () => !quiet && openSpecImport && specsOn && editing === null,
-      palette: () => !quietBehindPalette && openSpecImport && specsOn && editing === null,
-      run: () => setOpenSpecImportOpen({ folder: selectedFolder }),
     },
     {
       id: "extract-specs",
@@ -8885,7 +8885,6 @@ export function App() {
     action("new-folder", "New folder", <NewFolderIcon size={14} />, () => void createFolder()),
     // Only while Import from Aha! is switched on in Settings
     // (specs/external-links/aha-import.feature.md).
-    shortcutAction("import-aha", <Import size={14} />),
     // A specification folder for a code project, drafted from its code
     // (specs/app/extract-specs-from-code.feature.md); and, for a folder made
     // on this computer only, its repository on GitHub.
@@ -8978,7 +8977,7 @@ export function App() {
     // .feature.md), since the tab's own button is a tab away.
     ...barTabs.flatMap((tab) => [
       shortcutAction(`go-${tab.id}`, <tab.icon size={14} />),
-      ...(tab.shortcuts ?? []).map((s) => shortcutAction(s.id, <Search size={14} />)),
+      ...(tab.shortcuts ?? []).map((s) => shortcutAction(s.id, s.icon ?? <Search size={14} />)),
       ...(tab.palette?.commands?.({
         prompt,
         promptWithChoice,
