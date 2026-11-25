@@ -21,6 +21,7 @@ const DOM_GLOBALS = [
   "HTMLElement",
   "HTMLInputElement",
   "HTMLTextAreaElement",
+  "HTMLSelectElement",
   "HTMLFormElement",
   "Element",
   "Node",
@@ -122,6 +123,11 @@ async function unmount() {
 }
 
 afterEach(async () => {
+  // Error toasts never expire and their store is process-wide: a note left
+  // here would show in the next file's App.
+  for (const close of host?.querySelectorAll<HTMLElement>(".toast-close") ?? []) {
+    await act(async () => close.click());
+  }
   await unmount();
   await syncedOnStart();
   globalThis.fetch = realFetch;
@@ -237,5 +243,158 @@ describe("Specs is a built-in plugin", () => {
     await open("/");
     await until(() => sidebarText().includes("No plugin is on in this folder"), "the empty sidebar's hint");
     expect(host!.querySelector('aside:not(.rail) a[href="/plugins"]') !== null).toBe(true);
+  });
+});
+
+// What the Specs tab does today, pinned before it moves out of App.tsx into
+// its plugin (the client-half series): each of these must pass unchanged
+// after every step of that move.
+
+/** Presses one key the way a person does, outside any field. */
+async function press(key: string) {
+  await act(async () => {
+    window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+  });
+}
+
+/** Types into a React-controlled input: in happy-dom React hears the prototype's
+    setter followed by a keyup, not an `input` event. */
+async function typeInto(input: HTMLInputElement, text: string) {
+  const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+  await act(async () => {
+    input.focus();
+    setValue.call(input, text);
+    input.dispatchEvent(new KeyboardEvent("keyup", { key: text.slice(-1), bubbles: true }));
+  });
+}
+
+const dialogTitle = () => host!.querySelector(".modal-dialog h3")?.textContent ?? null;
+const paletteInput = () => host!.querySelector<HTMLInputElement>('.palette input[role="combobox"]');
+const paletteLabels = () => [...host!.querySelectorAll(".palette-item .palette-label")].map((el) => el.textContent);
+const toasts = () => [...host!.querySelectorAll(".toast-message")].map((el) => el.textContent ?? "");
+const featureOpen = () => (host!.textContent ?? "").includes("Renewal");
+
+const BOTH = { "notebook/2026-11-20-chose-the-queue.md": ENTRY, "specs/quotes.feature.md": FEATURE };
+
+describe("The Specs tab's behaviour, kept through its move into the plugin", () => {
+  test("a feature's link opens that feature, with its url and the window's title", async () => {
+    await setUp(BOTH);
+    await open("/features/quotes");
+    await until(() => document.title === "SpecDriven — Quotes", "the feature's title");
+    expect(location.pathname).toBe("/features/quotes");
+    expect(featureOpen()).toBe(true);
+    expect(readmeOpen()).toBe(false);
+    expect(specsPanel()).toBe(true);
+  });
+
+  test("a versionless scenario link opens the scenario and settles on its versioned url", async () => {
+    await setUp(BOTH);
+    await open("/features/quotes/scenarios/renewal");
+    await until(() => location.pathname === "/features/quotes/scenarios/renewal/v1", "the canonical scenario url");
+    await until(() => document.title === "SpecDriven — Quotes · Renewal v1", "the scenario's title");
+  });
+
+  test("a feature picked in the tree goes back home on Back", async () => {
+    await setUp(BOTH);
+    await open("/");
+    await until(() => sidebarText().includes("Quotes"), "the tree");
+    const row = [...host!.querySelectorAll<HTMLElement>("#side-panel-specs .tree-feature")].find(
+      (el) => el.textContent?.includes("Quotes"),
+    )!;
+    const entries = history.length;
+    await act(async () => row.click());
+    await until(() => location.pathname === "/features/quotes", "the feature's url");
+    // The click pushed an entry for Back to leave...
+    expect(history.length).toBe(entries + 1);
+    // ...and Back is the browser's half, played here: happy-dom's
+    // history.back() reloads the page instead of firing popstate.
+    await act(async () => {
+      history.replaceState(null, "", "/");
+      window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+    });
+    await until(() => readmeOpen(), "home");
+    expect(location.pathname).toBe("/");
+  });
+
+  test("`g s` on a notebook entry turns the sidebar to the tree and opens the README", async () => {
+    await setUp(BOTH);
+    await open("/notebook/2026-11-20-chose-the-queue");
+    await until(() => document.title === "SpecDriven — Chose the queue", "the notebook entry");
+    expect(specsPanel()).toBe(false);
+    await press("g");
+    await press("s");
+    await until(() => readmeOpen(), "home");
+    expect(specsPanel()).toBe(true);
+    expect(location.pathname).toBe("/");
+  });
+
+  test("the rail's Specs icon on a notebook entry does the same as `g s`", async () => {
+    await setUp(BOTH);
+    localStorage.setItem("sd-sidebar-collapsed", "1");
+    await open("/notebook/2026-11-20-chose-the-queue");
+    await until(() => document.title === "SpecDriven — Chose the queue", "the notebook entry");
+    const specs = host!.querySelector<HTMLElement>('a.rail-link[aria-label="Specs"]')!;
+    expect(specs.getAttribute("href")).toBe("/");
+    await act(async () => specs.click());
+    await until(() => readmeOpen(), "home");
+    expect(location.pathname).toBe("/");
+  });
+
+  test("the palette finds a feature while Specs is on, and none while it is off", async () => {
+    await setUp(BOTH);
+    await open("/");
+    await until(() => sidebarText().includes("Quotes"), "the tree");
+    await press("/");
+    await until(() => paletteInput() !== null, "the palette");
+    await typeInto(paletteInput()!, "quotes");
+    await until(() => paletteLabels().includes("Quotes"), "the feature in the palette");
+    await unmount();
+
+    expect((await putState({ plugins: { enabled: ["notebook"] } })).status).toBe(200);
+    await open("/");
+    await until(() => sidebarText().includes("Chose the queue"), "the notebook's list");
+    await press("/");
+    await until(() => paletteInput() !== null, "the palette");
+    await typeInto(paletteInput()!, "quotes");
+    await until(() => (host!.querySelector(".palette-list")?.textContent ?? "").includes("No matches"), "no match");
+    expect(paletteLabels()).not.toContain("Quotes");
+  });
+
+  test("`c` makes a feature from home and a scenario on a feature page", async () => {
+    await setUp(BOTH);
+    await open("/");
+    await until(() => sidebarText().includes("Quotes"), "the tree");
+    await press("c");
+    await until(() => dialogTitle() !== null, "the new feature dialog");
+    expect(dialogTitle()).toBe("New feature");
+    await unmount();
+
+    await open("/features/quotes");
+    await until(() => document.title === "SpecDriven — Quotes", "the feature");
+    await press("c");
+    await until(() => dialogTitle() !== null, "the new scenario dialog");
+    expect(dialogTitle()).toBe("New scenario");
+  });
+
+  test("switching Specs off with a feature open goes home", async () => {
+    await setUp(BOTH);
+    await open("/features/quotes");
+    await until(() => document.title === "SpecDriven — Quotes", "the feature");
+    await act(async () => {
+      await putState({ plugins: { enabled: ["notebook"] } });
+      const state = await (await api("/api/state")).json();
+      await syncClientPlugins(state.plugins);
+    });
+    await until(() => readmeOpen(), "home");
+    expect(featureOpen()).toBe(false);
+    expect(location.pathname).toBe("/");
+  });
+
+  test("a link to a feature that is not there says so and opens home", async () => {
+    await setUp(BOTH);
+    await open("/features/gone");
+    await until(() => toasts().some((t) => t.includes("gone")), "the missed link's note");
+    expect(readmeOpen()).toBe(true);
+    expect(featureOpen()).toBe(false);
   });
 });
