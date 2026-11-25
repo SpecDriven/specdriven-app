@@ -74,6 +74,22 @@ export interface PaletteHit<V> {
   sub?: ReactNode;
   href?: string;
   view: V;
+  /** The hit's own group, over the tab's — Specs' scenarios beside its features. */
+  group?: PaletteGroup;
+  /** The hit's own icon, over the tab's — a scenario's status, say. */
+  icon?: ReactNode;
+  /** What alt-Enter opens instead — a scenario's card on its feature's page. */
+  altView?: V;
+}
+
+/** How the palette's Recent list shows a view that was open. */
+export interface RecentItem<V> {
+  label: string;
+  /** Absent, none — not even the tab's title. */
+  sub?: ReactNode;
+  icon?: ReactNode;
+  /** What alt-Enter opens instead. */
+  altView?: V;
 }
 
 export interface TabPlugin<V = unknown> {
@@ -130,7 +146,16 @@ export interface TabPlugin<V = unknown> {
    * the tab is the sidebar, so the key never makes a feature from there.
    * Absent, `c` is quiet on the tab.
    */
-  create?: { label: string; run(app: TabApp, navigate: Navigate<V>): void };
+  create?: {
+    label: string;
+    run(app: TabApp, navigate: Navigate<V>): void;
+    /**
+     * What `c` makes while one of the tab's views has the pane, over any
+     * tab's "new" — a scenario on a feature's page. `run` null keeps `c`
+     * quiet there; null leaves it to the shown tab's create.
+     */
+    inView?(view: V): { label: string; run: (() => void) | null } | null;
+  };
   Sidebar: ComponentType<{ view: V | null; app: TabApp; navigate: Navigate<V> }>;
   Pane: ComponentType<{ view: V; app: TabApp; navigate: Navigate<V> }>;
   palette?: {
@@ -138,6 +163,11 @@ export interface TabPlugin<V = unknown> {
     /** The palette opened from this tab searches the tab's own data — its
         store, or its own server route. */
     search?(query: string, signal: AbortSignal): PaletteHit<V>[] | Promise<PaletteHit<V>[]>;
+    /**
+     * The palette searches this tab when the tab on screen offers no search
+     * of its own — Specs' features, from a list tab with none.
+     */
+    fallback?: boolean;
     /** Commands the palette offers while the tab is mounted. */
     commands?(host: {
       prompt: Prompt;
@@ -170,7 +200,7 @@ export interface TabPlugin<V = unknown> {
    * open, or null for a view not worth remembering. Absent, the tab's views
    * are not remembered.
    */
-  recent?(view: V): string | null;
+  recent?(view: V): string | RecentItem<V> | null;
   /**
    * The file a coding agent session started from the view attaches — the
    * Files tab's open file, Specs' open feature. Absent, none.

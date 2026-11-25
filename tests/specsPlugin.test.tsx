@@ -390,6 +390,76 @@ describe("The Specs tab's behaviour, kept through its move into the plugin", () 
     expect(location.pathname).toBe("/");
   });
 
+  test("a scenario found in the palette opens its page, and with mod-Enter its card on the feature's page", async () => {
+    await setUp(BOTH);
+    await open("/");
+    await until(() => sidebarText().includes("Quotes"), "the tree");
+    await press("/");
+    await until(() => paletteInput() !== null, "the palette");
+    await typeInto(paletteInput()!, "renewal");
+    await until(() => paletteLabels().includes("Renewal"), "the scenario in the palette");
+    const hit = [...host!.querySelectorAll<HTMLElement>(".palette-item")].find(
+      (el) => el.querySelector(".palette-label")?.textContent === "Renewal",
+    )!;
+    await act(async () => hit.click());
+    await until(() => location.pathname === "/features/quotes/scenarios/renewal/v1", "the scenario's page");
+    await unmount();
+
+    await open("/");
+    await until(() => sidebarText().includes("Quotes"), "the tree");
+    await press("/");
+    await until(() => paletteInput() !== null, "the palette");
+    await typeInto(paletteInput()!, "renewal");
+    await until(() => paletteLabels().includes("Renewal"), "the scenario in the palette");
+    const at = paletteLabels().indexOf("Renewal");
+    const input = paletteInput()!;
+    for (let i = 0; i < at; i++) {
+      await act(async () => {
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
+      });
+    }
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", metaKey: true, bubbles: true, cancelable: true }));
+    });
+    await until(() => document.title === "SpecDriven — Quotes", "the feature's page");
+    expect(location.pathname).toBe("/features/quotes");
+  });
+
+  test("the palette's Recent list offers the feature last opened, and not while Specs is off", async () => {
+    await setUp(BOTH);
+    await open("/features/quotes");
+    await until(() => document.title === "SpecDriven — Quotes", "the feature");
+    await unmount();
+
+    await open("/");
+    await until(() => sidebarText().includes("Quotes"), "the tree");
+    await press("/");
+    await until(() => paletteLabels().includes("Quotes"), "the feature under Recent");
+    expect([...host!.querySelectorAll(".palette-group")].some((el) => el.textContent === "Recent")).toBe(true);
+    await unmount();
+
+    expect((await putState({ plugins: { enabled: ["notebook"] } })).status).toBe(200);
+    await open("/");
+    await until(() => sidebarText().includes("Chose the queue"), "the notebook's list");
+    await press("/");
+    await until(() => paletteInput() !== null, "the palette");
+    expect(paletteLabels()).not.toContain("Quotes");
+  });
+
+  test("a Recent entry kept from before Specs was a tab still opens its feature", async () => {
+    await setUp(BOTH);
+    localStorage.setItem("sd-recent", JSON.stringify([{ kind: "feature", fileName: "specs/quotes.feature.md", name: "Quotes" }]));
+    await open("/");
+    await until(() => sidebarText().includes("Quotes"), "the tree");
+    await press("/");
+    await until(() => paletteLabels().includes("Quotes"), "the kept entry under Recent");
+    const entry = [...host!.querySelectorAll<HTMLElement>(".palette-item")].find(
+      (el) => el.querySelector(".palette-label")?.textContent === "Quotes",
+    )!;
+    await act(async () => entry.click());
+    await until(() => location.pathname === "/features/quotes", "the feature's url");
+  });
+
   test("a link to a feature that is not there says so and opens home", async () => {
     await setUp(BOTH);
     await open("/features/gone");

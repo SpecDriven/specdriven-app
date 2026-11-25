@@ -45,6 +45,20 @@ export const specsTab: TabPlugin<SpecsView> = {
   },
   // The open feature goes with a coding agent message.
   current: (view) => view.feature,
+  // `c` makes a feature from the tree, and a scenario on a feature's page.
+  create: {
+    label: "New feature",
+    run: () => specsHost()?.createFeature(),
+    inView: () => specsHost()?.createInView ?? null,
+  },
+  // The palette searches the spec files from this tab, and from any tab
+  // with no search of its own (specs/search.feature.md).
+  palette: {
+    group: "Features",
+    fallback: true,
+    search: (query, signal) => specsHost()?.search(query, signal) ?? [],
+  },
+  recent: (view) => specsHost()?.recent(view) ?? null,
   Sidebar: () => <>{specsHost()?.sidebar ?? null}</>,
   Pane: () => <>{specsHost()?.pane ?? null}</>,
 };

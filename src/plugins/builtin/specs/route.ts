@@ -14,6 +14,13 @@ export interface SpecsView {
   feature: string;
   /** The scenario a link opens on its page; absent for the feature's page. */
   scenario?: ScenarioRef | null;
+  /**
+   * Open the scenario's card on its feature's page rather than its own page
+   * (a palette hit's alt-Enter). Not part of the url.
+   */
+  page?: boolean;
+  /** The search terms to mark on the page opened (specs/search.feature.md). Not part of the url. */
+  terms?: string[];
 }
 
 /** The view a url names, or null when it is not a feature's url. */

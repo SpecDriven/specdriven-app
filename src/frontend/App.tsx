@@ -634,6 +634,16 @@ function readRecent(): RecentEntry[] {
     // the view at its url on the folder's tab.
     return list.slice(0, 8).map((e) => {
       const kind = e.kind as string;
+      // A feature or a scenario, from before Specs was a plugin's tab: the
+      // view at its url on that tab.
+      if (kind === "feature" || kind === "scenario") {
+        return {
+          kind: "plugin" as const,
+          fileName: e.scenario ? scenarioPath(e.fileName, e.scenario) : featurePath(e.fileName),
+          name: e.scenario ? e.scenario.name : e.name,
+          tab: SPECS_TAB,
+        };
+      }
       if (kind !== "page" && kind !== "roadmap") return e;
       return {
         kind: "plugin" as const,
@@ -1732,9 +1742,23 @@ export function App() {
   // read from it (src/plugins/builtin/specs/route.ts). Opening either
   // closes the other: openFeature drops the tab's view, openPluginView the
   // feature.
+  // The scenario whose page is open goes in the view, so its url and its
+  // Recent entry are the scenario's.
+  const viewScenario = pageScenario(editing, feature?.scenarios);
   const pluginView = useMemo<PluginView | null>(
-    () => tabView ?? (selected !== null ? { tab: SPECS_TAB, view: { feature: selected } satisfies SpecsView } : null),
-    [tabView, selected],
+    () =>
+      tabView ??
+      (selected !== null
+        ? {
+            tab: SPECS_TAB,
+            view: {
+              feature: selected,
+              scenario: viewScenario ? { slug: slugify(viewScenario.name), version: viewScenario.version } : null,
+            } satisfies SpecsView,
+          }
+        : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [tabView, selected, viewScenario?.name, viewScenario?.version],
   );
   const pluginViewRef = useRef<PluginView | null>(null);
   pluginViewRef.current = pluginView;
@@ -3180,13 +3204,18 @@ export function App() {
   // specs/client.tsx) — a link, Back, a palette hit: published here, before
   // App's loading screen returns early, since a link is opened at start.
   provideSpecsHost({
-    open: (view, opts) =>
+    open: (view, opts) => {
+      // Opened from the palette or Recent: "New feature" lands beside it,
+      // not in a folder picked before.
+      if (opts.push) setSelectedFolder(null);
       void openFeature(view.feature, {
         scenario: view.scenario ?? null,
-        pane: true,
+        pane: !view.page,
         push: opts.push,
         pullProblem: opts.pullProblem ?? null,
-      }),
+        ...(view.terms ? { terms: view.terms } : {}),
+      });
+    },
   });
 
   /**
@@ -6911,18 +6940,6 @@ export function App() {
    * scenario hit opens that scenario's page — or, with ⌘⏎ in the palette,
    * its feature page with the card highlighted.
    */
-  const openResult = (r: SearchResultItem, onFeaturePage = false) => {
-    setSelectedFolder(null);
-    void openFeature(r.fileName, {
-      push: true,
-      scenario: r.scenario
-        ? { slug: slugify(r.scenario.name), version: r.scenario.version }
-        : null,
-      pane: r.scenario !== undefined && !onFeaturePage,
-      terms: r.terms,
-    });
-  };
-
   const resultHref = (r: SearchResultItem) =>
     r.scenario ? scenarioPath(r.fileName, r.scenario) : featurePath(r.fileName);
 
@@ -8360,14 +8377,70 @@ export function App() {
     if (!to) return false;
     openScenarioRow(to.file, to.scenario);
   };
-  // The shown plugin tab's own "new" (specs/app/plugins.feature.md): what `c`
-  // creates while that tab is the sidebar — a task, a case, an issue.
-  const tabCreate = locked || specsShown
-    ? undefined
-    : pluginTabs.find((tab) => tab.id === shownTab)?.create;
-  // `c` with nothing open makes a feature only while there is a Specs tab
-  // to show it in; on another tab it is that tab's own "new", or quiet.
-  const canCreateHere = specsShown || tabCreate !== undefined;
+  // What the Specs tab's palette, Recent list and `c` read (src/plugins/
+  // builtin/specs/client.tsx), published before they are read below.
+  provideSpecsHost({
+    search: async (q, signal) => {
+      const res = await fetch(`/api/search?scope=specs&q=${encodeURIComponent(q)}`, { signal });
+      const data = (await res.json()) as { results?: SearchResultItem[]; error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Search failed");
+      return (data.results ?? []).map((r) => {
+        const scenario = r.scenario ? { slug: slugify(r.scenario.name), version: r.scenario.version } : null;
+        const view: SpecsView = { feature: r.fileName, scenario, terms: r.terms };
+        return {
+          id: `${r.kind}:${r.fileName}:${r.scenario?.name ?? ""}@${r.scenario?.version ?? 0}`,
+          group: r.scenario ? "Scenarios" : "Features",
+          label: r.scenario ? r.scenario.name : r.featureName,
+          sub: r.scenario ? (
+            <>
+              {r.featureName}
+              {r.snippet && <> · {markText(r.snippet, r.terms)}</>}
+            </>
+          ) : r.snippet ? (
+            markText(r.snippet, r.terms)
+          ) : undefined,
+          icon: r.scenario ? (
+            <StatusIcon status={scenarioStatus(r.fileName, r.scenario)} size={14} />
+          ) : (
+            <FileText size={14} />
+          ),
+          href: resultHref(r),
+          view,
+          // Alt opens the scenario's card on its feature's page.
+          ...(r.scenario ? { altView: { ...view, page: true } } : {}),
+        };
+      });
+    },
+    recent: (view) => {
+      const listing = features.find((f) => f.fileName === view.feature);
+      const open = view.feature === selected ? feature : null;
+      const name = open?.name || listing?.name || titleFromFileName(view.feature);
+      if (!view.scenario) return { label: name, icon: <FileText size={14} /> };
+      const { slug, version } = view.scenario;
+      const s = (open?.scenarios ?? listing?.scenarios ?? []).find(
+        (x) => slugify(x.name) === slug && (version === undefined || x.version === version),
+      );
+      if (!s) return null;
+      return {
+        label: s.name,
+        sub: name,
+        icon: <StatusIcon status={scenarioStatus(view.feature, s)} size={14} />,
+        altView: { ...view, page: true },
+      };
+    },
+    createFeature: () => void createFeature(),
+    createInView: editing
+      ? { label: "New scenario after this one", run: canAddAfter ? () => void newScenarioAfterCurrent() : null }
+      : onFeaturePage
+        ? { label: "New scenario", run: () => void newScenario() }
+        : null,
+  });
+  // `c` (specs/app/plugins.feature.md): what the open view makes — a
+  // scenario on a feature's page — else the shown tab's own "new": a
+  // feature from the tree, a task from the Tasks tab, a case from Tests.
+  // Quiet on a tab with none.
+  const viewCreate = pluginView && activeTab?.create?.inView ? activeTab.create.inView(pluginView.view) : null;
+  const shownCreate = barTabs.find((tab) => tab.id === shownTab)?.create;
   const allShortcuts: Shortcut[] = [
     // mod+k and `/` open the palette; the browser's own Find (mod+f) is
     // left alone, since the in-sidebar field it used to focus is gone.
@@ -8558,23 +8631,14 @@ export function App() {
       // Inside the scenario pane the new scenario follows the open one
       // (specs/editor/spec-editor.feature.md "Spec editor pane"); single
       // letters never fire while typing, so `c` in the body is just a c.
-      label: editing
-        ? "New scenario after this one"
-        : onFeaturePage
-          ? "New scenario"
-          : tabCreate
-            ? tabCreate.label
-            : "New feature",
+      label: viewCreate?.label ?? shownCreate?.label ?? "New",
       group: "Create",
-      when: () => !quiet && (editing !== null ? canAddAfter : onFeaturePage || canCreateHere),
-      palette: () => !quietBehindPalette && (editing !== null ? canAddAfter : onFeaturePage || canCreateHere),
+      when: () => !quiet && (viewCreate ? viewCreate.run !== null : shownCreate !== undefined),
+      palette: () => !quietBehindPalette && (viewCreate ? viewCreate.run !== null : shownCreate !== undefined),
       run: () => {
-        if (editing) void newScenarioAfterCurrent();
-        else if (onFeaturePage) void newScenario();
-        // The shown tab's own "new": a task from the Tasks tab, a case from
-        // Tests — never a feature from there.
-        else if (tabCreate) tabCreate.run(tabApp, navigateIn(shownTab));
-        else void createFeature();
+        if (viewCreate) viewCreate.run?.();
+        // The shown tab's own "new": never a feature from the Tasks tab.
+        else shownCreate?.run(tabApp, navigateIn(shownTab));
       },
     },
     {
@@ -8912,7 +8976,7 @@ export function App() {
     // The plugins' tabs: the way there, and each tab's own commands —
     // "New notebook entry" among them (specs/app/engineering-notebook
     // .feature.md), since the tab's own button is a tab away.
-    ...pluginTabs.flatMap((tab) => [
+    ...barTabs.flatMap((tab) => [
       shortcutAction(`go-${tab.id}`, <tab.icon size={14} />),
       ...(tab.shortcuts ?? []).map((s) => shortcutAction(s.id, <Search size={14} />)),
       ...(tab.palette?.commands?.({
@@ -8965,100 +9029,53 @@ export function App() {
       .find((f) => f.fileName === fileName)
       ?.scenarios.find((x) => x.name === s.name && x.version === s.version)?.status ?? "proposed";
   const resolvePalette = async (q: string, signal: AbortSignal): Promise<PaletteItem[]> => {
-    // A plugin's tab searches its own data when it offers a search — its
+    // The tab on screen searches its own data when it offers a search — its
     // store (the server's full-text index knows only markdown), or its own
-    // scope of that index (a special folder's pages).
-    const shownPlugin = pluginTabs.find((tab) => tab.id === shownTab);
-    if (shownPlugin?.palette?.search) {
-      const { group } = shownPlugin.palette;
-      const Icon = shownPlugin.icon;
-      return (await shownPlugin.palette.search(q, signal)).map(
-        (hit): PaletteItem => ({
-          id: hit.id,
-          group,
-          label: hit.label,
-          text: hit.label,
-          sub: hit.sub,
-          icon: <Icon size={14} />,
-          href: hit.href,
-          run: () => void openPluginView(shownPlugin.id, hit.view, { push: true }),
-        }),
-      );
-    }
-    // With Specs switched off the palette offers no feature or scenario.
-    if (!specsOn) return [];
-    const res = await fetch(`/api/search?scope=specs&q=${encodeURIComponent(q)}`, { signal });
-    const data = (await res.json()) as { results?: SearchResultItem[]; error?: string };
-    if (!res.ok) throw new Error(data.error ?? "Search failed");
-    return (data.results ?? []).map(
-      (r): PaletteItem => ({
-        id: `${r.kind}:${r.fileName}:${r.scenario?.name ?? ""}@${r.scenario?.version ?? 0}`,
-        group: r.scenario ? "Scenarios" : "Features",
-        label: r.scenario ? r.scenario.name : r.featureName,
-        text: r.scenario ? r.scenario.name : r.featureName,
-        sub: r.scenario ? (
-          <>
-            {r.featureName}
-            {r.snippet && <> · {markText(r.snippet, r.terms)}</>}
-          </>
-        ) : r.snippet ? (
-          markText(r.snippet, r.terms)
-        ) : undefined,
-        icon: r.scenario ? (
-          <StatusIcon status={scenarioStatus(r.fileName, r.scenario)} size={14} />
-        ) : (
-          <FileText size={14} />
-        ),
-        href: resultHref(r),
-        run: ({ alt }) => openResult(r, alt),
+    // scope of that index (a special folder's pages); else the tab that
+    // searches for every other (Specs: the spec files). With none of them
+    // on, the palette offers commands alone.
+    const shown = barTabs.find((tab) => tab.id === shownTab);
+    const owner = shown?.palette?.search
+      ? shown
+      : barTabs.find((tab) => tab.palette?.fallback && tab.palette.search);
+    const search = owner?.palette?.search;
+    if (!owner || !search) return [];
+    const { group } = owner.palette!;
+    const Icon = owner.icon;
+    return (await search(q, signal)).map(
+      (hit): PaletteItem => ({
+        id: hit.id,
+        group: hit.group ?? group,
+        label: hit.label,
+        text: hit.label,
+        sub: hit.sub,
+        icon: hit.icon ?? <Icon size={14} />,
+        href: hit.href,
+        run: ({ alt }) =>
+          void openPluginView(owner.id, alt && hit.altView !== undefined ? hit.altView : hit.view, { push: true }),
       }),
     );
   };
-  // A plugin view is offered while its tab is mounted — a page of a folder
-  // switched off since is not.
+  // A view is offered while its tab is on — a page of a folder switched off
+  // since is not, nor a feature while Specs is off. The tab says how it
+  // shows now (a scenario's status, say); the stored name is the fallback.
   const recentItems: PaletteItem[] = recent.flatMap((e): PaletteItem[] => {
-    const owner = e.kind === "plugin" ? pluginTabs.find((t) => t.id === e.tab) : undefined;
-    if (e.kind === "plugin" && !owner) return [];
-    // Nor is a feature or a scenario while Specs is switched off.
-    if (e.kind !== "plugin" && !specsOn) return [];
+    const owner = barTabs.find((t) => t.id === e.tab);
+    const view = owner?.route.match(e.fileName) ?? null;
+    if (!owner || view === null) return [];
+    const live = owner.recent?.(view) ?? null;
+    const item = typeof live === "object" ? live : null;
     return [
       {
         id: `recent:${e.kind}:${e.fileName}:${e.scenario?.name ?? ""}@${e.scenario?.version ?? 0}`,
         group: "Recent",
-        label: e.scenario ? e.scenario.name : e.name,
-        text: e.scenario ? e.scenario.name : e.name,
-        sub: e.scenario ? e.name : owner?.title,
-        icon: owner ? (
-          <owner.icon size={14} aria-hidden="true" />
-        ) : e.scenario ? (
-          <StatusIcon status={scenarioStatus(e.fileName, e.scenario)} size={14} />
-        ) : (
-          <FileText size={14} />
-        ),
-        href: owner
-          ? e.fileName
-          : e.scenario
-            ? scenarioPath(e.fileName, e.scenario)
-            : featurePath(e.fileName),
-        run: ({ alt }) => {
-          if (owner) {
-            const view = owner.route.match(e.fileName);
-            if (view !== null) openPluginView(owner.id, view, { push: true });
-            return;
-          }
-          openResult(
-            {
-              kind: e.scenario ? "scenario" : "feature",
-              fileName: e.fileName,
-              featureName: e.name,
-              scenario: e.scenario,
-              score: 0,
-              terms: [],
-              snippet: "",
-            },
-            alt,
-          );
-        },
+        label: item?.label ?? (typeof live === "string" ? live : e.name),
+        text: item?.label ?? (typeof live === "string" ? live : e.name),
+        sub: item ? item.sub : owner.title,
+        icon: item?.icon ?? <owner.icon size={14} aria-hidden="true" />,
+        href: e.fileName,
+        run: ({ alt }) =>
+          void openPluginView(owner.id, alt && item?.altView !== undefined ? item.altView : view, { push: true }),
       },
     ];
   });
@@ -9066,25 +9083,15 @@ export function App() {
   useEffect(() => {
     if (loading) return;
     let entry: RecentEntry | null = null;
-    if (selected) {
-      const name = features.find((f) => f.fileName === selected)?.name ?? titleFromFileName(selected);
-      entry = paneScenario
-        ? {
-            kind: "scenario",
-            fileName: selected,
-            name,
-            scenario: { name: paneScenario.name, version: paneScenario.version },
-          }
-        : { kind: "feature", fileName: selected, name };
-    } else if (pluginView && activeTab?.recent) {
-      // A plugin's view the tab says is worth remembering — a page, say —
-      // by its url, so it reopens the way a link to it would.
-      const name = activeTab.recent(pluginView.view);
-      if (name !== null) {
+    if (pluginView && activeTab?.recent) {
+      // A view the tab says is worth remembering — a feature, a scenario, a
+      // page — by its url, so it reopens the way a link to it would.
+      const shown = activeTab.recent(pluginView.view);
+      if (shown !== null) {
         entry = {
           kind: "plugin",
           fileName: activeTab.route.path(pluginView.view),
-          name,
+          name: typeof shown === "string" ? shown : shown.label,
           tab: activeTab.id,
         };
       }
@@ -9167,7 +9174,7 @@ export function App() {
   // feature holding an Event Model slice's scenarios carries a crumb naming
   // the model, say, that opens its canvas. None while the module is off.
   const pluginCrumbs = (fileName: string): Crumb[] =>
-    pluginTabs.flatMap((tab) =>
+    barTabs.flatMap((tab) =>
       (tab.featureCrumbs?.(fileName) ?? []).map(
         (c): Crumb => ({
           label: c.label,
