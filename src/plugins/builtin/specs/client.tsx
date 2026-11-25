@@ -1,21 +1,25 @@
 // Specs' browser half (specs/app/plugins.feature.md "Specs is a built-in
 // plugin"): the tab, registered while the plugin is on in the open folder,
 // so it stands in the tab bar and on the rail where the profile's order
-// puts it and goes when the plugin is switched off. The feature tree and the
+// puts it and goes when the plugin is switched off. Its views are the
+// features' urls (./route.ts). The feature tree, the feature page and the
 // editor are still built inside App.tsx, which hands them to this tab
-// through src/frontend/specs/host.ts; the tab renders them.
+// through src/frontend/specs/host.ts; the tab renders them, and opens a
+// feature through it.
 
 import { FileText } from "lucide-react";
 import type { Context, Plugin } from "../../kernel";
 import type { TabPlugin } from "../../client/tabs";
 import { SPECS_PLUGIN } from "../../profile";
 import { specsHost } from "../../../frontend/specs/host";
+import { titleFromFileName } from "../../../server/parser";
 import { manifest } from "./manifest";
+import { matchSpecsRoute, specsPath, type SpecsView } from "./route";
 
 /** The Specs tab's id, which is the plugin's. */
 export const SPECS_TAB = SPECS_PLUGIN;
 
-export const specsTab: TabPlugin<null> = {
+export const specsTab: TabPlugin<SpecsView> = {
   id: SPECS_TAB,
   title: "Specs",
   icon: FileText,
@@ -24,15 +28,25 @@ export const specsTab: TabPlugin<null> = {
   // The tab bar turns the sidebar to the tree; a row opens a feature.
   opensOnSelect: false,
   route: {
-    match: () => null,
-    path: () => "/",
-    key: () => SPECS_TAB,
-    title: () => "Specs",
+    match: matchSpecsRoute,
+    path: specsPath,
+    // The feature alone: opening one of its scenarios keeps the pane.
+    key: (view) => view.feature,
+    title: (view) => specsHost()?.title ?? titleFromFileName(view.feature),
+    // The tab's door is the folder's README, App's home.
     home: null,
   },
-  // The tree, as App last built it.
+  // A feature is read before it shows, and a link that misses says so.
+  open: (view, opts) => {
+    const host = specsHost();
+    if (!host) return false;
+    host.open(view, opts);
+    return true;
+  },
+  // The open feature goes with a coding agent message.
+  current: (view) => view.feature,
   Sidebar: () => <>{specsHost()?.sidebar ?? null}</>,
-  Pane: () => null,
+  Pane: () => <>{specsHost()?.pane ?? null}</>,
 };
 
 const plugin: Plugin<Context> = {

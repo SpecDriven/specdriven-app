@@ -71,6 +71,9 @@ export const filesTab: TabPlugin<FilesView> = {
       return readme ? { path: readme } : view;
     },
   },
+  // The open file goes with a coding agent message (specs/agents/agent-pane
+  // .feature.md); home names none.
+  current: (view) => view.path,
   Sidebar: ({ view, navigate }) => <FilesSidebar view={view} navigate={navigate} />,
   Pane: ({ view, app }) => (
     <FilesPane path={view.path} repoCrumb={app.repoCrumb} autosaveSeconds={app.autosaveSeconds} canOpenInIdea />

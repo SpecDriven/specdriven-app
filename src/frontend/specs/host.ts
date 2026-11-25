@@ -11,20 +11,42 @@
 // plugin"). Each later move takes a field off it.
 
 import type { ReactNode } from "react";
+import type { OpenViewOptions } from "../../plugins/client/tabs";
+import type { SpecsView } from "../../plugins/builtin/specs/route";
 
 export interface SpecsHost {
   /** The tree: the Specs tab's sidebar panel. */
   sidebar: ReactNode;
+  /** The open feature's page, its scenario's page or the editor. */
+  pane: ReactNode;
+  /** The window title's page part — the feature, and the scenario open in the pane — or null while it loads. */
+  title: string | null;
+  /** Open a feature, or a scenario's page when the view names one. */
+  open(view: SpecsView, opts: OpenViewOptions): void;
 }
 
-let current: SpecsHost | null = null;
+const NO_HOST: SpecsHost = {
+  sidebar: null,
+  pane: null,
+  title: null,
+  open: () => {},
+};
 
-/** App's render: what the Specs tab reads until the next render. */
-export function provideSpecsHost(host: SpecsHost): void {
-  current = host;
+let current: SpecsHost = NO_HOST;
+let provided = false;
+
+/**
+ * App's render: what the Specs tab reads until the next render. The handlers
+ * go first, before any early return of App's (its loading screen) — a link
+ * opened at start needs `open` before the tree or the pane are built — and
+ * the elements follow at the end of the render.
+ */
+export function provideSpecsHost(host: Partial<SpecsHost>): void {
+  current = { ...current, ...host };
+  provided = true;
 }
 
 /** The host App last provided, or null before App's first render. */
 export function specsHost(): SpecsHost | null {
-  return current;
+  return provided ? current : null;
 }

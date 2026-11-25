@@ -55,6 +55,18 @@ export interface TabApp {
 /** Open one of the tab's views; `push` adds a history entry. */
 export type Navigate<V> = (view: V, opts?: { push?: boolean }) => void;
 
+/** How a view is being opened. */
+export interface OpenViewOptions {
+  /** Add a history entry for it. */
+  push?: boolean;
+  /**
+   * Opened from a link, after the folder was pulled for it: why the pull
+   * failed, or null — a miss is then said as what it is
+   * (specs/ui/navigation.feature.md "a link opens on synced data").
+   */
+  pullProblem?: string | null;
+}
+
 /** A palette hit from the tab's own search — the store, not the server index. */
 export interface PaletteHit<V> {
   id: string;
@@ -107,6 +119,13 @@ export interface TabPlugin<V = unknown> {
    */
   opensOnSelect?: boolean;
   /**
+   * A tab that opens its views itself, loading each before it shows — Specs
+   * reads the feature's file first, and a missed link leaves a note. App
+   * hands it a view in place of holding it; true when the tab took it.
+   * Absent, App holds the view and pushes its url.
+   */
+  open?(view: V, opts: OpenViewOptions): boolean;
+  /**
    * The tab's own "new" — a task, a case, an issue: what `c` creates while
    * the tab is the sidebar, so the key never makes a feature from there.
    * Absent, `c` is quiet on the tab.
@@ -152,6 +171,11 @@ export interface TabPlugin<V = unknown> {
    * are not remembered.
    */
   recent?(view: V): string | null;
+  /**
+   * The file a coding agent session started from the view attaches — the
+   * Files tab's open file, Specs' open feature. Absent, none.
+   */
+  current?(view: V): string | null;
   /** The tab's store, so App re-renders titles when it changes. */
   subscribe?(listener: () => void): () => void;
 }

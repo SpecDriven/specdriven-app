@@ -171,6 +171,7 @@ import {
   tabReachable,
   useRegistry,
   useTabStores,
+  type OpenViewOptions,
   type PluginView,
   type TabApp,
   type TabPlugin,
@@ -301,7 +302,8 @@ import {
 } from "./StartFolder";
 import { FILES_TAB } from "./files/plugin";
 import { SPECS_TAB } from "../plugins/builtin/specs/client";
-import { FILES_HOME, type FilesView } from "./files/route";
+import type { SpecsView } from "../plugins/builtin/specs/route";
+import { FILES_HOME } from "./files/route";
 import { CloneFromGitHub, GITHUB_HOST, PasteToken, TokenSignInDialog } from "./GitHubToken";
 import { accountMenuEntries } from "./accountMenu";
 import { SettingsFileDialog, type SettingsFile } from "./SettingsFileDialog";
@@ -1723,12 +1725,22 @@ export function App() {
   // repo's .specdriven/<agent>-models.json files — what every model dropdown lists.
   const agentModels = useMemo(() => agentModelsOf(settingsPayload), [settingsPayload]);
   const saveAgentModels = (next: AgentModels) => setSettingsPayload((p) => ({ ...p, agentModels: next }));
-  const [pluginView, setPluginView] = useState<PluginView | null>(null);
+  // Another tab's open view, which App holds; null when none is open.
+  const [tabView, setPluginView] = useState<PluginView | null>(null);
+  // The view that has the pane: another tab's, or the Specs tab's open
+  // feature — App still holds that one as `selected`, so the Specs view is
+  // read from it (src/plugins/builtin/specs/route.ts). Opening either
+  // closes the other: openFeature drops the tab's view, openPluginView the
+  // feature.
+  const pluginView = useMemo<PluginView | null>(
+    () => tabView ?? (selected !== null ? { tab: SPECS_TAB, view: { feature: selected } satisfies SpecsView } : null),
+    [tabView, selected],
+  );
   const pluginViewRef = useRef<PluginView | null>(null);
   pluginViewRef.current = pluginView;
-  const activeTab = pluginView ? (pluginTabs.find((t) => t.id === pluginView.tab) ?? null) : null;
-  /** Ticks with the active tab's store, so titles read through it stay current. */
-  const tabsTick = useTabStores(pluginTabs);
+  const activeTab = pluginView ? (barTabs.find((t) => t.id === pluginView.tab) ?? null) : null;
+  /** Ticks with the tabs' stores, so titles read through them stay current. */
+  const tabsTick = useTabStores(barTabs);
   // Google Calendar (specs/app/tasks.feature.md "Add task to Google
   // Calendar"): the Settings switch behind every task's calendar chip, as
   // the Settings dialog's row shows it; the tasks plugin reads it too.
@@ -2439,10 +2451,10 @@ export function App() {
   // not leave the retired url behind for Back to land on.
   useEffect(() => {
     if (loading || needsRepo) return;
-    // A plugin's view owns its url (openPluginView pushes it), and so does
-    // an app page; with no feature selected this effect would otherwise
-    // rewrite it to `/`.
-    if (pluginView || appPage) return;
+    // Another tab's view owns its url (openPluginView pushes it), and so
+    // does an app page; with no feature selected this effect would
+    // otherwise rewrite it to `/`.
+    if (appPage || (pluginView && selected === null)) return;
     const url = pagePath(selected, paneScenario);
     const opening = paneScenario !== null && !panePushed.current;
     panePushed.current = paneScenario !== null;
@@ -2468,20 +2480,14 @@ export function App() {
   // and email link previews show it.
   const clock = titlePrefix(pom.timer, pom.now);
   useEffect(() => {
-    const s = paneScenario ?? undefined;
-    const name = feature && selected ? feature.name || titleFromFileName(selected) : "";
-    // A plugin's view — an open roadmap page or task, say — names the window
-    // the way a feature does, so a shared link previews as that page
-    // (specs/app/tasks.feature.md).
+    // The open view names the window — a feature and the scenario in its
+    // pane (the Specs tab's), a roadmap page or a task — so a shared link
+    // previews as that page (specs/app/tasks.feature.md).
     const base = appPage
       ? `SpecDriven — ${appPage === "settings" ? "Settings" : appPage === "project-settings" ? "Project settings" : appPage === "plugins" ? "Plugins" : appPage === "data" ? "Data" : appPage === "images" ? "Images" : appPage === "whats-new" ? "What's new" : appPage === "updates" ? "Updates" : "Observability"}`
       : pluginView && activeTab
-      ? `SpecDriven — ${activeTab.route.title(pluginView.view)}`
-      : !selected || !feature
-        ? "SpecDriven"
-        : s
-          ? `SpecDriven — ${name} · ${s.name} v${s.version}`
-          : `SpecDriven — ${name}`;
+        ? `SpecDriven — ${activeTab.route.title(pluginView.view)}`
+        : "SpecDriven";
     // A running pomodoro puts its clock first, so the tab shows the time
     // left while the person works elsewhere. This effect is the title's
     // only writer.
@@ -3170,6 +3176,19 @@ export function App() {
     }
   };
 
+  // How the Specs tab opens a feature from its url (src/plugins/builtin/
+  // specs/client.tsx) — a link, Back, a palette hit: published here, before
+  // App's loading screen returns early, since a link is opened at start.
+  provideSpecsHost({
+    open: (view, opts) =>
+      void openFeature(view.feature, {
+        scenario: view.scenario ?? null,
+        pane: true,
+        push: opts.push,
+        pullProblem: opts.pullProblem ?? null,
+      }),
+  });
+
   /**
    * Home — the data folder's README editor (app-startup.md
    * "The data folder name links to the README"). Drops the feature selection
@@ -3219,12 +3238,15 @@ export function App() {
    * says what the url is. A view that names no one thing — `/models` — opens
    * the one the tab resolves it to; false when there is nothing to open.
    */
-  const openPluginView = (tab: string, view: unknown, opts: { push?: boolean } = {}): boolean => {
+  const openPluginView = (tab: string, view: unknown, opts: OpenViewOptions = {}): boolean => {
     const owner = tabs.get(tab);
     if (!owner) return false;
     const resolved = owner.route.resolve ? owner.route.resolve(view) : view;
     if (resolved === null) return false;
     view = resolved;
+    // A tab that loads its views itself — Specs reads the feature first —
+    // takes it from here, the leaving and the url included.
+    if (owner.open) return owner.open(view, opts);
     editorRef.current.close();
     setSelected(null);
     setFeature(null);
@@ -3512,17 +3534,13 @@ export function App() {
   // unwinds everything it registered").
   useEffect(() => {
     // A tab being remounted — its plugin was rebuilt — is back in a moment.
-    if (pluginView && !pluginTabs.some((t) => t.id === pluginView.tab) && !isRemounting(pluginView.tab)) {
+    // Specs too ("Specs is a built-in plugin"): switched off while a
+    // feature has the pane, the feature leaves for home.
+    if (pluginView && !barTabs.some((t) => t.id === pluginView.tab) && !isRemounting(pluginView.tab)) {
       goHome();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pluginTabs]);
-  // So does Specs ("Specs is a built-in plugin"): switched off while a
-  // feature has the pane, the feature leaves for home.
-  useEffect(() => {
-    if (!specsOn && selected !== null && codeRepoDir === null) goHome();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [specsOn]);
+  }, [barTabs]);
 
   /**
    * Re-read the plugins from the server — a plugin from a folder was
@@ -3624,7 +3642,6 @@ export function App() {
         await refreshViewRef.current();
       }
     }
-    const route = parseRoute(pathname);
     // The app's own pages first, so no plugin can claim their urls.
     const page = matchAppPage(pathname);
     if (page) {
@@ -3640,14 +3657,9 @@ export function App() {
     const pluginHit = matchPluginRoute(pathname);
     if (pluginHit) {
       // A tab with nothing to open — an empty models folder — goes home.
-      if (!openPluginView(pluginHit.tab.id, pluginHit.view)) goHome();
-    } else if (route.feature && tabs.get(SPECS_TAB)) {
-      // A scenario url is a link to that scenario's page — the card's "Copy
-      // link" makes one — so it opens the pane, not just the card
-      // (specs/ui/navigation.feature.md "open a scenario link"). Only while
-      // Specs is on (read from the registry: this runs from boot's closure):
-      // with the plugin off its urls read as home, like any plugin's.
-      await openFeature(route.feature, { scenario: route.scenario ?? null, pane: true, pullProblem });
+      // A feature's url is the Specs tab's (src/plugins/builtin/specs/route
+      // .ts): with Specs off it matches nothing and reads as home.
+      if (!openPluginView(pluginHit.tab.id, pluginHit.view, { pullProblem })) goHome();
     } else {
       // Back to home while the editor pane is open: it leaves the way `<`
       // does (specs/editor/spec-editor.feature.md "Spec editor pane").
@@ -11198,734 +11210,10 @@ export function App() {
     )}
     </div>
   );
-  provideSpecsHost({ sidebar: specsSidebar });
-
-  return (
-    <main
-      className={`layout${resizingSidebar || resizingAgent ? " resizing" : ""}${sidebarCollapsed && !compact ? " collapsed" : ""}${compact ? " compact" : ""}${paneShown && !compact ? " agent-open" : ""}${editorOff ? " editor-hidden" : ""}${locked ? " read-only" : ""}`}
-      style={{ "--sidebar-w": `${sidebarWidth}px`, "--agent-w": `${pane.width}px` } as CSSProperties}
-    >
-      {compact && (
-        /* One pane: a top bar stands in for the sidebar's header — the menu
-           button opens the drawer, the mark is the way home, and search opens
-           the palette, since ⌘K has no key to live on. */
-        <div className="topbar">
-          <button
-            type="button"
-            className="ibtn topbar-menu"
-            aria-label={drawerOpen ? "Close the menu" : "Open the menu"}
-            aria-expanded={drawerOpen}
-            aria-controls="sidebar"
-            onClick={toggleSidebar}
-          >
-            <MenuIcon size={18} aria-hidden="true" />
-          </button>
-          <a
-            href="/"
-            className="topbar-home"
-            aria-label="Open the data folder's README"
-            onClick={(e) =>
-              spaClick(e, () => {
-                goHome();
-                void loadReadme();
-              })
-            }
-          >
-            <Logo size={22} />
-            {dataRepo && (
-              <span className="topbar-repo">{demo ? "demo-data" : repoDisplayName(dataRepo)}</span>
-            )}
-          </a>
-          <button
-            type="button"
-            className="ibtn"
-            aria-label="Search or run a command"
-            onClick={() => setPalette({ query: "" })}
-          >
-            <Search size={18} aria-hidden="true" />
-          </button>
-          {codeGen && canOpenAgentPane && (
-            <button
-              type="button"
-              className="ibtn"
-              aria-label="Coding agent pane"
-              aria-pressed={paneShown}
-              onClick={() => agentChat.togglePane()}
-            >
-              <Bot size={18} aria-hidden="true" />
-            </button>
-          )}
-          {/* Demo mode: the sandbox note sits under the bar here, since a
-              phone visitor may never open the drawer that holds it. */}
-          {demo && <div className="demo-banner topbar-banner">Demo — edits reset on refresh</div>}
-        </div>
-      )}
-      {compact && drawerOpen && (
-        <div className="drawer-backdrop" aria-hidden="true" onClick={() => setDrawerOpen(false)} />
-      )}
-      {sidebarCollapsed && !compact ? (
-        /* The rail (specs/ui/ui.feature.md "Design system"): the sidebar
-           folded to its icons — search, Home, the page tabs, and the way
-           back out. */
-        <aside className="rail">
-          {/* The logo is the home link, as the folder name is in the expanded
-              sidebar (app-startup.md "The data folder name links to the
-              README"); the one Expand sits at the foot, where the sidebar's
-              Collapse icon has its mirror. */}
-          <Tooltip label="Home (README)" keys="g h">
-            <a
-              href="/"
-              className="rail-btn rail-logo"
-              aria-label="Home"
-              onClick={(e) =>
-                spaClick(e, () => {
-                  goHome();
-                  void loadReadme();
-                })
-              }
-            >
-              <Logo size={24} />
-            </a>
-          </Tooltip>
-          <Tooltip label="Search or run a command" keys="mod+k">
-            <button
-              type="button"
-              className="rail-btn"
-              aria-label="Search or run a command"
-              onClick={() => setPalette({ query: "" })}
-            >
-              <Search size={16} aria-hidden="true" />
-            </button>
-          </Tooltip>
-          {/* The rail mirrors the sidebar's tab bar: the tabs in the
-              profile's order, lit the way the bar's tabs are (shownTab) — so
-              collapsing the sidebar never loses the tree. A tab with nothing
-              to open — an empty folder — has no icon on the rail. */}
-          {barTabs.filter(tabReachable).map((tab) => (
-            <Tooltip key={tab.id} label={tab.title} keys={tab.shortcut}>
-              <a
-                href={tabHref(tab)}
-                className={`rail-link${
-                  pluginView?.tab === tab.id || (!pluginView && shownTab === tab.id) ? " active" : ""
-                }`}
-                aria-label={tab.title}
-                onClick={(e) => spaClick(e, () => openTab(tab))}
-              >
-                <tab.icon size={16} aria-hidden="true" />
-              </a>
-            </Tooltip>
-          ))}
-          <div className="rail-bottom">
-            <PomodoroBar
-              compact
-              onExpand={toggleSidebar}
-              settingsOpen={pomodoroSettings}
-              onSettingsOpen={setPomodoroSettings}
-            />
-            {canHideEditor && (
-              <Tooltip label={editorOff ? "Show the editor pane" : "Hide the editor pane"} keys="\">
-                <button
-                  type="button"
-                  className={`rail-btn${editorOff ? "" : " active"}`}
-                  aria-label="Editor pane"
-                  aria-pressed={!editorOff}
-                  onClick={toggleEditor}
-                >
-                  <PanelRight size={16} aria-hidden="true" />
-                </button>
-              </Tooltip>
-            )}
-            {codeGen && canOpenAgentPane && (
-              <Tooltip label={pane.open ? "Close the coding agent pane" : "Open the coding agent pane"} keys="]">
-                <button
-                  type="button"
-                  className={`rail-btn${paneShown ? " active" : ""}`}
-                  aria-label="Coding agent pane"
-                  aria-pressed={paneShown}
-                  onClick={() => agentChat.togglePane()}
-                >
-                  <Bot size={16} aria-hidden="true" />
-                </button>
-              </Tooltip>
-            )}
-            <Tooltip label="Expand the sidebar" keys="[">
-              <button type="button" className="rail-btn" aria-label="Expand the sidebar" onClick={toggleSidebar}>
-                <PanelLeftOpen size={16} aria-hidden="true" />
-              </button>
-            </Tooltip>
-            {/* The same user menu the sidebar's corner opens
-                (specs/user-info-settings.feature.md), not a shortcut to
-                Settings alone. */}
-            <span className="rail-user">
-              <Menu
-                open={userMenuOpen}
-                onClose={() => setUserMenuOpen(false)}
-                label="User menu"
-                className="user-menu"
-                containerSelector=".rail-user"
-                items={userMenuItems}
-              />
-              <Tooltip label={user ? (user.login ?? user.username) : "User menu"}>
-                <button
-                  type="button"
-                  className="rail-btn"
-                  aria-label="User menu"
-                  aria-haspopup="menu"
-                  aria-expanded={userMenuOpen}
-                  onClick={() => setUserMenuOpen((o) => !o)}
-                >
-                  <span className="avatar" aria-hidden="true">
-                    {initials}
-                  </span>
-                </button>
-              </Tooltip>
-            </span>
-          </div>
-        </aside>
-      ) : (
-      <aside
-        id="sidebar"
-        className={compact ? `drawer${drawerOpen ? " open" : ""}` : undefined}
-        ref={drawerTrapRef}
-        aria-hidden={compact && !drawerOpen ? true : undefined}
-        // Following any link in the drawer — a feature, a page,
-        // Home — is leaving it; buttons that only change the drawer itself
-        // (folder twists, the filter, the tabs) keep it open.
-        onClickCapture={(e) => {
-          if (compact && e.target instanceof Element && e.target.closest("a[href]"))
-            setDrawerOpen(false);
-        }}
-      >
-        <header>
-          {/* The data repo name leads the header, which costs a single row of
-              vertical space. It is the home link (app-startup.md
-              "The data folder name links to the README"): a real `/` anchor,
-              so a plain click opens the README editor and right-click → Copy
-              Link works. */}
-          <div className="repo-row">
-            {codeRepoDir !== null ? (
-              /* A code repository (specs/app/code-repo-mode.feature.md): its
-                 name is the home link, which opens its README.md. */
-              <a
-                href="/"
-                className="repo-name"
-                title={`${codeRepoDir} — a code repository`}
-                aria-label="Open the code repository's home"
-                onClick={(e) => spaClick(e, goHome)}
-              >
-                {repoDisplayName(codeRepoDir)}
-              </a>
-            ) : dataRepo && (
-              <a
-                href="/"
-                className="repo-name"
-                title={`${dataRepo} — open its README`}
-                aria-label="Open the data folder's README"
-                onClick={(e) => spaClick(e, goHome)}
-              >
-                {/* The demo's working copy is a numbered throwaway folder —
-                    show the dataset's name, not the generation counter. */}
-                {demo ? "demo-data" : repoDisplayName(dataRepo)}
-              </a>
-            )}
-            {/* Recent folder list (specs/ui/ui.feature.md "Recent folder
-                list"): a small ▾ next to the folder name drops down the
-                folders used before (up to 10, most recent first), by name
-                only — the full path is the tooltip. Picking one switches
-                to it and opens its README; the current folder is ticked,
-                and picking it just goes home to the README. */}
-            {/* The read-only site's projects (src/frontend/readOnlyProject.ts):
-                where it shows more than one, the ▾ lists them by name, the
-                repository as the tooltip, the visitor's ticked; picking one
-                opens its home. */}
-            {readOnly && readOnlyProjects.length > 1 && (
-              <div className="repo-recent">
-                <button
-                  type="button"
-                  className="ibtn repo-recent-toggle"
-                  title="Projects"
-                  aria-label="Projects"
-                  aria-haspopup="menu"
-                  aria-expanded={recentMenuOpen}
-                  onClick={() => setRecentMenuOpen((o) => !o)}
-                >
-                  <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
-                    <path
-                      d="M1.5 3.5 5 7l3.5-3.5"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </button>
-                <Menu
-                  open={recentMenuOpen}
-                  onClose={() => setRecentMenuOpen(false)}
-                  label="Projects"
-                  className="repo-recent-menu"
-                  containerSelector=".repo-recent"
-                  items={readOnlyProjects.map(
-                    (project): MenuItem => ({
-                      id: `project:${project.id}`,
-                      label: project.id,
-                      icon: <FolderKindIcon kind="spec" size={13} />,
-                      title: project.repo,
-                      checked: project.id === readOnlyProject,
-                      onSelect: () => {
-                        if (project.id !== readOnlyProject) chooseProject(project.id);
-                        else {
-                          goHome();
-                          void loadReadme();
-                        }
-                      },
-                    }),
-                  )}
-                />
-              </div>
-            )}
-            {(dataRepo || codeRepoDir !== null) && !demo && !readOnly && (
-              <div className="repo-recent">
-                <button
-                  type="button"
-                  className="ibtn repo-recent-toggle"
-                  title="Recent folders"
-                  aria-label="Recent folders"
-                  aria-haspopup="menu"
-                  aria-expanded={recentMenuOpen}
-                  disabled={settingRepo}
-                  onClick={() => setRecentMenuOpen((o) => !o)}
-                >
-                  <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
-                    <path
-                      d="M1.5 3.5 5 7l3.5-3.5"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </button>
-                <Menu
-                  open={recentMenuOpen}
-                  onClose={() => setRecentMenuOpen(false)}
-                  label="Recent folders"
-                  className="repo-recent-menu"
-                  containerSelector=".repo-recent"
-                  items={[
-                    // Every kind of folder, the newest ten, each marked
-                    // by its kind's icon (specs/app/spec-folders.feature.md
-                    // "Manage specification folders").
-                    ...recentFolders.slice(0, 10).map((folder): MenuItem => {
-                      const current =
-                        folder.kind === "code" ? folder.path === codeRepoDir : codeRepoDir === null && folder.path === dataRepo;
-                      return {
-                        id: `${folder.kind}:${folder.path}`,
-                        label: repoDisplayName(folder.path),
-                        icon: <FolderKindIcon kind={folder.kind} size={13} />,
-                        title: `${FOLDER_KIND_LABEL[folder.kind]} — ${folder.path}`,
-                        checked: current,
-                        onSelect: () => {
-                          if (folder.kind === "code") void openCodeRepo(folder.path);
-                          else if (current) {
-                            goHome();
-                            void loadReadme();
-                          } else {
-                            void switchRepo(folder.path);
-                          }
-                        },
-                      };
-                    }),
-                    // Manage specification folders
-                    // (specs/app/spec-folders.feature.md): the list as a
-                    // dialog, where folders can be opened, removed or added.
-                    {
-                      id: "manage-folders",
-                      label: "Manage folders…",
-                      icon: <FolderInput size={13} />,
-                      onSelect: () => setFoldersOpen(true),
-                    },
-                    // Another window, which asks for its folder
-                    // (specs/app/multiple-windows.feature.md "Opening a
-                    // window") — the desktop app's alone.
-                    ...(canOpenWindows
-                      ? [
-                          {
-                            id: "new-window",
-                            label: "New window",
-                            icon: <AppWindow size={13} />,
-                            onSelect: () => void openInNewWindow(),
-                          } satisfies MenuItem,
-                        ]
-                      : []),
-                  ]}
-                />
-              </div>
-            )}
-            {/* Sync (specs/ui/ui.feature.md "Main page"): immediate data
-                reload, next to the folder it reloads. Disabled with a progress
-                label while running, the icon turning; no status line at the
-                bottom of the page. Up here it works from the home view too, not
-                only with a feature open. */}
-            {!demo && !readOnly && codeRepoDir === null && (
-              <Tooltip
-                label={
-                  syncing
-                    ? "Syncing…"
-                    : repoReadOnly !== null
-                      ? "Sync — pull the data folder; it is read only, so nothing is pushed"
-                      : pushFailing && syncProblem !== null
-                      ? `${syncProblemMessage(syncProblem)}. Click to try again.`
-                      : "Sync — pull the data folder and push saved changes"
-                }
-              >
-                <button
-                  type="button"
-                  className={pushFailing ? "ibtn repo-sync failing" : "ibtn repo-sync"}
-                  aria-label={
-                    syncing
-                      ? "Syncing…"
-                      : pushFailing
-                        ? "Sync — saved changes are not being pushed"
-                        : "Sync"
-                  }
-                  disabled={syncing}
-                  onClick={() => void syncNow()}
-                >
-                  {/* While pushes fail the icon itself says so, struck
-                      through — the tooltip gives the reason. */}
-                  {pushFailing && !syncing ? (
-                    <RefreshCwOff size={14} className="sync-icon" aria-hidden="true" />
-                  ) : (
-                    <RefreshCw
-                      size={14}
-                      className={syncing ? "sync-icon spinning" : "sync-icon"}
-                      aria-hidden="true"
-                    />
-                  )}
-                </button>
-              </Tooltip>
-            )}
-          </div>
-          {/* The Pomodoro (specs/app/pomodoro.feature.md): its icon lives here,
-              left of the pane toggles, and opens the bar beneath the header.
-              Nothing renders while the Settings switch is off. */}
-          <PomodoroToggle />
-          {/* The pane toggles sit in the order their panes do: the editor
-              first, then the coding agent's Bot to its right. */}
-          {canHideEditor && (
-            <Tooltip label={editorOff ? "Show the editor pane" : "Hide the editor pane"} keys="\">
-              <button
-                type="button"
-                className={`ibtn${editorOff ? "" : " active"}`}
-                aria-label="Editor pane"
-                aria-pressed={!editorOff}
-                onClick={toggleEditor}
-              >
-                <PanelRight size={15} aria-hidden="true" />
-              </button>
-            </Tooltip>
-          )}
-          {codeGen && canOpenAgentPane && (
-            <Tooltip label={pane.open ? "Close the coding agent pane" : "Open the coding agent pane"} keys="]">
-              <button
-                type="button"
-                className={`ibtn${paneShown ? " active" : ""}`}
-                aria-label="Coding agent pane"
-                aria-pressed={paneShown}
-                onClick={() => agentChat.togglePane()}
-              >
-                <Bot size={15} aria-hidden="true" />
-              </button>
-            </Tooltip>
-          )}
-          <Tooltip label={compact ? "Close the menu" : "Collapse the sidebar"} keys="[">
-            <button
-              type="button"
-              className="ibtn collapse-btn"
-              aria-label={compact ? "Close the menu" : "Collapse the sidebar"}
-              onClick={toggleSidebar}
-            >
-              {compact ? (
-                <X size={16} aria-hidden="true" />
-              ) : (
-                <PanelLeftClose size={15} aria-hidden="true" />
-              )}
-            </button>
-          </Tooltip>
-        </header>
-        {/* Demo mode: say what the sandbox does — edits are ephemeral. On a
-            small screen the top bar carries the note instead. */}
-        {demo && !compact && <div className="demo-banner">Demo — edits reset on refresh</div>}
-        {/* A read-only folder (src/frontend/repoReadOnly.ts) says so under
-            the header for as long as it is — a line of its own, so the
-            folder's name keeps its room — and the line opens the dialog
-            with the reason and the way back. */}
-        {repoReadOnly !== null && !readOnly && codeRepoDir === null && (
-          <Tooltip label={readOnlySummary(repoReadOnly)}>
-            <button type="button" className="repo-read-only" onClick={() => setReadOnlyDialogOpen(true)}>
-              <Lock size={12} aria-hidden="true" />
-              <span>Read only</span>
-              <span className="repo-read-only-why">— why?</span>
-            </button>
-          </Tooltip>
-        )}
-        {/* Search (specs/search.feature.md): top-left, under the header so the
-            macOS drag region above it stays draggable. The field opens the
-            command palette, where the results are. */}
-        <div className="sidebar-search">
-          <button
-            type="button"
-            className="sidebar-search-btn"
-            aria-label="Search or run a command"
-            onClick={() => setPalette({ query: "" })}
-          >
-            <Search size={14} className="search-icon" aria-hidden="true" />
-            <span>Search or run a command…</span>
-            <kbd>{IS_MAC ? "⌘K" : "Ctrl K"}</kbd>
-          </button>
-        </div>
-        {/* The Pomodoro bar (specs/app/pomodoro.feature.md): the pane the
-            header's timer icon opens, right under the icon that opens it.
-            Renders nothing while the Settings switch is off or the bar is
-            closed (src/frontend/pomodoroPref.ts). */}
-        <PomodoroBar settingsOpen={pomodoroSettings} onSettingsOpen={setPomodoroSettings} />
-        {/* Sidebar tabs (specs/app/roadmap.feature.md, specs/app/tasks.feature
-            .md): each mounted plugin's — Specs, the feature tree, and each
-            special folder the Plugins page shows among them — in the
-            profile's order (specs/app/plugins.feature.md). The bar only
-            shows once there is something to switch to — one tab is no tab
-            bar. */}
-        {barTabs.length > 1 && (
-          <div className="side-tabs" role="tablist" aria-label="Sidebar">
-            {/* Each tab's tooltip carries its `g` chord, as the rail's icons
-                do. */}
-            {barTabs.map((tab) => (
-              <Tooltip key={tab.id} label={tab.title} keys={tab.shortcut}>
-                <button
-                  type="button"
-                  role="tab"
-                  id={`side-tab-${tab.id}`}
-                  aria-selected={shownTab === tab.id}
-                  aria-controls={`side-panel-${tab.id}`}
-                  className={shownTab === tab.id ? "active" : ""}
-                  onClick={() => {
-                    selectSidebarTab(tab.id);
-                    // The tab is the module's door: with none of its views
-                    // open yet, it opens the tab's home view — unless the tab
-                    // is a list to pick from (a special folder's pages, or
-                    // the feature tree).
-                    if (
-                      tab.opensOnSelect !== false &&
-                      tab.route.home !== null &&
-                      pluginViewRef.current?.tab !== tab.id
-                    ) {
-                      openPluginView(tab.id, tab.route.home, { push: true });
-                    }
-                  }}
-                >
-                  <tab.icon size={14} aria-hidden="true" /> <span className="side-tab-label">{tab.title}</span>
-                </button>
-              </Tooltip>
-            ))}
-          </div>
-        )}
-        {/* Every plugin switched off in this folder, Specs included: the
-            sidebar says where they are switched on. */}
-        {!loading && barTabs.length === 0 && codeRepoDir === null && (
-          <p className="empty">
-            No plugin is on in this folder.{" "}
-            <a href="/plugins" onClick={(e) => spaClick(e, () => openAppPage("plugins"))}>
-              Open Plugins
-            </a>{" "}
-            to switch one on.
-          </p>
-        )}
-        {/* The shown tab's own sidebar (specs/app/plugins.feature.md) — the
-            feature tree, a special folder's page list or the Tests tab's
-            plans and case library, say. */}
-        {barTabs
-          .filter((tab) => tab.id === shownTab)
-          .map((tab) => (
-            <tab.Sidebar
-              key={tab.id}
-              view={pluginView?.tab === tab.id ? pluginView.view : null}
-              app={tabApp}
-              navigate={navigateIn(tab.id)}
-            />
-          ))}
-        {/* specs/app/extract-specs-from-code.feature.md: while the open
-            folder's specs are drafted from its code — and until the run is
-            dismissed — a pill says how far it is. */}
-        <ExtractionProgress
-          extraction={extraction}
-          onOpenFeature={(file) => void openFeature(file, { push: true })}
-          onPublish={() => setPublishOpen(true)}
-          onLinkTests={() => setLinkTestsOpen(true)}
-          onError={(message) => toast.error(message)}
-        />
-        {/* specs/user-info-settings.feature.md: the lower left corner shows the
-            current user; its menu holds User info, Settings and Plugins. */}
-        <div className="user-corner">
-          <Menu
-            open={userMenuOpen}
-            onClose={() => setUserMenuOpen(false)}
-            label="User menu"
-            className="user-menu"
-            containerSelector=".user-corner"
-            // The read-only site's visitor has no settings, plugins or logs:
-            // the menu offers the release notes and the app's source alone.
-            items={userMenuItems}
-          />
-          <div className="user-row">
-            <button
-              type="button"
-              className="user-chip"
-              aria-haspopup="menu"
-              aria-expanded={userMenuOpen}
-              onClick={() => setUserMenuOpen((o) => !o)}
-            >
-              <span className="avatar" aria-hidden="true">
-                {initials}
-              </span>
-              <span className="user-name">{user ? (user.login ?? user.username) : "…"}</span>
-              {/* The build on screen, right of the user name. */}
-              {appVersion && !canUpdate && (
-                <VersionChip version={appVersion} notesUnseen={notesUnseen} updateAvailable={updateAvailable} />
-              )}
-            </button>
-            {/* Check for Updates… (specs/app/app-updates.feature.md): on the
-                desktop app the version is its own button, opening the Updates
-                page — beside the user chip, since a button cannot hold one. */}
-            {appVersion && canUpdate && (
-              <VersionChip
-                version={appVersion}
-                notesUnseen={notesUnseen}
-                updateAvailable={updateAvailable}
-                onOpen={() => {
-                  setUserMenuOpen(false);
-                  setDrawerOpen(false);
-                  openUpdates();
-                }}
-              />
-            )}
-          </div>
-        </div>
-      </aside>
-      )}
-      {/* Divider (specs/ui/ui.feature.md "Sidebar resize"): drag to resize the
-          left pane, double-click to restore the default width. Gone while
-          the sidebar is a rail, and on one-pane screens. */}
-      {!sidebarCollapsed && !compact && (
-      <div
-        className="sidebar-divider"
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize sidebar"
-        aria-valuemin={SIDEBAR_MIN}
-        aria-valuemax={Math.max(SIDEBAR_MIN, Math.round(window.innerWidth * 0.6))}
-        aria-valuenow={sidebarWidth}
-        tabIndex={0}
-        onPointerDown={(e) => {
-          e.preventDefault();
-          e.currentTarget.setPointerCapture(e.pointerId);
-          setResizingSidebar(true);
-        }}
-        onPointerMove={(e) => {
-          if (resizingSidebar) setSidebarWidth(clampSidebarWidth(e.clientX));
-        }}
-        onPointerUp={(e) => {
-          if (!resizingSidebar) return;
-          setResizingSidebar(false);
-          storeSidebarWidth(clampSidebarWidth(e.clientX));
-        }}
-        onLostPointerCapture={() => setResizingSidebar(false)}
-        onDoubleClick={() => {
-          setSidebarWidth(SIDEBAR_DEFAULT);
-          storeSidebarWidth(SIDEBAR_DEFAULT);
-        }}
-        onKeyDown={(e) => {
-          const delta = e.key === "ArrowRight" ? 16 : e.key === "ArrowLeft" ? -16 : 0;
-          if (delta === 0) return;
-          e.preventDefault();
-          const w = clampSidebarWidth(sidebarWidth + delta);
-          setSidebarWidth(w);
-          storeSidebarWidth(w);
-        }}
-      />
-      )}
-      {/* Hidden ("\", specs/ui/ui.feature.md "Hide the editor pane") so the
-          coding agent pane can take the window — not rendered rather than
-          hidden in CSS, the way the agent pane itself is gated. */}
-      {!editorOff && (
-      <section className="editor" aria-busy={featureLoading || undefined}>
-        {/* A render error in one view shows a note with a way back, never a
-            blank window; the key follows the page so navigating resets it. */}
-        <ErrorBoundary
-          key={appPage ?? selected ?? pluginViewKey ?? "home"}
-        >
-        {appPageShown === "settings" ? (
-          renderSettingsPage()
-        ) : appPageShown === "project-settings" ? (
-          /* Project settings (specs/app/project-settings.feature.md): the
-             data repo's project-settings.yaml — code repos with their specs
-             symlinks, the default, the members, the authorship switch. */
-          <ProjectSettingsPage
-            key={projectSettingsKey}
-            prompt={prompt}
-            confirm={confirm}
-            browseFolder={canChooseFolder ? () => chooseFolderNative("code-repo") : undefined}
-            onChanged={() => void loadFeatures()}
-            onClose={closeAppPage}
-          />
-        ) : appPageShown === "plugins" ? (
-          /* Plugins (specs/app/plugins.feature.md): its own page, opened
-             from the user menu — the plugins on in tab order, the ones off,
-             the folders they load from and the marketplaces. */
-          <PluginsPage
-            initialWanted={pluginsWanted}
-            plugins={plugins}
-            loadErrors={pluginLoadErrors}
-            hasIssuesRepo={Boolean(issuesRepo)}
-            demo={demo}
-            sources={pluginSources}
-            marketplaces={pluginMarketplaces}
-            error={settingsError}
-            setEnabled={setPluginEnabled}
-            move={movePlugin}
-            patchSettings={patchSettings}
-            prompt={prompt}
-            confirm={confirm}
-            browseFolder={canChooseFolder ? () => chooseFolderNative() : undefined}
-            onChanged={refreshPlugins}
-            onOpenSettings={openSettings}
-            onClose={closeAppPage}
-          />
-        ) : appPageShown === "observability" ? (
-          /* Observability: browse and search the app's own logs, and set
-             how verbose they are. */
-          <ObservabilityPage
-            key={observabilityComponent}
-            onClose={closeAppPage}
-            copyText={copyText}
-            initialComponent={observabilityComponent}
-            confirm={confirm}
-          />
-        ) : appPageShown === "data" ? (
-          /* Data: the Automerge store as tables, documents and history. */
-          <DataPage onClose={closeAppPage} />
-        ) : appPageShown === "images" ? (
-          /* Images: every stored image with where it is used; delete the unreferenced. */
-          <ImagesPage onClose={closeAppPage} confirm={confirm} demo={demo} />
-        ) : appPageShown === "whats-new" ? (
-          /* What's new: every release's notes, the installed one marked. */
-          <WhatsNewPage installed={appVersion} onClose={closeAppPage} />
-        ) : appPageShown === "updates" ? (
-          /* Updates: the newest release, and the desktop app installing it. */
-          <UpdatesPage onClose={closeAppPage} />
-        ) : locked && editing && selected && feature ? (
+  // The open feature's page, its scenario's page or the editor: the Specs
+  // tab's pane, built here and handed to the tab like the tree.
+  const specsPane = (
+    locked && editing && selected && feature ? (
           /* The read-only site: a scenario's page is a page, not the editor —
              its trail, the way to its neighbours, and the scenario rendered
              with its links. */
@@ -13802,9 +13090,750 @@ export function App() {
               )}
             </div>
           </>
-        ) : selected && !feature && featureLoading ? (
+        ) : (
           /* A feature opened by deep link, still on its way. */
           <PageSkeleton cards={3} />
+        )
+  );
+  // The window title's page part for the open feature (specs/ui/
+  // navigation.feature.md): the feature, and the scenario open in the pane.
+  const specsTitle =
+    feature && selected
+      ? paneScenario
+        ? `${feature.name || titleFromFileName(selected)} · ${paneScenario.name} v${paneScenario.version}`
+        : feature.name || titleFromFileName(selected)
+      : null;
+  provideSpecsHost({
+    sidebar: specsSidebar,
+    pane: specsPane,
+    title: specsTitle,
+  });
+
+  return (
+    <main
+      className={`layout${resizingSidebar || resizingAgent ? " resizing" : ""}${sidebarCollapsed && !compact ? " collapsed" : ""}${compact ? " compact" : ""}${paneShown && !compact ? " agent-open" : ""}${editorOff ? " editor-hidden" : ""}${locked ? " read-only" : ""}`}
+      style={{ "--sidebar-w": `${sidebarWidth}px`, "--agent-w": `${pane.width}px` } as CSSProperties}
+    >
+      {compact && (
+        /* One pane: a top bar stands in for the sidebar's header — the menu
+           button opens the drawer, the mark is the way home, and search opens
+           the palette, since ⌘K has no key to live on. */
+        <div className="topbar">
+          <button
+            type="button"
+            className="ibtn topbar-menu"
+            aria-label={drawerOpen ? "Close the menu" : "Open the menu"}
+            aria-expanded={drawerOpen}
+            aria-controls="sidebar"
+            onClick={toggleSidebar}
+          >
+            <MenuIcon size={18} aria-hidden="true" />
+          </button>
+          <a
+            href="/"
+            className="topbar-home"
+            aria-label="Open the data folder's README"
+            onClick={(e) =>
+              spaClick(e, () => {
+                goHome();
+                void loadReadme();
+              })
+            }
+          >
+            <Logo size={22} />
+            {dataRepo && (
+              <span className="topbar-repo">{demo ? "demo-data" : repoDisplayName(dataRepo)}</span>
+            )}
+          </a>
+          <button
+            type="button"
+            className="ibtn"
+            aria-label="Search or run a command"
+            onClick={() => setPalette({ query: "" })}
+          >
+            <Search size={18} aria-hidden="true" />
+          </button>
+          {codeGen && canOpenAgentPane && (
+            <button
+              type="button"
+              className="ibtn"
+              aria-label="Coding agent pane"
+              aria-pressed={paneShown}
+              onClick={() => agentChat.togglePane()}
+            >
+              <Bot size={18} aria-hidden="true" />
+            </button>
+          )}
+          {/* Demo mode: the sandbox note sits under the bar here, since a
+              phone visitor may never open the drawer that holds it. */}
+          {demo && <div className="demo-banner topbar-banner">Demo — edits reset on refresh</div>}
+        </div>
+      )}
+      {compact && drawerOpen && (
+        <div className="drawer-backdrop" aria-hidden="true" onClick={() => setDrawerOpen(false)} />
+      )}
+      {sidebarCollapsed && !compact ? (
+        /* The rail (specs/ui/ui.feature.md "Design system"): the sidebar
+           folded to its icons — search, Home, the page tabs, and the way
+           back out. */
+        <aside className="rail">
+          {/* The logo is the home link, as the folder name is in the expanded
+              sidebar (app-startup.md "The data folder name links to the
+              README"); the one Expand sits at the foot, where the sidebar's
+              Collapse icon has its mirror. */}
+          <Tooltip label="Home (README)" keys="g h">
+            <a
+              href="/"
+              className="rail-btn rail-logo"
+              aria-label="Home"
+              onClick={(e) =>
+                spaClick(e, () => {
+                  goHome();
+                  void loadReadme();
+                })
+              }
+            >
+              <Logo size={24} />
+            </a>
+          </Tooltip>
+          <Tooltip label="Search or run a command" keys="mod+k">
+            <button
+              type="button"
+              className="rail-btn"
+              aria-label="Search or run a command"
+              onClick={() => setPalette({ query: "" })}
+            >
+              <Search size={16} aria-hidden="true" />
+            </button>
+          </Tooltip>
+          {/* The rail mirrors the sidebar's tab bar: the tabs in the
+              profile's order, lit the way the bar's tabs are (shownTab) — so
+              collapsing the sidebar never loses the tree. A tab with nothing
+              to open — an empty folder — has no icon on the rail. */}
+          {barTabs.filter(tabReachable).map((tab) => (
+            <Tooltip key={tab.id} label={tab.title} keys={tab.shortcut}>
+              <a
+                href={tabHref(tab)}
+                className={`rail-link${
+                  pluginView?.tab === tab.id || (!pluginView && shownTab === tab.id) ? " active" : ""
+                }`}
+                aria-label={tab.title}
+                onClick={(e) => spaClick(e, () => openTab(tab))}
+              >
+                <tab.icon size={16} aria-hidden="true" />
+              </a>
+            </Tooltip>
+          ))}
+          <div className="rail-bottom">
+            <PomodoroBar
+              compact
+              onExpand={toggleSidebar}
+              settingsOpen={pomodoroSettings}
+              onSettingsOpen={setPomodoroSettings}
+            />
+            {canHideEditor && (
+              <Tooltip label={editorOff ? "Show the editor pane" : "Hide the editor pane"} keys="\">
+                <button
+                  type="button"
+                  className={`rail-btn${editorOff ? "" : " active"}`}
+                  aria-label="Editor pane"
+                  aria-pressed={!editorOff}
+                  onClick={toggleEditor}
+                >
+                  <PanelRight size={16} aria-hidden="true" />
+                </button>
+              </Tooltip>
+            )}
+            {codeGen && canOpenAgentPane && (
+              <Tooltip label={pane.open ? "Close the coding agent pane" : "Open the coding agent pane"} keys="]">
+                <button
+                  type="button"
+                  className={`rail-btn${paneShown ? " active" : ""}`}
+                  aria-label="Coding agent pane"
+                  aria-pressed={paneShown}
+                  onClick={() => agentChat.togglePane()}
+                >
+                  <Bot size={16} aria-hidden="true" />
+                </button>
+              </Tooltip>
+            )}
+            <Tooltip label="Expand the sidebar" keys="[">
+              <button type="button" className="rail-btn" aria-label="Expand the sidebar" onClick={toggleSidebar}>
+                <PanelLeftOpen size={16} aria-hidden="true" />
+              </button>
+            </Tooltip>
+            {/* The same user menu the sidebar's corner opens
+                (specs/user-info-settings.feature.md), not a shortcut to
+                Settings alone. */}
+            <span className="rail-user">
+              <Menu
+                open={userMenuOpen}
+                onClose={() => setUserMenuOpen(false)}
+                label="User menu"
+                className="user-menu"
+                containerSelector=".rail-user"
+                items={userMenuItems}
+              />
+              <Tooltip label={user ? (user.login ?? user.username) : "User menu"}>
+                <button
+                  type="button"
+                  className="rail-btn"
+                  aria-label="User menu"
+                  aria-haspopup="menu"
+                  aria-expanded={userMenuOpen}
+                  onClick={() => setUserMenuOpen((o) => !o)}
+                >
+                  <span className="avatar" aria-hidden="true">
+                    {initials}
+                  </span>
+                </button>
+              </Tooltip>
+            </span>
+          </div>
+        </aside>
+      ) : (
+      <aside
+        id="sidebar"
+        className={compact ? `drawer${drawerOpen ? " open" : ""}` : undefined}
+        ref={drawerTrapRef}
+        aria-hidden={compact && !drawerOpen ? true : undefined}
+        // Following any link in the drawer — a feature, a page,
+        // Home — is leaving it; buttons that only change the drawer itself
+        // (folder twists, the filter, the tabs) keep it open.
+        onClickCapture={(e) => {
+          if (compact && e.target instanceof Element && e.target.closest("a[href]"))
+            setDrawerOpen(false);
+        }}
+      >
+        <header>
+          {/* The data repo name leads the header, which costs a single row of
+              vertical space. It is the home link (app-startup.md
+              "The data folder name links to the README"): a real `/` anchor,
+              so a plain click opens the README editor and right-click → Copy
+              Link works. */}
+          <div className="repo-row">
+            {codeRepoDir !== null ? (
+              /* A code repository (specs/app/code-repo-mode.feature.md): its
+                 name is the home link, which opens its README.md. */
+              <a
+                href="/"
+                className="repo-name"
+                title={`${codeRepoDir} — a code repository`}
+                aria-label="Open the code repository's home"
+                onClick={(e) => spaClick(e, goHome)}
+              >
+                {repoDisplayName(codeRepoDir)}
+              </a>
+            ) : dataRepo && (
+              <a
+                href="/"
+                className="repo-name"
+                title={`${dataRepo} — open its README`}
+                aria-label="Open the data folder's README"
+                onClick={(e) => spaClick(e, goHome)}
+              >
+                {/* The demo's working copy is a numbered throwaway folder —
+                    show the dataset's name, not the generation counter. */}
+                {demo ? "demo-data" : repoDisplayName(dataRepo)}
+              </a>
+            )}
+            {/* Recent folder list (specs/ui/ui.feature.md "Recent folder
+                list"): a small ▾ next to the folder name drops down the
+                folders used before (up to 10, most recent first), by name
+                only — the full path is the tooltip. Picking one switches
+                to it and opens its README; the current folder is ticked,
+                and picking it just goes home to the README. */}
+            {/* The read-only site's projects (src/frontend/readOnlyProject.ts):
+                where it shows more than one, the ▾ lists them by name, the
+                repository as the tooltip, the visitor's ticked; picking one
+                opens its home. */}
+            {readOnly && readOnlyProjects.length > 1 && (
+              <div className="repo-recent">
+                <button
+                  type="button"
+                  className="ibtn repo-recent-toggle"
+                  title="Projects"
+                  aria-label="Projects"
+                  aria-haspopup="menu"
+                  aria-expanded={recentMenuOpen}
+                  onClick={() => setRecentMenuOpen((o) => !o)}
+                >
+                  <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+                    <path
+                      d="M1.5 3.5 5 7l3.5-3.5"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+                <Menu
+                  open={recentMenuOpen}
+                  onClose={() => setRecentMenuOpen(false)}
+                  label="Projects"
+                  className="repo-recent-menu"
+                  containerSelector=".repo-recent"
+                  items={readOnlyProjects.map(
+                    (project): MenuItem => ({
+                      id: `project:${project.id}`,
+                      label: project.id,
+                      icon: <FolderKindIcon kind="spec" size={13} />,
+                      title: project.repo,
+                      checked: project.id === readOnlyProject,
+                      onSelect: () => {
+                        if (project.id !== readOnlyProject) chooseProject(project.id);
+                        else {
+                          goHome();
+                          void loadReadme();
+                        }
+                      },
+                    }),
+                  )}
+                />
+              </div>
+            )}
+            {(dataRepo || codeRepoDir !== null) && !demo && !readOnly && (
+              <div className="repo-recent">
+                <button
+                  type="button"
+                  className="ibtn repo-recent-toggle"
+                  title="Recent folders"
+                  aria-label="Recent folders"
+                  aria-haspopup="menu"
+                  aria-expanded={recentMenuOpen}
+                  disabled={settingRepo}
+                  onClick={() => setRecentMenuOpen((o) => !o)}
+                >
+                  <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+                    <path
+                      d="M1.5 3.5 5 7l3.5-3.5"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+                <Menu
+                  open={recentMenuOpen}
+                  onClose={() => setRecentMenuOpen(false)}
+                  label="Recent folders"
+                  className="repo-recent-menu"
+                  containerSelector=".repo-recent"
+                  items={[
+                    // Every kind of folder, the newest ten, each marked
+                    // by its kind's icon (specs/app/spec-folders.feature.md
+                    // "Manage specification folders").
+                    ...recentFolders.slice(0, 10).map((folder): MenuItem => {
+                      const current =
+                        folder.kind === "code" ? folder.path === codeRepoDir : codeRepoDir === null && folder.path === dataRepo;
+                      return {
+                        id: `${folder.kind}:${folder.path}`,
+                        label: repoDisplayName(folder.path),
+                        icon: <FolderKindIcon kind={folder.kind} size={13} />,
+                        title: `${FOLDER_KIND_LABEL[folder.kind]} — ${folder.path}`,
+                        checked: current,
+                        onSelect: () => {
+                          if (folder.kind === "code") void openCodeRepo(folder.path);
+                          else if (current) {
+                            goHome();
+                            void loadReadme();
+                          } else {
+                            void switchRepo(folder.path);
+                          }
+                        },
+                      };
+                    }),
+                    // Manage specification folders
+                    // (specs/app/spec-folders.feature.md): the list as a
+                    // dialog, where folders can be opened, removed or added.
+                    {
+                      id: "manage-folders",
+                      label: "Manage folders…",
+                      icon: <FolderInput size={13} />,
+                      onSelect: () => setFoldersOpen(true),
+                    },
+                    // Another window, which asks for its folder
+                    // (specs/app/multiple-windows.feature.md "Opening a
+                    // window") — the desktop app's alone.
+                    ...(canOpenWindows
+                      ? [
+                          {
+                            id: "new-window",
+                            label: "New window",
+                            icon: <AppWindow size={13} />,
+                            onSelect: () => void openInNewWindow(),
+                          } satisfies MenuItem,
+                        ]
+                      : []),
+                  ]}
+                />
+              </div>
+            )}
+            {/* Sync (specs/ui/ui.feature.md "Main page"): immediate data
+                reload, next to the folder it reloads. Disabled with a progress
+                label while running, the icon turning; no status line at the
+                bottom of the page. Up here it works from the home view too, not
+                only with a feature open. */}
+            {!demo && !readOnly && codeRepoDir === null && (
+              <Tooltip
+                label={
+                  syncing
+                    ? "Syncing…"
+                    : repoReadOnly !== null
+                      ? "Sync — pull the data folder; it is read only, so nothing is pushed"
+                      : pushFailing && syncProblem !== null
+                      ? `${syncProblemMessage(syncProblem)}. Click to try again.`
+                      : "Sync — pull the data folder and push saved changes"
+                }
+              >
+                <button
+                  type="button"
+                  className={pushFailing ? "ibtn repo-sync failing" : "ibtn repo-sync"}
+                  aria-label={
+                    syncing
+                      ? "Syncing…"
+                      : pushFailing
+                        ? "Sync — saved changes are not being pushed"
+                        : "Sync"
+                  }
+                  disabled={syncing}
+                  onClick={() => void syncNow()}
+                >
+                  {/* While pushes fail the icon itself says so, struck
+                      through — the tooltip gives the reason. */}
+                  {pushFailing && !syncing ? (
+                    <RefreshCwOff size={14} className="sync-icon" aria-hidden="true" />
+                  ) : (
+                    <RefreshCw
+                      size={14}
+                      className={syncing ? "sync-icon spinning" : "sync-icon"}
+                      aria-hidden="true"
+                    />
+                  )}
+                </button>
+              </Tooltip>
+            )}
+          </div>
+          {/* The Pomodoro (specs/app/pomodoro.feature.md): its icon lives here,
+              left of the pane toggles, and opens the bar beneath the header.
+              Nothing renders while the Settings switch is off. */}
+          <PomodoroToggle />
+          {/* The pane toggles sit in the order their panes do: the editor
+              first, then the coding agent's Bot to its right. */}
+          {canHideEditor && (
+            <Tooltip label={editorOff ? "Show the editor pane" : "Hide the editor pane"} keys="\">
+              <button
+                type="button"
+                className={`ibtn${editorOff ? "" : " active"}`}
+                aria-label="Editor pane"
+                aria-pressed={!editorOff}
+                onClick={toggleEditor}
+              >
+                <PanelRight size={15} aria-hidden="true" />
+              </button>
+            </Tooltip>
+          )}
+          {codeGen && canOpenAgentPane && (
+            <Tooltip label={pane.open ? "Close the coding agent pane" : "Open the coding agent pane"} keys="]">
+              <button
+                type="button"
+                className={`ibtn${paneShown ? " active" : ""}`}
+                aria-label="Coding agent pane"
+                aria-pressed={paneShown}
+                onClick={() => agentChat.togglePane()}
+              >
+                <Bot size={15} aria-hidden="true" />
+              </button>
+            </Tooltip>
+          )}
+          <Tooltip label={compact ? "Close the menu" : "Collapse the sidebar"} keys="[">
+            <button
+              type="button"
+              className="ibtn collapse-btn"
+              aria-label={compact ? "Close the menu" : "Collapse the sidebar"}
+              onClick={toggleSidebar}
+            >
+              {compact ? (
+                <X size={16} aria-hidden="true" />
+              ) : (
+                <PanelLeftClose size={15} aria-hidden="true" />
+              )}
+            </button>
+          </Tooltip>
+        </header>
+        {/* Demo mode: say what the sandbox does — edits are ephemeral. On a
+            small screen the top bar carries the note instead. */}
+        {demo && !compact && <div className="demo-banner">Demo — edits reset on refresh</div>}
+        {/* A read-only folder (src/frontend/repoReadOnly.ts) says so under
+            the header for as long as it is — a line of its own, so the
+            folder's name keeps its room — and the line opens the dialog
+            with the reason and the way back. */}
+        {repoReadOnly !== null && !readOnly && codeRepoDir === null && (
+          <Tooltip label={readOnlySummary(repoReadOnly)}>
+            <button type="button" className="repo-read-only" onClick={() => setReadOnlyDialogOpen(true)}>
+              <Lock size={12} aria-hidden="true" />
+              <span>Read only</span>
+              <span className="repo-read-only-why">— why?</span>
+            </button>
+          </Tooltip>
+        )}
+        {/* Search (specs/search.feature.md): top-left, under the header so the
+            macOS drag region above it stays draggable. The field opens the
+            command palette, where the results are. */}
+        <div className="sidebar-search">
+          <button
+            type="button"
+            className="sidebar-search-btn"
+            aria-label="Search or run a command"
+            onClick={() => setPalette({ query: "" })}
+          >
+            <Search size={14} className="search-icon" aria-hidden="true" />
+            <span>Search or run a command…</span>
+            <kbd>{IS_MAC ? "⌘K" : "Ctrl K"}</kbd>
+          </button>
+        </div>
+        {/* The Pomodoro bar (specs/app/pomodoro.feature.md): the pane the
+            header's timer icon opens, right under the icon that opens it.
+            Renders nothing while the Settings switch is off or the bar is
+            closed (src/frontend/pomodoroPref.ts). */}
+        <PomodoroBar settingsOpen={pomodoroSettings} onSettingsOpen={setPomodoroSettings} />
+        {/* Sidebar tabs (specs/app/roadmap.feature.md, specs/app/tasks.feature
+            .md): each mounted plugin's — Specs, the feature tree, and each
+            special folder the Plugins page shows among them — in the
+            profile's order (specs/app/plugins.feature.md). The bar only
+            shows once there is something to switch to — one tab is no tab
+            bar. */}
+        {barTabs.length > 1 && (
+          <div className="side-tabs" role="tablist" aria-label="Sidebar">
+            {/* Each tab's tooltip carries its `g` chord, as the rail's icons
+                do. */}
+            {barTabs.map((tab) => (
+              <Tooltip key={tab.id} label={tab.title} keys={tab.shortcut}>
+                <button
+                  type="button"
+                  role="tab"
+                  id={`side-tab-${tab.id}`}
+                  aria-selected={shownTab === tab.id}
+                  aria-controls={`side-panel-${tab.id}`}
+                  className={shownTab === tab.id ? "active" : ""}
+                  onClick={() => {
+                    selectSidebarTab(tab.id);
+                    // The tab is the module's door: with none of its views
+                    // open yet, it opens the tab's home view — unless the tab
+                    // is a list to pick from (a special folder's pages, or
+                    // the feature tree).
+                    if (
+                      tab.opensOnSelect !== false &&
+                      tab.route.home !== null &&
+                      pluginViewRef.current?.tab !== tab.id
+                    ) {
+                      openPluginView(tab.id, tab.route.home, { push: true });
+                    }
+                  }}
+                >
+                  <tab.icon size={14} aria-hidden="true" /> <span className="side-tab-label">{tab.title}</span>
+                </button>
+              </Tooltip>
+            ))}
+          </div>
+        )}
+        {/* Every plugin switched off in this folder, Specs included: the
+            sidebar says where they are switched on. */}
+        {!loading && barTabs.length === 0 && codeRepoDir === null && (
+          <p className="empty">
+            No plugin is on in this folder.{" "}
+            <a href="/plugins" onClick={(e) => spaClick(e, () => openAppPage("plugins"))}>
+              Open Plugins
+            </a>{" "}
+            to switch one on.
+          </p>
+        )}
+        {/* The shown tab's own sidebar (specs/app/plugins.feature.md) — the
+            feature tree, a special folder's page list or the Tests tab's
+            plans and case library, say. */}
+        {barTabs
+          .filter((tab) => tab.id === shownTab)
+          .map((tab) => (
+            <tab.Sidebar
+              key={tab.id}
+              view={pluginView?.tab === tab.id ? pluginView.view : null}
+              app={tabApp}
+              navigate={navigateIn(tab.id)}
+            />
+          ))}
+        {/* specs/app/extract-specs-from-code.feature.md: while the open
+            folder's specs are drafted from its code — and until the run is
+            dismissed — a pill says how far it is. */}
+        <ExtractionProgress
+          extraction={extraction}
+          onOpenFeature={(file) => void openFeature(file, { push: true })}
+          onPublish={() => setPublishOpen(true)}
+          onLinkTests={() => setLinkTestsOpen(true)}
+          onError={(message) => toast.error(message)}
+        />
+        {/* specs/user-info-settings.feature.md: the lower left corner shows the
+            current user; its menu holds User info, Settings and Plugins. */}
+        <div className="user-corner">
+          <Menu
+            open={userMenuOpen}
+            onClose={() => setUserMenuOpen(false)}
+            label="User menu"
+            className="user-menu"
+            containerSelector=".user-corner"
+            // The read-only site's visitor has no settings, plugins or logs:
+            // the menu offers the release notes and the app's source alone.
+            items={userMenuItems}
+          />
+          <div className="user-row">
+            <button
+              type="button"
+              className="user-chip"
+              aria-haspopup="menu"
+              aria-expanded={userMenuOpen}
+              onClick={() => setUserMenuOpen((o) => !o)}
+            >
+              <span className="avatar" aria-hidden="true">
+                {initials}
+              </span>
+              <span className="user-name">{user ? (user.login ?? user.username) : "…"}</span>
+              {/* The build on screen, right of the user name. */}
+              {appVersion && !canUpdate && (
+                <VersionChip version={appVersion} notesUnseen={notesUnseen} updateAvailable={updateAvailable} />
+              )}
+            </button>
+            {/* Check for Updates… (specs/app/app-updates.feature.md): on the
+                desktop app the version is its own button, opening the Updates
+                page — beside the user chip, since a button cannot hold one. */}
+            {appVersion && canUpdate && (
+              <VersionChip
+                version={appVersion}
+                notesUnseen={notesUnseen}
+                updateAvailable={updateAvailable}
+                onOpen={() => {
+                  setUserMenuOpen(false);
+                  setDrawerOpen(false);
+                  openUpdates();
+                }}
+              />
+            )}
+          </div>
+        </div>
+      </aside>
+      )}
+      {/* Divider (specs/ui/ui.feature.md "Sidebar resize"): drag to resize the
+          left pane, double-click to restore the default width. Gone while
+          the sidebar is a rail, and on one-pane screens. */}
+      {!sidebarCollapsed && !compact && (
+      <div
+        className="sidebar-divider"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize sidebar"
+        aria-valuemin={SIDEBAR_MIN}
+        aria-valuemax={Math.max(SIDEBAR_MIN, Math.round(window.innerWidth * 0.6))}
+        aria-valuenow={sidebarWidth}
+        tabIndex={0}
+        onPointerDown={(e) => {
+          e.preventDefault();
+          e.currentTarget.setPointerCapture(e.pointerId);
+          setResizingSidebar(true);
+        }}
+        onPointerMove={(e) => {
+          if (resizingSidebar) setSidebarWidth(clampSidebarWidth(e.clientX));
+        }}
+        onPointerUp={(e) => {
+          if (!resizingSidebar) return;
+          setResizingSidebar(false);
+          storeSidebarWidth(clampSidebarWidth(e.clientX));
+        }}
+        onLostPointerCapture={() => setResizingSidebar(false)}
+        onDoubleClick={() => {
+          setSidebarWidth(SIDEBAR_DEFAULT);
+          storeSidebarWidth(SIDEBAR_DEFAULT);
+        }}
+        onKeyDown={(e) => {
+          const delta = e.key === "ArrowRight" ? 16 : e.key === "ArrowLeft" ? -16 : 0;
+          if (delta === 0) return;
+          e.preventDefault();
+          const w = clampSidebarWidth(sidebarWidth + delta);
+          setSidebarWidth(w);
+          storeSidebarWidth(w);
+        }}
+      />
+      )}
+      {/* Hidden ("\", specs/ui/ui.feature.md "Hide the editor pane") so the
+          coding agent pane can take the window — not rendered rather than
+          hidden in CSS, the way the agent pane itself is gated. */}
+      {!editorOff && (
+      <section className="editor" aria-busy={featureLoading || undefined}>
+        {/* A render error in one view shows a note with a way back, never a
+            blank window; the key follows the page so navigating resets it. */}
+        <ErrorBoundary
+          key={appPage ?? selected ?? pluginViewKey ?? "home"}
+        >
+        {appPageShown === "settings" ? (
+          renderSettingsPage()
+        ) : appPageShown === "project-settings" ? (
+          /* Project settings (specs/app/project-settings.feature.md): the
+             data repo's project-settings.yaml — code repos with their specs
+             symlinks, the default, the members, the authorship switch. */
+          <ProjectSettingsPage
+            key={projectSettingsKey}
+            prompt={prompt}
+            confirm={confirm}
+            browseFolder={canChooseFolder ? () => chooseFolderNative("code-repo") : undefined}
+            onChanged={() => void loadFeatures()}
+            onClose={closeAppPage}
+          />
+        ) : appPageShown === "plugins" ? (
+          /* Plugins (specs/app/plugins.feature.md): its own page, opened
+             from the user menu — the plugins on in tab order, the ones off,
+             the folders they load from and the marketplaces. */
+          <PluginsPage
+            initialWanted={pluginsWanted}
+            plugins={plugins}
+            loadErrors={pluginLoadErrors}
+            hasIssuesRepo={Boolean(issuesRepo)}
+            demo={demo}
+            sources={pluginSources}
+            marketplaces={pluginMarketplaces}
+            error={settingsError}
+            setEnabled={setPluginEnabled}
+            move={movePlugin}
+            patchSettings={patchSettings}
+            prompt={prompt}
+            confirm={confirm}
+            browseFolder={canChooseFolder ? () => chooseFolderNative() : undefined}
+            onChanged={refreshPlugins}
+            onOpenSettings={openSettings}
+            onClose={closeAppPage}
+          />
+        ) : appPageShown === "observability" ? (
+          /* Observability: browse and search the app's own logs, and set
+             how verbose they are. */
+          <ObservabilityPage
+            key={observabilityComponent}
+            onClose={closeAppPage}
+            copyText={copyText}
+            initialComponent={observabilityComponent}
+            confirm={confirm}
+          />
+        ) : appPageShown === "data" ? (
+          /* Data: the Automerge store as tables, documents and history. */
+          <DataPage onClose={closeAppPage} />
+        ) : appPageShown === "images" ? (
+          /* Images: every stored image with where it is used; delete the unreferenced. */
+          <ImagesPage onClose={closeAppPage} confirm={confirm} demo={demo} />
+        ) : appPageShown === "whats-new" ? (
+          /* What's new: every release's notes, the installed one marked. */
+          <WhatsNewPage installed={appVersion} onClose={closeAppPage} />
+        ) : appPageShown === "updates" ? (
+          /* Updates: the newest release, and the desktop app installing it. */
+          <UpdatesPage onClose={closeAppPage} />
         ) : pluginView && activeTab ? (
           /* A plugin's view (specs/app/plugins.feature.md) — a roadmap page,
              a task, or the test management module's plans, cases and runs,
@@ -13910,16 +13939,11 @@ export function App() {
           ghostty={ghosttyOn && !demo && !hosted}
           codeRepoOpen={codeRepoDir !== null}
           // What the main pane shows goes with a message by default: the
-          // open feature, or the Files tab's file (both relative to the
-          // open folder). A plugin's other views and the app's pages name none.
+          // file the open view names (src/plugins/client/tabs.ts `current`)
+          // — the open feature, or the Files tab's file, both relative to
+          // the open folder. Other views and the app's pages name none.
           current={
-            pluginView
-              ? pluginView.tab === FILES_TAB
-                ? (pluginView.view as FilesView).path
-                : null
-              : appPage
-                ? null
-                : selected
+            !appPage && pluginView && activeTab?.current ? activeTab.current(pluginView.view) : null
           }
           browseFolder={canChooseFolder ? () => chooseFolderNative(codeRepoDir !== null ? "code-repo" : "data-repo") : undefined}
           onClose={() => agentChat.closePane()}
