@@ -62,7 +62,14 @@ afterEach(() => {
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { AgentPane, knownFolders, sessionFolder } from "../src/frontend/AgentPane";
-import { agentChat, forgetFolderInfos, worktreeClosedNote, worktreeStartedNote, worktreeTooltip } from "../src/frontend/agentChat";
+import {
+  agentChat,
+  forgetFolderInfos,
+  worktreeClosedNote,
+  worktreeStartedNote,
+  worktreeSwitchedNote,
+  worktreeTooltip,
+} from "../src/frontend/agentChat";
 import type { ChatSessionMeta, ChatWorktree } from "../src/frontend/agentChat";
 import { toast } from "../src/frontend/Toasts";
 import { CLAUDE_AGENT } from "./fixtures/agents";
@@ -339,11 +346,19 @@ test("the Worktree box says which branch the session starts from, and when the f
     "Worktree · the session gets a git worktree of its own, on a new branch off main, once main is level with origin",
   );
   expect(worktreeTooltip({ canWorktree: true, branch: "feature", base: "main" })).toBe(
-    "Worktree · sessions start from main, but this folder is on feature — switch it to main first",
+    "Worktree · this folder is on feature: it is switched to main and brought level with origin, then the session gets a git worktree of its own, on a new branch off main",
   );
   expect(worktreeTooltip({ canWorktree: true, branch: "HEAD", base: "main" })).toContain("has a detached HEAD");
   expect(worktreeStartedNote(META)).toBeNull();
   expect(worktreeStartedNote({})).toBeNull();
+  // A folder switched to main for the worktree is told about.
+  expect(worktreeSwitchedNote(META)).toBeNull();
+  expect(worktreeSwitchedNote({ worktree: { ...META.worktree!, base: "main", switchedFrom: "feature" } })).toBe(
+    `Switched ${META.worktree!.repo} from feature to main, level with origin, for the worktree`,
+  );
+  expect(worktreeSwitchedNote({ worktree: { ...META.worktree!, base: "main", switchedFrom: "HEAD" } })).toContain(
+    "from a detached HEAD to main",
+  );
 });
 
 // In code repository mode the open repository arrives as the pane's
