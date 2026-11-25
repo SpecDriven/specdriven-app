@@ -4,6 +4,10 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.304 — 2026-11-25
+
+- Pin the Specs tab's behaviour before it moves into its plugin ([#517](https://github.com/SpecDriven/specdriven-app/pull/517))
+
 ## v0.1.303 — 2026-11-24
 
 - The agent pane's ⋯ menu is the last icon before close, with Stop to its left ([#516](https://github.com/SpecDriven/specdriven-app/pull/516))
