@@ -55,6 +55,18 @@ export interface TabApp {
 /** Open one of the tab's views; `push` adds a history entry. */
 export type Navigate<V> = (view: V, opts?: { push?: boolean }) => void;
 
+/** How a view is being opened. */
+export interface OpenViewOptions {
+  /** Add a history entry for it. */
+  push?: boolean;
+  /**
+   * Opened from a link, after the folder was pulled for it: why the pull
+   * failed, or null — a miss is then said as what it is
+   * (specs/ui/navigation.feature.md "a link opens on synced data").
+   */
+  pullProblem?: string | null;
+}
+
 /** A palette hit from the tab's own search — the store, not the server index. */
 export interface PaletteHit<V> {
   id: string;
@@ -62,6 +74,40 @@ export interface PaletteHit<V> {
   sub?: ReactNode;
   href?: string;
   view: V;
+  /** The hit's own group, over the tab's — Specs' scenarios beside its features. */
+  group?: PaletteGroup;
+  /** The hit's own icon, over the tab's — a scenario's status, say. */
+  icon?: ReactNode;
+  /** What alt-Enter opens instead — a scenario's card on its feature's page. */
+  altView?: V;
+}
+
+/** How the palette's Recent list shows a view that was open. */
+export interface RecentItem<V> {
+  label: string;
+  /** Absent, none — not even the tab's title. */
+  sub?: ReactNode;
+  icon?: ReactNode;
+  /** What alt-Enter opens instead. */
+  altView?: V;
+}
+
+/** A key, or a palette command, of a tab's own. */
+export interface TabShortcut {
+  id: string;
+  keys: string | string[];
+  label: string;
+  run(): void;
+  /** The cheat sheet's section; "Navigate" when absent. */
+  group?: string;
+  /** Only while this holds — Specs' imports while their switch is on, say. */
+  when?(): boolean;
+  /** Fires while typing in a field; absent is yes. */
+  inFields?: boolean;
+  /** Turns the sidebar to the tab first; absent is yes. */
+  reveal?: boolean;
+  /** The palette row's icon; a search glass when absent. */
+  icon?: ReactNode;
 }
 
 export interface TabPlugin<V = unknown> {
@@ -82,8 +128,13 @@ export interface TabPlugin<V = unknown> {
     key(view: V): string;
     /** The window title for a view, read from the tab's store. */
     title(view: V): string;
-    /** The view the tab opens on. */
-    home: V;
+    /**
+     * The view the tab opens on. Null for a tab with no home view of its own
+     * — Specs, whose door is the folder's README (specs/app/plugins.feature.md
+     * "Specs is a built-in plugin"): its rail icon, its `g` chord and its tab
+     * turn the sidebar to it and leave another tab's view for home.
+     */
+    home: V | null;
     /**
      * Turn a view that names no one thing — the tab itself, `/models` — into
      * the one it opens (the first model), or null when there is nothing to
@@ -102,11 +153,27 @@ export interface TabPlugin<V = unknown> {
    */
   opensOnSelect?: boolean;
   /**
+   * A tab that opens its views itself, loading each before it shows — Specs
+   * reads the feature's file first, and a missed link leaves a note. App
+   * hands it a view in place of holding it; true when the tab took it.
+   * Absent, App holds the view and pushes its url.
+   */
+  open?(view: V, opts: OpenViewOptions): boolean;
+  /**
    * The tab's own "new" — a task, a case, an issue: what `c` creates while
    * the tab is the sidebar, so the key never makes a feature from there.
    * Absent, `c` is quiet on the tab.
    */
-  create?: { label: string; run(app: TabApp, navigate: Navigate<V>): void };
+  create?: {
+    label: string;
+    run(app: TabApp, navigate: Navigate<V>): void;
+    /**
+     * What `c` makes while one of the tab's views has the pane, over any
+     * tab's "new" — a scenario on a feature's page. `run` null keeps `c`
+     * quiet there; null leaves it to the shown tab's create.
+     */
+    inView?(view: V): { label: string; run: (() => void) | null } | null;
+  };
   Sidebar: ComponentType<{ view: V | null; app: TabApp; navigate: Navigate<V> }>;
   Pane: ComponentType<{ view: V; app: TabApp; navigate: Navigate<V> }>;
   palette?: {
@@ -114,6 +181,11 @@ export interface TabPlugin<V = unknown> {
     /** The palette opened from this tab searches the tab's own data — its
         store, or its own server route. */
     search?(query: string, signal: AbortSignal): PaletteHit<V>[] | Promise<PaletteHit<V>[]>;
+    /**
+     * The palette searches this tab when the tab on screen offers no search
+     * of its own — Specs' features, from a list tab with none.
+     */
+    fallback?: boolean;
     /** Commands the palette offers while the tab is mounted. */
     commands?(host: {
       prompt: Prompt;
@@ -124,10 +196,11 @@ export interface TabPlugin<V = unknown> {
   };
   /**
    * Keys of the tab's own beyond its `g` chord — ⇧⌘F searches the code
-   * repository's files. App turns the sidebar to the tab, then runs it; the
-   * key works while typing, and the command palette lists it.
+   * repository's files; `[]` for a command only the palette offers. App
+   * turns the sidebar to the tab, then runs it; the key works while typing,
+   * and the command palette lists it.
    */
-  shortcuts?: { id: string; keys: string | string[]; label: string; run(): void }[];
+  shortcuts?: TabShortcut[];
   /**
    * Crumbs a feature page carries back into the module — an Event Model
    * whose slice links the feature, say. App makes each a link to the view.
@@ -146,7 +219,12 @@ export interface TabPlugin<V = unknown> {
    * open, or null for a view not worth remembering. Absent, the tab's views
    * are not remembered.
    */
-  recent?(view: V): string | null;
+  recent?(view: V): string | RecentItem<V> | null;
+  /**
+   * The file a coding agent session started from the view attaches — the
+   * Files tab's open file, Specs' open feature. Absent, none.
+   */
+  current?(view: V): string | null;
   /** The tab's store, so App re-renders titles when it changes. */
   subscribe?(listener: () => void): () => void;
 }
@@ -263,9 +341,18 @@ export function useTabStores(list: TabPlugin[]): number {
   return useSyncExternalStore(subscribe, () => cell.n, () => 0);
 }
 
-/** Whether a tab has anything to open: its home resolves to a view. */
+/**
+ * Whether a tab has anything to open: its home resolves to a view. A tab
+ * with no home view always has its door — home, with its sidebar.
+ */
 export function tabReachable(tab: TabPlugin): boolean {
-  return !tab.route.resolve || tab.route.resolve(tab.route.home) !== null;
+  const { home, resolve } = tab.route;
+  return home === null || !resolve || resolve(home) !== null;
+}
+
+/** Where a tab's door leads: its home view's url, or home for a tab with none. */
+export function tabHref(tab: TabPlugin): string {
+  return tab.route.home === null ? "/" : tab.route.path(tab.route.home);
 }
 
 /** Which plugin view has the main pane. */
