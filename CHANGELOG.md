@@ -4,6 +4,12 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.303 — 2026-11-24
+
+- The agent pane's ⋯ menu is the last icon before close, with Stop to its left ([#516](https://github.com/SpecDriven/specdriven-app/pull/516))
+- The agent pane's ⋯ menu stays while a session is open, for that session's agent where it works ([#515](https://github.com/SpecDriven/specdriven-app/pull/515))
+- A worktree session switches the folder to its default branch and pulls, instead of refusing ([#514](https://github.com/SpecDriven/specdriven-app/pull/514))
+
 ## v0.1.302 — 2026-11-24
 
 - The public specs site mounts the Event Models it installs ([#513](https://github.com/SpecDriven/specdriven-app/pull/513))
