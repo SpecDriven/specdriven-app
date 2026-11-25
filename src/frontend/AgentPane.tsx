@@ -506,6 +506,19 @@ function AgentHeader({
       {/* An agent with an account: the plug or the person, always one of the two —
           with or without a session (specs/agents/agent-pane.feature.md S13). */}
       {chipAgent?.capabilities.hasAccount && <AccountChip agent={chipAgent.id} account={meta?.account} />}
+      {/* Stop sits left of the ⋯ menu, which is the last icon before close. */}
+      {meta && busy && agent?.capabilities.canInterrupt && (
+        <Tooltip label="Stop this turn">
+          <button
+            type="button"
+            className="ibtn"
+            aria-label="Stop"
+            onClick={() => void agentChat.interrupt(meta.id).catch(fail)}
+          >
+            <Square size={14} aria-hidden="true" />
+          </button>
+        </Tooltip>
+      )}
       {/* The ⋯ menu (specs/agents/agent-pane.feature.md "MCP servers before a
           session"), with or without a turn running: for the open session, its
           agent where it works — inside its worktree, if it has one; with none
@@ -523,18 +536,6 @@ function AgentHeader({
         draftAgent?.capabilities.mcpManage && (
           <AgentMenu agent={draftAgent} folder={draftFolder} cwd={draftCwd} homeDir={homeDir} />
         )
-      )}
-      {meta && busy && agent?.capabilities.canInterrupt && (
-        <Tooltip label="Stop this turn">
-          <button
-            type="button"
-            className="ibtn"
-            aria-label="Stop"
-            onClick={() => void agentChat.interrupt(meta.id).catch(fail)}
-          >
-            <Square size={14} aria-hidden="true" />
-          </button>
-        </Tooltip>
       )}
       <Tooltip label="Close the coding agent pane" keys="]">
         <button
