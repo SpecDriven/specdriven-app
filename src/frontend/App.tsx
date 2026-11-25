@@ -335,6 +335,14 @@ import {
 } from "./claudeWeb";
 import { ClaudeWebNote } from "./ClaudeWebNote";
 import { openWebLink } from "./weblinks";
+import {
+  resetListing,
+  setFeatureOrders,
+  setFeatures,
+  setFolderOrders,
+  setListing,
+  useSpecsListing,
+} from "./specs/listing";
 
 interface Conflict {
   ours: string;
@@ -1496,7 +1504,11 @@ export function App() {
   const repoInputRef = useRef<HTMLInputElement>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [features, setFeatures] = useState<FeatureListing[]>([]);
+  // The spec listing lives in a core store (src/frontend/specs/listing.ts)
+  // the Specs tab reads too. A fresh App starts from nothing listed, as its
+  // own state did: once, before the first read of the store.
+  useState(resetListing);
+  const { features, folders, folderDescriptions, folderOrders, featureOrders } = useSpecsListing();
   // Project members (src/server/members.ts): the data repo's
   // project-settings.yaml, as the feature's "Assigned" dropdown offers them.
   const [members, setMembers] = useState<ProjectMember[]>([]);
@@ -1534,22 +1546,6 @@ export function App() {
   }, [features]);
   /** Whether an assignment change is in flight — the dropdown waits for it. */
   const [assignedSaving, setAssignedSaving] = useState(false);
-  const [folders, setFolders] = useState<string[]>([]);
-  /** Folder path → description, for the folders that have a display-name.txt. */
-  const [folderDescriptions, setFolderDescriptions] = useState<Record<string, string>>({});
-  /**
-   * Folder path → its subfolders in order (specs/ui/folders.feature.md
-   * "order folders"), for the folders that have a folder-order.txt; the top
-   * level's under `specs`. A move writes the new order here first, so the
-   * tree shows it while the save is out.
-   */
-  const [folderOrders, setFolderOrders] = useState<Record<string, string[]>>({});
-  /**
-   * Folder path → its features' file names in order (specs/ui/
-   * folders.feature.md "order features"), for the folders that have a
-   * feature-order.txt. Written first on a move, like `folderOrders`.
-   */
-  const [featureOrders, setFeatureOrders] = useState<Record<string, string[]>>({});
   /** Folder paths whose subtree is collapsed in the sidebar. */
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   /**
@@ -2197,11 +2193,7 @@ export function App() {
       return null;
     }
     const { listing } = result;
-    setFeatures(listing.features);
-    setFolders(listing.folders);
-    setFolderDescriptions(listing.folderDescriptions);
-    setFolderOrders(listing.folderOrders);
-    setFeatureOrders(listing.featureOrders);
+    setListing(listing);
     setMembers(listing.members);
     setCodeRepo(listing.codeRepo);
     setCodeRepos(listing.codeRepos ?? []);
