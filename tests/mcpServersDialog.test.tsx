@@ -568,6 +568,11 @@ test("the header's ⋯ menu stays while a session is open, for that session's ag
   expect(host.querySelector('.agent-head button[aria-label="Stop"]')).not.toBeNull();
   const more = host.querySelector<HTMLButtonElement>('.agent-head button[aria-label="More for Claude"]');
   expect(more).not.toBeNull();
+  // Stop sits left of the ⋯ menu, and the ⋯ menu is the last icon before close.
+  const order = [...host.querySelectorAll<HTMLButtonElement>(".agent-head button")]
+    .map((b) => b.getAttribute("aria-label"))
+    .slice(-3);
+  expect(order).toEqual(["Stop", "More for Claude", "Close the coding agent pane"]);
   act(() => more!.click());
   act(() => host.querySelector<HTMLElement>('.agent-head-menu [role="menuitem"]')!.click());
   await settle();
