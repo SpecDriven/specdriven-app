@@ -45,6 +45,45 @@ export function hostedSessionPick<F extends { fileName: string }>(a: {
   return { hint: "Open a feature, or select specs in the sidebar or single scenarios on their cards." };
 }
 
+/** One spec a session runs over: whole, or cut down to some scenarios. */
+export interface SessionFile {
+  fileName: string;
+  scenarios?: { name: string; version: number }[];
+}
+
+/**
+ * What an AI session runs over (specs/agents/claude.feature.md "Create and
+ * name a code gen session"), in order of how deliberately it was picked:
+ * the specs and scenarios checked for a session; else the scenarios picked
+ * in the sidebar tree (one or more, ⌘/Shift-click), grouped by feature in
+ * tree order; else the scenario whose page is open; else the open feature,
+ * whole. Nothing selected is nothing — the Start session button is off.
+ */
+export function sessionSelection(a: {
+  checked: SessionFile[];
+  treePicks: { file: string; row: { name: string; version: number } }[];
+  openFeature: string | null;
+  openScenario: { name: string; version: number } | null;
+}): SessionFile[] {
+  if (a.checked.length > 0) return a.checked;
+  if (a.treePicks.length > 0) {
+    const files: SessionFile[] = [];
+    for (const { file, row } of a.treePicks) {
+      const pick = { name: row.name, version: row.version };
+      const last = files[files.length - 1];
+      if (last?.fileName === file) last.scenarios!.push(pick);
+      else files.push({ fileName: file, scenarios: [pick] });
+    }
+    return files;
+  }
+  if (!a.openFeature) return [];
+  if (a.openScenario) {
+    const { name, version } = a.openScenario;
+    return [{ fileName: a.openFeature, scenarios: [{ name, version }] }];
+  }
+  return [{ fileName: a.openFeature }];
+}
+
 export interface AiTabProps {
   /** The dialog's title, hint, name and "Run in". */
   dialog: PromptOptions;

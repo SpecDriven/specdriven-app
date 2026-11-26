@@ -81,6 +81,8 @@ export interface SpecsSidebarProps {
   renameFolder: (path: string) => Promise<void>;
   selected: string | null;
   selectionLabel: string;
+  /** What was checked for a session, for the "Selected:" note. */
+  checkedLabel: string;
   sessionCount: number;
   sessionNotice: ReactNode;
   sessionRunning: boolean;
@@ -154,6 +156,7 @@ export function SpecsSidebar(props: SpecsSidebarProps) {
     renameFolder,
     selected,
     selectionLabel,
+    checkedLabel,
     sessionCount,
     sessionNotice,
     sessionRunning,
@@ -1206,13 +1209,13 @@ export function SpecsSidebar(props: SpecsSidebarProps) {
           label={
             sessionRunning
               ? "Session running…"
-              : hosted
-                ? sessionCount > 0 || selected
-                  ? `Open Claude Code with a prompt for ${sessionCount > 0 ? selectionLabel : "the open feature"}`
-                  : "Open Claude Code with a prompt"
-                : codeGen && sessionCount > 0
-                  ? `Start an AI session in ${codeGenTargetLabel(sessionTarget, agents)} with ${selectionLabel}`
-                  : "Start an AI session"
+              : sessionCount === 0
+                ? "Select a feature or scenarios to start an AI session"
+                : hosted
+                  ? `Open Claude Code with a prompt for ${selectionLabel}`
+                  : codeGen
+                    ? `Start an AI session in ${codeGenTargetLabel(sessionTarget, agents)} with ${selectionLabel}`
+                    : "Start an AI session"
           }
         >
           <button
@@ -1227,7 +1230,12 @@ export function SpecsSidebar(props: SpecsSidebarProps) {
                   ? "Open Claude Code with a prompt"
                   : `Start session…${codeGen && specSelection.size > 0 ? ` (${specSelection.size})` : ""}`
             }
-            onClick={() => startSession()}
+            // Off with nothing to run over, but still hoverable (a disabled
+            // button gets no hover), so its tooltip says what to select.
+            aria-disabled={sessionCount === 0 || undefined}
+            onClick={() => {
+              if (sessionCount > 0) startSession();
+            }}
             disabled={sessionRunning}
           >
             <StartSessionIcon size={15} />
@@ -1280,8 +1288,8 @@ export function SpecsSidebar(props: SpecsSidebarProps) {
     )}
     {/* What a session would run over, so a scenario checked on a card
         two clicks away is still visible from here. */}
-    {codeGen && selectionLabel && !sessionRunning && (
-      <p className="session-notice">Selected: {selectionLabel}</p>
+    {codeGen && checkedLabel && !sessionRunning && (
+      <p className="session-notice">Selected: {checkedLabel}</p>
     )}
     {sessionNotice && <p className="session-notice">{sessionNotice}</p>}
     </SidebarSection>

@@ -5,7 +5,7 @@
 // Static markup only — bun test has no DOM.
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { AiSessionFields, StartSessionDialog, aiTabState, hostedSessionPick } from "../src/frontend/StartSessionDialog";
+import { AiSessionFields, StartSessionDialog, aiTabState, hostedSessionPick, sessionSelection } from "../src/frontend/StartSessionDialog";
 import type { PromptOptions } from "../src/frontend/ModalPrompts";
 
 const noop = () => undefined;
@@ -98,5 +98,43 @@ describe("StartSessionDialog", () => {
     expect(markup).toContain("Select a spec in the sidebar");
     expect(markup).not.toContain('role="tablist"');
     expect(markup).not.toContain("Pomodoro");
+  });
+});
+
+describe("sessionSelection", () => {
+  const none = { checked: [], treePicks: [], openFeature: null, openScenario: null };
+  const row = (name: string, version = 1) => ({ name, version, status: "proposed" as const });
+
+  test("nothing checked, picked or open is nothing, so the Start session button is off", () => {
+    expect(sessionSelection(none)).toEqual([]);
+  });
+
+  test("the open feature runs whole", () => {
+    expect(sessionSelection({ ...none, openFeature: "a.feature.md" })).toEqual([{ fileName: "a.feature.md" }]);
+  });
+
+  test("the open scenario runs alone", () => {
+    expect(sessionSelection({ ...none, openFeature: "a.feature.md", openScenario: row("Blocked") })).toEqual([
+      { fileName: "a.feature.md", scenarios: [{ name: "Blocked", version: 1 }] },
+    ]);
+  });
+
+  test("scenarios picked in the tree win over the open one, grouped by feature", () => {
+    const treePicks = [
+      { file: "a.feature.md", row: row("One") },
+      { file: "a.feature.md", row: row("Two", 2) },
+      { file: "b.feature.md", row: row("Three") },
+    ];
+    expect(sessionSelection({ ...none, treePicks, openFeature: "a.feature.md", openScenario: row("Other") })).toEqual([
+      { fileName: "a.feature.md", scenarios: [{ name: "One", version: 1 }, { name: "Two", version: 2 }] },
+      { fileName: "b.feature.md", scenarios: [{ name: "Three", version: 1 }] },
+    ]);
+  });
+
+  test("specs checked for a session win over everything else", () => {
+    const checked = [{ fileName: "c.feature.md" }];
+    expect(
+      sessionSelection({ checked, treePicks: [{ file: "a.feature.md", row: row("One") }], openFeature: "a.feature.md", openScenario: null }),
+    ).toBe(checked);
   });
 });
