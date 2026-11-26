@@ -6438,6 +6438,18 @@ aside header .collapse-btn {
   font-variant-numeric: tabular-nums;
 }
 
+/* With nothing checked, picked or open there is nothing to run over: the
+   button looks off but stays hoverable, so its tooltip says what to select. */
+.head-actions .session-btn[aria-disabled="true"] {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.head-actions .session-btn[aria-disabled="true"]:hover {
+  background: transparent;
+  color: var(--text-2);
+}
+
 /* While a session runs the button is off and its spark twinkles. */
 .head-actions .session-btn:disabled {
   cursor: default;

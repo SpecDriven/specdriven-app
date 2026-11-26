@@ -149,7 +149,7 @@ import { WhatsNewPage, hasUnseenNotes, markNotesSeen } from "./WhatsNewPage";
 import { UpdatesPage } from "./UpdatesPage";
 import type { MarketplaceRef } from "../plugins/marketplace";
 import type { PromptOptions } from "./ModalPrompts";
-import { StartSessionDialog, aiTabState, hostedSessionPick } from "./StartSessionDialog";
+import { StartSessionDialog, aiTabState, hostedSessionPick, sessionSelection } from "./StartSessionDialog";
 import { pomodoro, titlePrefix, usePomodoro } from "./pomodoro";
 import { PomodoroBar, PomodoroToggle } from "./PomodoroBar";
 import { applyPomodoroEnabled, applyPomodoroShown, usePomodoroEnabled } from "./pomodoroPref";
@@ -3752,7 +3752,27 @@ export function App() {
   // What the current selection sends to a session. Selections can outlive
   // the list (a checked spec deleted elsewhere, a scenario replaced by a new
   // version) — only specs and scenarios still listed go in.
+  // With nothing checked, the scenarios picked in the tree, the open
+  // scenario, or the open feature stand in (sessionSelection).
   const sessionFiles = (): { fileName: string; scenarios?: ScenarioPick[] }[] => {
+    const picks: { file: string; row: ScenarioRow }[] = [];
+    if (!locked && treePicks.size > 0) {
+      for (const f of features) {
+        for (const row of scenarioRows(f, selected, feature)) {
+          if (treePicks.has(treeScenarioKey(f.fileName, row))) picks.push({ file: f.fileName, row });
+        }
+      }
+    }
+    return sessionSelection({
+      checked: checkedSessionFiles(),
+      treePicks: picks,
+      openFeature: selected && feature ? selected : null,
+      openScenario: paneScenario,
+    });
+  };
+
+  /** The specs and scenarios checked for a session, still listed. */
+  const checkedSessionFiles = (): { fileName: string; scenarios?: ScenarioPick[] }[] => {
     const files: { fileName: string; scenarios?: ScenarioPick[] }[] = [];
     for (const f of features) {
       const entry = specSelection.get(f.fileName);
@@ -3812,7 +3832,11 @@ export function App() {
   };
 
   const selectionLabel = describeSelection(sessionFiles());
-  const sessionCount = specSelection.size + sessionBundle().count;
+  /** The sidebar's "Selected:" note: what was checked, not what stands in. */
+  const checkedLabel = describeSelection(checkedSessionFiles());
+  // What a session would run over, counted: the Start session button is
+  // off at zero (nothing checked, picked or open).
+  const sessionCount = sessionFiles().length + sessionBundle().count;
 
   /** The target the next session dialog opens on. */
   const sessionTarget = resolveCodeGenTarget(codeGenTarget, canOpenClaudeDesktop, agents);
@@ -8163,7 +8187,7 @@ export function App() {
             : []),
         ]
       : []),
-    ...(codeGen && (specSelection.size > 0 || (hosted && selected)) && !sessionRunning
+    ...(codeGen && sessionCount > 0 && !sessionRunning
       ? [action("session", hosted ? "Open Prompt in Claude Code" : "Start AI Session", <StartSessionIcon size={14} />, () => startSession())]
       : []),
     // Off in Settings: the Pomodoro is not part of this app, so the palette
@@ -10057,6 +10081,7 @@ export function App() {
     renameFolder,
     selected,
     selectionLabel,
+    checkedLabel,
     sessionCount,
     sessionNotice,
     sessionRunning,
@@ -10993,8 +11018,8 @@ export function App() {
                               id: "session",
                               label: hosted ? "Open Prompt in Claude Code" : "Start AI Session",
                               icon: <StartSessionIcon size={13} />,
-                              // The hosted app takes the open feature when nothing is checked.
-                              disabled: sessionRunning || (specSelection.size === 0 && !hosted),
+                              // Nothing checked, picked or open: nothing to run over.
+                              disabled: sessionRunning || sessionCount === 0,
                               onSelect: () => void startSession(),
                             },
                           ]
