@@ -4,6 +4,13 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.305 — 2026-11-25
+
+- Start AI session is on only with a feature or scenarios selected ([#520](https://github.com/SpecDriven/specdriven-app/pull/520))
+- The Specs tab is a real plugin tab: its tree, pane, urls, palette and `c` go through the tab contract ([#519](https://github.com/SpecDriven/specdriven-app/pull/519))
+- The spec listing moves into a core store the Specs tab can read ([#518](https://github.com/SpecDriven/specdriven-app/pull/518))
+- Pin the Specs tab's behaviour before it moves into its plugin ([#517](https://github.com/SpecDriven/specdriven-app/pull/517))
+
 ## v0.1.304 — 2026-11-25
 
 - Pin the Specs tab's behaviour before it moves into its plugin ([#517](https://github.com/SpecDriven/specdriven-app/pull/517))
