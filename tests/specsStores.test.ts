@@ -25,6 +25,13 @@ import {
 import { recentSpec } from "../src/frontend/specs/palette";
 import type { EditState } from "../src/frontend/specs/scenarioEdit";
 import {
+  resetSpecsSettings,
+  setDeletePublished,
+  setResourceLinksOn,
+  setShowTestLinks,
+  specsSettings,
+} from "../src/frontend/specs/settings";
+import {
   resetSpecSelection,
   scenarioKey,
   scenarioSelected,
@@ -55,6 +62,7 @@ afterEach(() => {
   resetFeaturePageState();
   resetSpecSelection();
   resetSpecsDialogs();
+  resetSpecsSettings();
   resetListing();
 });
 
@@ -229,4 +237,32 @@ test("an import dialog is open on the folder it lands in, and a reset closes eve
   expect(specsDialogs().ahaImportOpen).toBeNull();
   expect(specsDialogs().importOpen).toBeNull();
   expect(specsDialogs().linkTestsOpen).toBe(false);
+});
+
+test("the switches start at their defaults, and a reset puts them back", () => {
+  expect(specsSettings()).toEqual({
+    previewLines: 8,
+    showTestLinks: true,
+    publishExternalLinks: true,
+    projectManagement: true,
+    projectManagementTool: "Jira",
+    resourceLinksOn: { aha: false, figma: false },
+    qtestLinks: false,
+    ahaImportOn: false,
+    jiraEnabledOn: false,
+    confluenceEnabledOn: false,
+    deletePublished: false,
+    assignments: false,
+    featureFlags: false,
+    scenarioPolarity: false,
+  });
+  setShowTestLinks(false);
+  setDeletePublished(true);
+  // An Aha! import switches its links on beside what is already on.
+  setResourceLinksOn((prev) => ({ ...prev, aha: true }));
+  expect(specsSettings().resourceLinksOn).toEqual({ aha: true, figma: false });
+  resetSpecsSettings();
+  expect(specsSettings().showTestLinks).toBe(true);
+  expect(specsSettings().deletePublished).toBe(false);
+  expect(specsSettings().resourceLinksOn).toEqual({ aha: false, figma: false });
 });

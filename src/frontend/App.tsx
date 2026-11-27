@@ -430,6 +430,27 @@ import {
 } from "./specs/dialogs";
 import { provideSpecsHost } from "./specs/host";
 import {
+  DEFAULT_PROJECT_MANAGEMENT_TOOL,
+  NO_RESOURCE_LINKS,
+  resetSpecsSettings,
+  setAhaImportOn,
+  setAssignments,
+  setConfluenceEnabledOn,
+  setDeletePublished,
+  setFeatureFlags,
+  setJiraEnabledOn,
+  setPreviewLines,
+  setProjectManagement,
+  setProjectManagementTool,
+  setPublishExternalLinks,
+  setQtestLinks,
+  setResourceLinksOn,
+  setScenarioPolarity,
+  setShowTestLinks,
+  useSpecsSettings,
+  type ResourceLinkSwitches,
+} from "./specs/settings";
+import {
   resetSpecSelection,
   scenarioKey,
   scenarioSelected,
@@ -556,13 +577,10 @@ const MIN_AUTOSAVE_SECONDS = 3;
 // etc.feature.md): the tool tickets live in until Settings names another, and
 // the tools the Settings dropdown offers by name — anything else is typed in
 // beside it. Mirrors the server's default in src/server/state.ts.
-const DEFAULT_PROJECT_MANAGEMENT_TOOL = "Jira";
 const PROJECT_MANAGEMENT_TOOLS = ["Jira", "Linear", "GitHub", "GitLab", "Asana", "Azure DevOps"];
 
 // Aha! and Figma links (specs/external-links/aha-and-figma-links.feature.md):
 // each tool is offered only once its Settings switch is on — both start off.
-type ResourceLinkSwitches = Record<ResourceLinkKind, boolean>;
-const NO_RESOURCE_LINKS: ResourceLinkSwitches = { aha: false, figma: false };
 /** The Settings key that switches each tool on. */
 const RESOURCE_LINK_SETTING = { aha: "ahaLinks", figma: "figmaLinks" } as const;
 const RESOURCE_LINK_ICON = { aha: Lightbulb, figma: PenTool } as const;
@@ -1314,6 +1332,7 @@ export function App() {
     resetFeaturePageState();
     resetSpecSelection();
     resetSpecsDialogs();
+    resetSpecsSettings();
   });
   const { features, folders, folderDescriptions, folderOrders, featureOrders } = useSpecsListing();
   // The open feature — its file, what was read of it, the card highlighted
@@ -1369,6 +1388,24 @@ export function App() {
     descHeight,
     resizingDesc,
   } = useFeaturePageState();
+  // The switches of Settings the tree, the feature page and the editor read
+  // (src/frontend/specs/settings.ts), set from /api/state further down.
+  const {
+    previewLines,
+    showTestLinks,
+    publishExternalLinks,
+    projectManagement,
+    projectManagementTool,
+    resourceLinksOn,
+    qtestLinks,
+    ahaImportOn,
+    jiraEnabledOn,
+    confluenceEnabledOn,
+    deletePublished,
+    assignments,
+    featureFlags,
+    scenarioPolarity,
+  } = useSpecsSettings();
   // Project members (src/server/members.ts): the data repo's
   // project-settings.yaml, as the feature's "Assigned" dropdown offers them.
   const [members, setMembers] = useState<ProjectMember[]>([]);
@@ -1550,7 +1587,6 @@ export function App() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [reloadSeconds, setReloadSeconds] = useState(60);
-  const [previewLines, setPreviewLines] = useState(8);
   /**
    * How often the open editor saves itself
    * (specs/editor/editor-autosave.feature.md).
@@ -1569,9 +1605,6 @@ export function App() {
   const readmeSaveQueue = useRef(createPromiseQueue());
   /** Bumped per README load, so a save landing after a repo switch stamps nothing. */
   const readmeSession = useRef(0);
-  // Test links (specs/traceability.feature.md): the table of automated-test
-  // links at the end of each scenario card is optional; default ON.
-  const [showTestLinks, setShowTestLinks] = useState(true);
   // Open test links in IntelliJ IDEA (specs/traceability.feature.md "Open
   // test in idea"): a click on one runs `idea --line` on the file in the
   // code repo instead of opening GitHub; default OFF.
@@ -1584,23 +1617,6 @@ export function App() {
   const [ghosttyOn, setGhosttyOn] = useState(false);
   /** Whether Ghostty is installed where the server runs. */
   const [canOpenGhostty, setCanOpenGhostty] = useState(false);
-  // External links (specs/external-links/project-management-jira-linear-etc.
-  // feature.md): whether ticket links are written into the .feature.md files.
-  const [publishExternalLinks, setPublishExternalLinks] = useState(true);
-  // Project management (specs/external-links/project-management-jira-linear-
-  // etc.feature.md): whether tickets are tracked at all, and the tool they
-  // live in. Off, nothing in the app shows or asks for a ticket; on, the
-  // editors ask for the ticket's url alone — the tool is this one.
-  const [projectManagement, setProjectManagement] = useState(true);
-  const [projectManagementTool, setProjectManagementTool] = useState(
-    DEFAULT_PROJECT_MANAGEMENT_TOOL,
-  );
-  /** Which of Aha! and Figma features and scenarios link to
-      (specs/external-links/aha-and-figma-links.feature.md). */
-  const [resourceLinksOn, setResourceLinksOn] = useState<ResourceLinkSwitches>(NO_RESOURCE_LINKS);
-  /** Whether features and scenarios link qTest test cases
-      (specs/external-links/qtest-test-cases.feature.md); default OFF. */
-  const [qtestLinks, setQtestLinks] = useState(false);
   // Which of the Specs tab's dialogs is open — imports, publishing,
   // extracting, linking tests — is in a store their openers set
   // (src/frontend/specs/dialogs.ts); they are still rendered here.
@@ -1628,9 +1644,7 @@ export function App() {
       device holds an API key for. */
   const [ahaSites, setAhaSites] = useState<AhaSite[]>([]);
   /** Whether "Import from Aha!" is offered at all — switched on in Settings
-      → Aha!, default OFF. Never in the demo or the hosted app, which keep
-      no API key. */
-  const [ahaImportOn, setAhaImportOn] = useState(false);
+      → Aha!. Never in the demo or the hosted app, which keep no API key. */
   const ahaImport = ahaImportOn && !demo && !hosted;
   /** Import from OpenSpec (specs/external-links/openspec-import.feature.md)
       needs no key, so no Settings switch; never in the demo or the hosted
@@ -1645,13 +1659,8 @@ export function App() {
       .feature.md): the Jira sites this device holds a token for. Never in
       the demo or the hosted app. */
   const [jiraSites, setJiraSites] = useState<JiraSite[]>([]);
-  /** Whether Jira and Confluence are switched on at all — in Settings → Jira /
-      Confluence, each default OFF (specs/external-links/jira-wiki-import
-      .feature.md, confluence-wiki.feature.md). Jira off hides the Jira import;
-      Confluence off hides "Publish to Confluence…" and the Confluence import.
-      Never in the demo or the hosted app, which keep no tokens. */
-  const [jiraEnabledOn, setJiraEnabledOn] = useState(false);
-  const [confluenceEnabledOn, setConfluenceEnabledOn] = useState(false);
+  /** Jira and Confluence, switched on in Settings: never in the demo or the
+      hosted app, which keep no tokens. */
   const jiraEnabled = jiraEnabledOn && !demo && !hosted;
   const confluenceEnabled = confluenceEnabledOn && !demo && !hosted;
   /** Code gen sessions offered at all (specs/agents/claude.feature.md). */
@@ -1684,19 +1693,6 @@ export function App() {
   useEffect(() => {
     void agentChat.restore();
   }, []);
-  // Deleting published scenarios (specs/editor/spec-editor.feature.md "Delete
-  // Published Spec"): opt-in — published scenarios stay immutable until the
-  // Settings switch turns deletion on.
-  const [deletePublished, setDeletePublished] = useState(false);
-  // Feature assignment (src/server/members.ts): opt-in — the "Assigned"
-  // dropdown shows only once the Settings switch turns assignments on.
-  const [assignments, setAssignments] = useState(false);
-  // Feature flags (specs/app/feature-flags.feature.md): opt-in — the flag
-  // chips and editors show only once the Settings switch turns them on.
-  const [featureFlags, setFeatureFlags] = useState(false);
-  // Scenario polarity (specs/ui/scenario-polarity.feature.md): opt-in — the
-  // Positive / Negative pill shows only once the Settings switch turns it on.
-  const [scenarioPolarity, setScenarioPolarity] = useState(false);
   // The GitHub account (specs/app/user-info-settings.feature.md "GitHub
   // account behind a switch"): not ready, so the Settings sign-in block and
   // the user menu's sign-in entries show only once the switch is on.
