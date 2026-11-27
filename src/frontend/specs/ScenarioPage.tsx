@@ -50,7 +50,7 @@ export function ScenarioPage({ app, actions }: { app: TabApp; actions: SpecsActi
                 type="button"
                 className="ibtn"
                 aria-label="Previous scenario"
-                disabled={!scenarioNav.prev}
+                disabled={scenarioNav.prev === null}
                 onClick={() => stepScenario(-1)}
               >
                 <ChevronLeft size={18} aria-hidden="true" />
@@ -61,7 +61,7 @@ export function ScenarioPage({ app, actions }: { app: TabApp; actions: SpecsActi
                 type="button"
                 className="ibtn"
                 aria-label="Next scenario"
-                disabled={!scenarioNav.next}
+                disabled={scenarioNav.next === null}
                 onClick={() => stepScenario(1)}
               >
                 <ChevronRight size={18} aria-hidden="true" />

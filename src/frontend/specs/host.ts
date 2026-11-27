@@ -10,10 +10,20 @@
 // a piece at a time (specs/app/plugins.feature.md "Specs is a built-in
 // plugin"). Each later move takes a field off it.
 
-import type { ReactNode } from "react";
+import type { ReactNode, RefObject } from "react";
 import type { OpenViewOptions, TabShortcut } from "../../plugins/client/tabs";
 import type { SpecsView } from "../../plugins/builtin/specs/route";
-import type { Scenario } from "../../server/parser";
+import type { AttributeDefinitions, KnownAttributes } from "../../server/customAttributes";
+import type {
+  PullRequestLink,
+  ResourceLink,
+  Scenario,
+  ScenarioFile,
+  ScenarioTarget,
+} from "../../server/parser";
+import type { ResourceLinkKind } from "../../server/resourceLinks";
+import type { LinkDraft } from "../externallinks";
+import type { ScenarioRow, scenarioNeighbors } from "../tree";
 
 /**
  * What the feature page, the scenario page and the editor still call in
@@ -26,12 +36,52 @@ export interface SpecsActions {
   backToFeature(): void;
   /** The url "Copy link" shares for a scenario: versionless on the public site. */
   scenarioLink(fileName: string, scenario: Pick<Scenario, "name" | "version">): string;
-  /** Whether the open scenario has one before and one after it, in the tree's order. */
-  scenarioNav: { prev: boolean; next: boolean };
+  /** The scenarios before and after the open one, in the tree's order — across features too. */
+  scenarioNav: ReturnType<typeof scenarioNeighbors>;
   /** Step to the scenario before (-1) or after (1) the open one. */
   stepScenario(step: -1 | 1): void | false;
   /** The clickable test-links table at the end of a scenario (specs/traceability.feature.md). */
   testsTable(tests: string[]): ReactNode;
+
+  // The editor pane's.
+  /** The open scenario as last saved, or null for a new one no save has placed. */
+  savedEntry: Scenario | null;
+  /** Its version as the draft has it. */
+  draftVersion: number;
+  /** A published scenario: its name and body are no longer edited. */
+  editingPublished: boolean;
+  /** Whether Delete is offered for it (a published one only where Settings allows). */
+  editingDeletable: boolean;
+  /** Whether "New scenario after this one" has a saved scenario to follow. */
+  canAddAfter: boolean;
+  /** The title field, so an autosave tick can see whether the name is still being typed. */
+  nameFieldRef: RefObject<HTMLInputElement | null>;
+  /** The body editor's box, measured while its height is dragged. */
+  bodyFieldRef: RefObject<HTMLDivElement | null>;
+  /** The data repo's attribute definitions, and the names and values in use. */
+  attributeDefs: AttributeDefinitions;
+  knownAttributes: KnownAttributes;
+  newScenarioAfterCurrent(): Promise<void>;
+  cloneTreeScenario(file: string, s: ScenarioRow): Promise<void>;
+  newVersion(index: number): void;
+  deleteScenario(): Promise<void>;
+  proposeScenario(): Promise<void>;
+  publishScenario(): Promise<void>;
+  unpublishScenario(): Promise<void>;
+  // The automated-tests field.
+  addTest(): void;
+  removeTest(index: number): void;
+  startTestEdit(index: number): void;
+  commitTestEdit(): void;
+  cancelTestLookup(): void;
+  // The ticket and qTest link fields as typed.
+  changeLinkDraft(draft: LinkDraft): void;
+  changeQtestDraft(draft: LinkDraft): void;
+  // What a scenario (a target) or the feature (null) links to and carries.
+  savePullRequests(target: ScenarioTarget | null, prs: PullRequestLink[]): Promise<void>;
+  saveResourceLinks(target: ScenarioTarget | null, kind: ResourceLinkKind, links: ResourceLink[]): Promise<void>;
+  uploadScenarioFiles(target: ScenarioTarget | null, listed: ScenarioFile[], chosen: File[], replacing?: string): Promise<void>;
+  saveScenarioFileList(target: ScenarioTarget | null, files: ScenarioFile[]): Promise<void>;
 }
 
 export interface SpecsHost {
