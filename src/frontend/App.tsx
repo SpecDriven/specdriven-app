@@ -31,7 +31,6 @@ import type { ResourceLinkKind } from "../server/resourceLinks";
 import type { FeatureListing } from "../server/features";
 import type { ProjectMember } from "../server/members";
 import type { GitHubRepo } from "../server/issues";
-import type { SearchResultItem } from "../server/search";
 import type { CurrentUser } from "../server/user";
 import {
   codeGenTargetLabel,
@@ -133,7 +132,6 @@ import {
   applyExcalidrawPref,
   useExcalidrawEnabled,
 } from "./excalidrawPref";
-import { markText } from "./highlight";
 import { PageSkeleton } from "./Skeleton";
 import { AppOutdated, watchDataTooNew } from "./AppOutdated";
 import { useModalPrompts } from "./ModalPrompts";
@@ -216,7 +214,6 @@ import { definitionsFor, knownNames, parseAttributeDefinitions } from "../server
 import { ResourceLinkField, ResourceLinkList } from "./ResourceLinkField";
 import { ScenarioFileList, ScenarioFilesField } from "./ScenarioFilesField";
 import {
-  EMPTY_LINK_DRAFT,
   externalLinkLabel,
   isBlankLinkDraft,
   linkDraftOf,
@@ -359,7 +356,121 @@ import {
 } from "./specs/scenarioEdit";
 import type { EditState, Placement } from "./specs/scenarioEdit";
 import { initialsOf } from "./initials";
+import {
+  BODY_HEIGHT_KEY,
+  BODY_MIN,
+  DESC_HEIGHT_KEY,
+  DESC_MIN,
+  clampBodyHeight,
+  clampDescHeight,
+  storeEditorHeight,
+} from "./specs/editorHeight";
+import {
+  resetEditorState,
+  setBodyHeight,
+  setConflict,
+  setConflictDraft,
+  setEditorMenuOpen,
+  setLinkDraft,
+  setLinkError,
+  setPublishing,
+  setQtestDraft,
+  setQtestError,
+  setResizingBody,
+  setResolving,
+  setSavedAt,
+  setSaving,
+  setStatusMenuOpen,
+  setTestDraft,
+  setTestEdit,
+  setTestEditDraft,
+  setTestNameDraft,
+  setTestNameHint,
+  setTestsError,
+  setUnpublishing,
+  useEditorState,
+} from "./specs/editorState";
+import {
+  resetFeaturePageState,
+  setAssignedSaving,
+  setAssigneeMenuOpen,
+  setCardMenu,
+  setDescEdit,
+  setDescHeight,
+  setFeatureAttributesOpen,
+  setFeatureFlagsOpen,
+  setFeatureMenuOpen,
+  setFeaturePrsOpen,
+  setFeatureQtestDraft,
+  setFeatureQtestError,
+  setFeatureQtestSaving,
+  setFeatureResourceOpen,
+  setFeatureTicketsError,
+  setFeatureTicketsOpen,
+  setFeatureTicketsSaving,
+  setPublishMenuOpen,
+  setRenameDraft,
+  setRenaming,
+  setResizingDesc,
+  useFeaturePageState,
+} from "./specs/featurePageState";
+import {
+  resetSpecsDialogs,
+  setAhaImportOpen,
+  setConfluenceFolder,
+  setConfluencePublishOpen,
+  setExtractOpen,
+  setImportOpen,
+  setLinkTestsOpen,
+  setOpenSpecImportOpen,
+  setPublishOpen,
+  setQtestPublishOpen,
+  setWikiQtestPublishOpen,
+  useSpecsDialogs,
+} from "./specs/dialogs";
 import { provideSpecsHost } from "./specs/host";
+import {
+  DEFAULT_PROJECT_MANAGEMENT_TOOL,
+  NO_RESOURCE_LINKS,
+  resetSpecsSettings,
+  setAhaImportOn,
+  setAssignments,
+  setConfluenceEnabledOn,
+  setDeletePublished,
+  setFeatureFlags,
+  setJiraEnabledOn,
+  setPreviewLines,
+  setProjectManagement,
+  setProjectManagementTool,
+  setPublishExternalLinks,
+  setQtestLinks,
+  setResourceLinksOn,
+  setScenarioPolarity,
+  setShowTestLinks,
+  useSpecsSettings,
+  type ResourceLinkSwitches,
+} from "./specs/settings";
+import {
+  resetSpecSelection,
+  scenarioKey,
+  scenarioSelected,
+  setSpecSelection,
+  toggleScenarioSelected,
+  toggleSpecSelected,
+  useSpecSelection,
+} from "./specs/selection";
+import {
+  resetOpenFeature,
+  setDirty,
+  setEditing,
+  setFeature,
+  setFeatureLoading,
+  setPaneRequest,
+  setSearchTerms,
+  setSelected,
+  setSelectedScenario,
+  useOpenFeature,
+} from "./specs/openFeature";
 import { SpecsSidebar, type SpecsSidebarProps } from "./specs/SpecsSidebar";
 import {
   resetTreeState,
@@ -388,15 +499,6 @@ import {
   setListing,
   useSpecsListing,
 } from "./specs/listing";
-
-interface Conflict {
-  ours: string;
-  theirs: string;
-  message: string;
-  /** Set when the conflicted publish targeted a single scenario — with its
-      document id, so the resolution still renames rather than doubles it. */
-  scenario?: ScenarioTarget;
-}
 
 /** Signed-in GitHub account as reported by /api/state (never the token). */
 interface AuthInfo {
@@ -475,13 +577,10 @@ const MIN_AUTOSAVE_SECONDS = 3;
 // etc.feature.md): the tool tickets live in until Settings names another, and
 // the tools the Settings dropdown offers by name — anything else is typed in
 // beside it. Mirrors the server's default in src/server/state.ts.
-const DEFAULT_PROJECT_MANAGEMENT_TOOL = "Jira";
 const PROJECT_MANAGEMENT_TOOLS = ["Jira", "Linear", "GitHub", "GitLab", "Asana", "Azure DevOps"];
 
 // Aha! and Figma links (specs/external-links/aha-and-figma-links.feature.md):
 // each tool is offered only once its Settings switch is on — both start off.
-type ResourceLinkSwitches = Record<ResourceLinkKind, boolean>;
-const NO_RESOURCE_LINKS: ResourceLinkSwitches = { aha: false, figma: false };
 /** The Settings key that switches each tool on. */
 const RESOURCE_LINK_SETTING = { aha: "ahaLinks", figma: "figmaLinks" } as const;
 const RESOURCE_LINK_ICON = { aha: Lightbulb, figma: PenTool } as const;
@@ -526,52 +625,10 @@ function storeSidebarWidth(w: number): void {
   }
 }
 
-// Description editor height (specs/editor/feature-editor.feature.md): the
-// editor opens a third of the window tall and is dragged taller or shorter by
-// the strip along its lower boundary. Device-local, like the sidebar width.
-const DESC_MIN = 120;
-const DESC_HEIGHT_KEY = "sd-desc-height";
-
-export function clampDescHeight(h: number, windowHeight: number): number {
-  // The scenario list below keeps at least a quarter of the window, so the
-  // editor can never swallow the page it belongs to.
-  const max = Math.max(DESC_MIN, Math.round(windowHeight * 0.75));
-  return Math.min(Math.max(Math.round(h), DESC_MIN), max);
-}
-
-// Scenario body height (specs/editor/spec-editor.feature.md "Spec body
-// resize"): the body editor opens at least 40% of the window tall and is
-// dragged taller or shorter by the strip under it; the pane's column scrolls
-// to whatever is below. Device-local, like the description's.
-const BODY_MIN = 120;
-const BODY_HEIGHT_KEY = "sd-body-height";
-
-export function clampBodyHeight(h: number, windowHeight: number): number {
-  // The pane scrolls, so the body may outgrow it — but never past what fits
-  // the window, or the strip would end up off screen mid-drag.
-  const max = Math.max(BODY_MIN, Math.round(windowHeight * 0.85));
-  return Math.min(Math.max(Math.round(h), BODY_MIN), max);
-}
-
-function readEditorHeight(key: string, min: number): number | null {
-  try {
-    const h = Number(localStorage.getItem(key));
-    // Nothing stored, or junk: the CSS default stands until a first drag.
-    return Number.isFinite(h) && h >= min ? Math.round(h) : null;
-  } catch {
-    return null;
-  }
-}
-
-/** A height, or null to clear it on a double-click: back to the CSS default. */
-function storeEditorHeight(key: string, h: number | null): void {
-  try {
-    if (h === null) localStorage.removeItem(key);
-    else localStorage.setItem(key, String(h));
-  } catch {
-    // Storage unavailable (private mode): the height just won't stick.
-  }
-}
+// The description's and the scenario body's heights moved to
+// src/frontend/specs/editorHeight.ts; the clamps are re-exported for the
+// tests that import them from here.
+export { clampBodyHeight, clampDescHeight };
 
 // The sidebar's tabs, one per mounted plugin by its id (src/plugins/client/
 // tabs.ts) — Specs' feature tree, the special folders' page lists among
@@ -1270,8 +1327,85 @@ export function App() {
   useState(() => {
     resetListing();
     resetTreeState();
+    resetOpenFeature();
+    resetEditorState();
+    resetFeaturePageState();
+    resetSpecSelection();
+    resetSpecsDialogs();
+    resetSpecsSettings();
   });
   const { features, folders, folderDescriptions, folderOrders, featureOrders } = useSpecsListing();
+  // The open feature — its file, what was read of it, the card highlighted
+  // and the scenario in the editor — lives in a store the Specs tab reads
+  // too (src/frontend/specs/openFeature.ts); set here under the same names.
+  const { featureLoading, selected, feature, selectedScenario, dirty, editing, paneRequest, searchTerms } =
+    useOpenFeature();
+  // What the editor pane and the feature page hold of their own — menus,
+  // drafts, heights, a save or a publish under way — likewise
+  // (src/frontend/specs/editorState.ts, featurePageState.ts).
+  const {
+    editorMenuOpen,
+    statusMenuOpen,
+    conflict,
+    conflictDraft,
+    resolving,
+    saving,
+    savedAt,
+    publishing,
+    unpublishing,
+    testDraft,
+    testNameDraft,
+    testEdit,
+    testEditDraft,
+    testNameHint,
+    testsError,
+    linkDraft,
+    linkError,
+    qtestDraft,
+    qtestError,
+    bodyHeight,
+    resizingBody,
+  } = useEditorState();
+  const {
+    featureMenuOpen,
+    cardMenu,
+    assigneeMenuOpen,
+    publishMenuOpen,
+    assignedSaving,
+    renameDraft,
+    renaming,
+    featureTicketsOpen,
+    featureTicketsError,
+    featureTicketsSaving,
+    featureQtestDraft,
+    featureQtestError,
+    featureQtestSaving,
+    featurePrsOpen,
+    featureFlagsOpen,
+    featureAttributesOpen,
+    featureResourceOpen,
+    descEdit,
+    descHeight,
+    resizingDesc,
+  } = useFeaturePageState();
+  // The switches of Settings the tree, the feature page and the editor read
+  // (src/frontend/specs/settings.ts), set from /api/state further down.
+  const {
+    previewLines,
+    showTestLinks,
+    publishExternalLinks,
+    projectManagement,
+    projectManagementTool,
+    resourceLinksOn,
+    qtestLinks,
+    ahaImportOn,
+    jiraEnabledOn,
+    confluenceEnabledOn,
+    deletePublished,
+    assignments,
+    featureFlags,
+    scenarioPolarity,
+  } = useSpecsSettings();
   // Project members (src/server/members.ts): the data repo's
   // project-settings.yaml, as the feature's "Assigned" dropdown offers them.
   const [members, setMembers] = useState<ProjectMember[]>([]);
@@ -1307,8 +1441,6 @@ export function App() {
     for (const f of features) for (const s of f.scenarios) t[s.status]++;
     return t;
   }, [features]);
-  /** Whether an assignment change is in flight — the dropdown waits for it. */
-  const [assignedSaving, setAssignedSaving] = useState(false);
   // The tree's own state (src/frontend/specs/treeState.ts): folds, outlines,
   // the folder picked, drags, the row menu, scenario picks and the filter.
   const {
@@ -1332,11 +1464,10 @@ export function App() {
   const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth);
   /** True while the sidebar divider is being dragged. */
   const [resizingSidebar, setResizingSidebar] = useState(false);
-  // Code gen sessions (specs/agents/claude.feature.md): specs checked in the
-  // sidebar, and scenarios checked on their cards, go into a named session
-  // that runs the coding agent. Per file the selection is the whole spec
-  // ("all") or a set of scenario keys.
-  const [specSelection, setSpecSelection] = useState<Map<string, "all" | Set<string>>>(new Map());
+  // Code gen sessions (specs/agents/claude.feature.md): what is checked for
+  // one, in a store the tree and the feature page set
+  // (src/frontend/specs/selection.ts).
+  const specSelection = useSpecSelection();
   const treePickAnchor = useRef<string | null>(null);
   const [sessionRunning, setSessionRunning] = useState(false);
   /** The Start session dialog (src/frontend/StartSessionDialog.tsx), open or not. */
@@ -1360,16 +1491,6 @@ export function App() {
   const [palette, setPalette] = useState<{ query: string } | null>(null);
   /** The pages opened most recently — the palette's empty state. */
   const [recent, setRecent] = useState<RecentEntry[]>(readRecent);
-  /** The header's ⋯ menu, a card's ⋯ menu (by index), the assignee chips. */
-  const [featureMenuOpen, setFeatureMenuOpen] = useState(false);
-  // The scenario pane's ⋯ menu, its status chip's menu, and the feature
-  // page's publish-rollup menu (specs/editor/spec-editor.feature.md "Spec
-  // editor pane"): actions as menus, not a row of filled buttons.
-  const [editorMenuOpen, setEditorMenuOpen] = useState(false);
-  const [statusMenuOpen, setStatusMenuOpen] = useState(false);
-  const [publishMenuOpen, setPublishMenuOpen] = useState(false);
-  const [cardMenu, setCardMenu] = useState<number | null>(null);
-  const [assigneeMenuOpen, setAssigneeMenuOpen] = useState(false);
   /** Sidebar collapsed to a rail ("["), remembered on this device. */
   const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
   /** The editor column hidden ("\"), so the coding agent pane can have the
@@ -1381,10 +1502,6 @@ export function App() {
   const compact = useMediaQuery(COMPACT_QUERY);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const drawerTrapRef = useFocusTrap(compact && drawerOpen);
-  /** A feature is being fetched — the skeleton shows until it lands. */
-  const [featureLoading, setFeatureLoading] = useState(false);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [feature, setFeature] = useState<Feature | null>(null);
   // What the data repo's attributes use, for the chips' checks and the
   // editor's suggestions (specs/app/custom-attributes.feature.md): every
   // listed feature, and the open one as it stands — its drafts and an edit
@@ -1398,16 +1515,12 @@ export function App() {
       ]),
     [features, feature],
   );
-  /** Draft for the inline file-name editor; null while not editing. */
-  const [renameDraft, setRenameDraft] = useState<string | null>(null);
-  const [renaming, setRenaming] = useState(false);
   // The header field saves on blur, and a blur can arrive from a stale
   // render (the field closing on ESC, or while a save is out) — these refs
   // carry the current draft and whether a rename is in flight.
   const renameDraftRef = useRef(renameDraft);
   renameDraftRef.current = renameDraft;
   const renamingRef = useRef(false);
-  const [selectedScenario, setSelectedScenario] = useState<number | null>(null);
   const scenarioRefs = useRef<(HTMLElement | null)[]>([]);
   /** The sidebar's folder tree, for scrolling its highlighted row into view. */
   const treeRef = useRef<HTMLDivElement | null>(null);
@@ -1418,25 +1531,6 @@ export function App() {
    * folders above it open and the listing is in.
    */
   const revealPending = useRef(false);
-  const [dirty, setDirty] = useState(false);
-  const [editing, setEditing] = useState<EditState | null>(null);
-  /**
-   * A scenario deep link asks for that scenario's page (specs/navigation.spec
-   * .md "open a scenario link"). The pane opens from an effect rather than
-   * straight from the navigation: any pane the link replaced closes first, so
-   * the new one starts a fresh editor session — its own autosave baseline,
-   * with the outgoing one's last save unable to reach back into it.
-   */
-  const [paneRequest, setPaneRequest] = useState<{
-    scenario: Scenario;
-    /** Search terms to mark in the pane (specs/search.feature.md), when a hit opened it. */
-    terms: string[] | null;
-  } | null>(null);
-  /**
-   * The words marked in the open scenario editor (specs/search.feature.md):
-   * the terms of the search hit that opened it, gone when the pane closes.
-   */
-  const [searchTerms, setSearchTerms] = useState<string[] | null>(null);
   // Editor autosave (specs/editor/editor-autosave.feature.md): the signature of
   // what the open dialog last had saved, and whether a tick is still saving.
   // Refs, because a tick reads them between renders and must not cause one.
@@ -1489,23 +1583,10 @@ export function App() {
   /** Bumped every time the dialog opens or closes, so a save that lands after
       the user has moved on cannot stamp its result onto another scenario. */
   const editorSession = useRef(0);
-  const [conflict, setConflict] = useState<Conflict | null>(null);
-  const [conflictDraft, setConflictDraft] = useState("");
-  /** Which resolution is being published, if any — the buttons disable while it runs. */
-  const [resolving, setResolving] = useState<"ours" | "theirs" | "draft" | null>(null);
-  /** Autosave state behind the header's Saved indicator. */
-  const [saving, setSaving] = useState(false);
-  const [savedAt, setSavedAt] = useState<number | null>(null);
   /** The `?` keyboard cheat sheet. */
   const [sheetOpen, setSheetOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  /** "all", a scenario key (`name@vN`), or null while no publish is running. */
-  const [publishing, setPublishing] = useState<string | null>(null);
-  // The editor pane's Back to proposed is away (specs/editor/spec-editor.
-  // feature.md "Unpublish a Spec"): its route commits and pushes first.
-  const [unpublishing, setUnpublishing] = useState(false);
   const [reloadSeconds, setReloadSeconds] = useState(60);
-  const [previewLines, setPreviewLines] = useState(8);
   /**
    * How often the open editor saves itself
    * (specs/editor/editor-autosave.feature.md).
@@ -1524,9 +1605,6 @@ export function App() {
   const readmeSaveQueue = useRef(createPromiseQueue());
   /** Bumped per README load, so a save landing after a repo switch stamps nothing. */
   const readmeSession = useRef(0);
-  // Test links (specs/traceability.feature.md): the table of automated-test
-  // links at the end of each scenario card is optional; default ON.
-  const [showTestLinks, setShowTestLinks] = useState(true);
   // Open test links in IntelliJ IDEA (specs/traceability.feature.md "Open
   // test in idea"): a click on one runs `idea --line` on the file in the
   // code repo instead of opening GitHub; default OFF.
@@ -1539,82 +1617,50 @@ export function App() {
   const [ghosttyOn, setGhosttyOn] = useState(false);
   /** Whether Ghostty is installed where the server runs. */
   const [canOpenGhostty, setCanOpenGhostty] = useState(false);
-  // External links (specs/external-links/project-management-jira-linear-etc.
-  // feature.md): whether ticket links are written into the .feature.md files.
-  const [publishExternalLinks, setPublishExternalLinks] = useState(true);
-  // Project management (specs/external-links/project-management-jira-linear-
-  // etc.feature.md): whether tickets are tracked at all, and the tool they
-  // live in. Off, nothing in the app shows or asks for a ticket; on, the
-  // editors ask for the ticket's url alone — the tool is this one.
-  const [projectManagement, setProjectManagement] = useState(true);
-  const [projectManagementTool, setProjectManagementTool] = useState(
-    DEFAULT_PROJECT_MANAGEMENT_TOOL,
-  );
-  /** Which of Aha! and Figma features and scenarios link to
-      (specs/external-links/aha-and-figma-links.feature.md). */
-  const [resourceLinksOn, setResourceLinksOn] = useState<ResourceLinkSwitches>(NO_RESOURCE_LINKS);
-  /** Whether features and scenarios link qTest test cases
-      (specs/external-links/qtest-test-cases.feature.md); default OFF. */
-  const [qtestLinks, setQtestLinks] = useState(false);
+  // Which of the Specs tab's dialogs is open — imports, publishing,
+  // extracting, linking tests — is in a store their openers set
+  // (src/frontend/specs/dialogs.ts); they are still rendered here.
+  const {
+    confluencePublishOpen,
+    confluenceFolder,
+    qtestPublishOpen,
+    wikiQtestPublishOpen,
+    ahaImportOpen,
+    openSpecImportOpen,
+    extractOpen,
+    importOpen,
+    publishOpen,
+    linkTestsOpen,
+  } = useSpecsDialogs();
   /** Confluence (specs/external-links/confluence-wiki.feature.md): the wikis
-      this device holds a token for, the last parent page published under,
-      and whether the publish dialog is open. */
+      this device holds a token for. */
   const [confluenceWikis, setConfluenceWikis] = useState<ConfluenceWiki[]>([]);
-  const [confluencePublishOpen, setConfluencePublishOpen] = useState(false);
-  /** "Publish to Confluence…" on a folder ("Publish a folder's features to
-      Confluence"): the folder, as the sidebar names it, and its features —
-      null until the server says which pages they link. */
-  const [confluenceFolder, setConfluenceFolder] = useState<{
-    path: string;
-    label: string;
-    features: FolderFeature[] | null;
-  } | null>(null);
   /** qTest (specs/external-links/qtest-test-cases.feature.md "Create qTest
       test cases from a feature"): the sites this device holds a token for,
-      the last parent module created under, and whether the dialog is open. */
+      and the last parent module created under. */
   const [qtestSites, setQtestSites] = useState<QtestSite[]>([]);
   const [qtestParentUrl, setQtestParentUrl] = useState("");
-  const [qtestPublishOpen, setQtestPublishOpen] = useState(false);
-  /** "Publish to Wiki & qTest…" (specs/external-links/qtest-test-cases.feature.md
-      "Publish the page and the test cases from one dialog"): the page first,
-      then the test cases, from one dialog. */
-  const [wikiQtestPublishOpen, setWikiQtestPublishOpen] = useState(false);
   /** Aha! (specs/external-links/aha-import.feature.md): the sites this
-      device holds an API key for, and the folder an open import lands in
-      (null for the top level) — or null while the dialog is closed. */
+      device holds an API key for. */
   const [ahaSites, setAhaSites] = useState<AhaSite[]>([]);
-  const [ahaImportOpen, setAhaImportOpen] = useState<{ folder: string | null } | null>(null);
   /** Whether "Import from Aha!" is offered at all — switched on in Settings
-      → Aha!, default OFF. Never in the demo or the hosted app, which keep
-      no API key. */
-  const [ahaImportOn, setAhaImportOn] = useState(false);
+      → Aha!. Never in the demo or the hosted app, which keep no API key. */
   const ahaImport = ahaImportOn && !demo && !hosted;
-  /** Import from OpenSpec (specs/external-links/openspec-import.feature.md):
-      the folder an open import lands in (null for the top level), or null
-      while the dialog is closed. Needs no key, so no Settings switch; never
-      in the demo or the hosted app, which have no code repo on disk. */
-  const [openSpecImportOpen, setOpenSpecImportOpen] = useState<{ folder: string | null } | null>(null);
+  /** Import from OpenSpec (specs/external-links/openspec-import.feature.md)
+      needs no key, so no Settings switch; never in the demo or the hosted
+      app, which have no code repo on disk. */
   const openSpecImport = !demo && !hosted;
   /** Extract specs from a code project (specs/app/extract-specs-from-code
-      .feature.md): the project the dialog starts on — the open code
-      repository — or null to ask for one; null while the dialog is closed.
-      Offered wherever a code repository can be opened: the user's own
-      machine, never the demo, the hosted app or the read-only site. */
-  const [extractOpen, setExtractOpen] = useState<{ codeDir: string | null } | null>(null);
+      .feature.md) is offered wherever a code repository can be opened: the
+      user's own machine, never the demo, the hosted app or the read-only
+      site. */
   const extractSpecs = canOpenCodeRepo && !demo && !hosted;
   /** Import from Jira/Wiki (specs/external-links/jira-wiki-import
-      .feature.md): the Jira sites this device holds a token for, and the
-      folder an open import lands in (null for the top level) — or null
-      while the dialog is closed. Never in the demo or the hosted app. */
+      .feature.md): the Jira sites this device holds a token for. Never in
+      the demo or the hosted app. */
   const [jiraSites, setJiraSites] = useState<JiraSite[]>([]);
-  const [importOpen, setImportOpen] = useState<{ folder: string | null; mode: "both" | "jira" | "wiki" } | null>(null);
-  /** Whether Jira and Confluence are switched on at all — in Settings → Jira /
-      Confluence, each default OFF (specs/external-links/jira-wiki-import
-      .feature.md, confluence-wiki.feature.md). Jira off hides the Jira import;
-      Confluence off hides "Publish to Confluence…" and the Confluence import.
-      Never in the demo or the hosted app, which keep no tokens. */
-  const [jiraEnabledOn, setJiraEnabledOn] = useState(false);
-  const [confluenceEnabledOn, setConfluenceEnabledOn] = useState(false);
+  /** Jira and Confluence, switched on in Settings: never in the demo or the
+      hosted app, which keep no tokens. */
   const jiraEnabled = jiraEnabledOn && !demo && !hosted;
   const confluenceEnabled = confluenceEnabledOn && !demo && !hosted;
   /** Code gen sessions offered at all (specs/agents/claude.feature.md). */
@@ -1647,19 +1693,6 @@ export function App() {
   useEffect(() => {
     void agentChat.restore();
   }, []);
-  // Deleting published scenarios (specs/editor/spec-editor.feature.md "Delete
-  // Published Spec"): opt-in — published scenarios stay immutable until the
-  // Settings switch turns deletion on.
-  const [deletePublished, setDeletePublished] = useState(false);
-  // Feature assignment (src/server/members.ts): opt-in — the "Assigned"
-  // dropdown shows only once the Settings switch turns assignments on.
-  const [assignments, setAssignments] = useState(false);
-  // Feature flags (specs/app/feature-flags.feature.md): opt-in — the flag
-  // chips and editors show only once the Settings switch turns them on.
-  const [featureFlags, setFeatureFlags] = useState(false);
-  // Scenario polarity (specs/ui/scenario-polarity.feature.md): opt-in — the
-  // Positive / Negative pill shows only once the Settings switch turns it on.
-  const [scenarioPolarity, setScenarioPolarity] = useState(false);
   // The GitHub account (specs/app/user-info-settings.feature.md "GitHub
   // account behind a switch"): not ready, so the Settings sign-in block and
   // the user menu's sign-in entries show only once the switch is on.
@@ -1783,58 +1816,14 @@ export function App() {
   const [settingsSyncDraft, setSettingsSyncDraft] = useState(DEFAULT_SYNC_SERVER_URL);
   /** The Settings switch: off saves an empty url, which turns live sync off. */
   const [settingsSyncOnDraft, setSettingsSyncOnDraft] = useState(false);
-  /** Url being typed into the edit dialog's "Add test link" field. */
-  const [testDraft, setTestDraft] = useState("");
-  /** The test's name beside it: read from the code on GitHub, or typed. */
-  const [testNameDraft, setTestNameDraft] = useState("");
-  /** Index of the test link opened for in-place ✎ editing, if any. */
-  const [testEdit, setTestEdit] = useState<number | null>(null);
-  const [testEditDraft, setTestEditDraft] = useState<TestDraft>({ url: "", name: "" });
-  /** What the last name lookup is doing or why it found nothing, under the field. */
-  const [testNameHint, setTestNameHint] = useState<string | null>(null);
   /** Serial of the latest name lookup: an older one landing late is ignored. */
   const testLookup = useRef(0);
   /** The url and name an ✎ row opened with, to tell a changed url from a re-open. */
   const testEditOpened = useRef<TestDraft>({ url: "", name: "" });
-  /** Why the last Save was blocked by the tests field, if it was. */
-  const [testsError, setTestsError] = useState<string | null>(null);
-  /** The edit dialog's "Ticket link" fields as typed
-      (specs/external-links/project-management-jira-linear-etc.feature.md). */
-  const [linkDraft, setLinkDraft] = useState<LinkDraft>(EMPTY_LINK_DRAFT);
-  /** Why the last Save was blocked by the ticket-link fields, if it was. */
-  const [linkError, setLinkError] = useState<string | null>(null);
-  /** The feature's tickets popover (specs/external-links/project-management-
-      jira-linear-etc.feature.md "Several tickets on a feature"): open or not,
-      why the server refused the last list, and whether one is on its way. */
-  const [featureTicketsOpen, setFeatureTicketsOpen] = useState(false);
-  const [featureTicketsError, setFeatureTicketsError] = useState<string | null>(null);
-  const [featureTicketsSaving, setFeatureTicketsSaving] = useState(false);
-  /** The edit dialog's "qTest test case" fields as typed
-      (specs/external-links/qtest-test-cases.feature.md), and why the last
-      Save was blocked by them; then the feature's own qTest dialog. */
-  const [qtestDraft, setQtestDraft] = useState<LinkDraft>(EMPTY_LINK_DRAFT);
-  const [qtestError, setQtestError] = useState<string | null>(null);
-  const [featureQtestDraft, setFeatureQtestDraft] = useState<LinkDraft | null>(null);
-  const [featureQtestError, setFeatureQtestError] = useState<string | null>(null);
-  const [featureQtestSaving, setFeatureQtestSaving] = useState(false);
-  /** The feature's "Pull requests" popover
-      (specs/external-links/related-pull-requests.feature.md). */
-  const [featurePrsOpen, setFeaturePrsOpen] = useState(false);
-  const [featureFlagsOpen, setFeatureFlagsOpen] = useState(false);
-  /** The feature's attributes popover (specs/app/custom-attributes.feature.md). */
-  const [featureAttributesOpen, setFeatureAttributesOpen] = useState(false);
-  /** The feature's Aha! or Figma popover, whichever is open
-      (specs/external-links/aha-and-figma-links.feature.md). */
-  const [featureResourceOpen, setFeatureResourceOpen] = useState<ResourceLinkKind | null>(null);
-  // The feature description editor (specs/editor/feature-editor.feature.md):
-  // the free markdown above the first scenario, edited in place and autosaved
-  // at the scenario editor's interval like the home README. Keyed by file so
-  // the editor belongs to the feature it was opened on — it shows only while
-  // that feature is selected, and a save that lands after the user moved on
-  // stamps nothing onto the feature opened since. `descSaved` is the text
-  // last landed on the server; refs, because a tick reads them between
-  // renders and must not cause one.
-  const [descEdit, setDescEdit] = useState<{ file: string; text: string } | null>(null);
+  // The feature description editor's draft is in the feature page's store
+  // (src/frontend/specs/featurePageState.ts). `descSaved` is the text last
+  // landed on the server; refs, because a tick reads them between renders
+  // and must not cause one.
   const descEditRef = useRef(descEdit);
   descEditRef.current = descEdit;
   const selectedRef = useRef(selected);
@@ -1849,21 +1838,7 @@ export function App() {
    * started.
    */
   const descSaveQueue = useRef(createPromiseQueue());
-  // The editor's height, dragged by the strip along its lower boundary. null
-  // until a first drag or a stored height: then the CSS third-of-the-window
-  // default stands, and follows the window.
-  const [descHeight, setDescHeight] = useState<number | null>(() =>
-    readEditorHeight(DESC_HEIGHT_KEY, DESC_MIN),
-  );
-  const [resizingDesc, setResizingDesc] = useState(false);
   const descPaneRef = useRef<HTMLDivElement | null>(null);
-  // The scenario body's height, the same way (specs/editor/spec-editor.
-  // feature.md "Spec body resize"): null until a first drag or a stored
-  // height, while the CSS default stands.
-  const [bodyHeight, setBodyHeight] = useState<number | null>(() =>
-    readEditorHeight(BODY_HEIGHT_KEY, BODY_MIN),
-  );
-  const [resizingBody, setResizingBody] = useState(false);
   const bodyFieldRef = useRef<HTMLDivElement | null>(null);
   // Git access (specs/app/user-info-settings.feature.md "Git access"): the
   // GitHub CLI (the default wherever gh is installed), a personal access
@@ -2362,11 +2337,9 @@ export function App() {
     extractKick,
     () => void loadFeatures(),
   );
-  const [publishOpen, setPublishOpen] = useState(false);
-  /** "Link tests to specs" (specs/app/extract-specs-from-code.feature.md
-      "Tests are linked later, on their own"): offered on a specification
-      folder that is open, where specs can be extracted at all. */
-  const [linkTestsOpen, setLinkTestsOpen] = useState(false);
+  // "Link tests to specs" (specs/app/extract-specs-from-code.feature.md
+  // "Tests are linked later, on their own") is offered on a specification
+  // folder that is open, where specs can be extracted at all.
   const linkTestsTrapRef = useFocusTrap(linkTestsOpen);
   const canLinkTests = extractSpecs && !needsRepo && codeRepoDir === null;
   // The desktop app's File → Extract Specs from Code Project… (src/electron/
@@ -3705,48 +3678,6 @@ export function App() {
     } else {
       toast.error(data.error ?? "Could not create the feature");
     }
-  };
-
-  /** A scenario's identity within its file: the `<name>@v<version>` heading
-      syntax, used as both a publish-progress and a selection key. Declared
-      before the selection helpers that call it during render. */
-  const scenarioKey = (s: { name: string; version: number }) => `${s.name}@v${s.version}`;
-
-  // The spec's own checkbox: none or some scenarios → the whole spec;
-  // the whole spec → cleared.
-  const toggleSpecSelected = (fileName: string) =>
-    setSpecSelection((prev) => {
-      const next = new Map(prev);
-      if (next.get(fileName) === "all") next.delete(fileName);
-      else next.set(fileName, "all");
-      return next;
-    });
-
-  // A scenario's checkbox on its card: unchecking one of a whole-spec
-  // selection keeps the rest; checking the last missing one promotes back to
-  // the whole spec. `all` is every scenario the file has, so "the whole
-  // spec" and "all of its scenarios" stay the same selection.
-  const toggleScenarioSelected = (
-    fileName: string,
-    all: { name: string; version: number }[],
-    key: string,
-  ) =>
-    setSpecSelection((prev) => {
-      const next = new Map(prev);
-      const entry = next.get(fileName);
-      const picked = new Set(entry === "all" ? all.map(scenarioKey) : (entry ?? []));
-      if (picked.has(key)) picked.delete(key);
-      else picked.add(key);
-      if (picked.size === 0) next.delete(fileName);
-      else if (all.every((s) => picked.has(scenarioKey(s)))) next.set(fileName, "all");
-      else next.set(fileName, picked);
-      return next;
-    });
-
-  /** True when this scenario is in the session selection. */
-  const scenarioSelected = (fileName: string, s: { name: string; version: number }) => {
-    const entry = specSelection.get(fileName);
-    return entry === "all" || (entry instanceof Set && entry.has(scenarioKey(s)));
   };
 
   // What the current selection sends to a session. Selections can outlive
@@ -6919,14 +6850,6 @@ export function App() {
     });
 
   /**
-   * Open a search hit exactly like its deep link (specs/search.feature.md): a
-   * scenario hit opens that scenario's page — or, with ⌘⏎ in the palette,
-   * its feature page with the card highlighted.
-   */
-  const resultHref = (r: SearchResultItem) =>
-    r.scenario ? scenarioPath(r.fileName, r.scenario) : featurePath(r.fileName);
-
-  /**
    * A scenario in the sidebar tree (specs/ui/navigation.feature.md "Scenario
    * navigation"): opens that scenario's page, from the feature page or
    * straight from another scenario's pane — the whole point, switching
@@ -7609,57 +7532,9 @@ export function App() {
     if (!to) return false;
     openScenarioRow(to.file, to.scenario);
   };
-  // What the Specs tab's palette, Recent list and `c` read (src/plugins/
+  // What the Specs tab's `c` and its own commands read (src/plugins/
   // builtin/specs/client.tsx), published before they are read below.
   provideSpecsHost({
-    search: async (q, signal) => {
-      const res = await fetch(`/api/search?scope=specs&q=${encodeURIComponent(q)}`, { signal });
-      const data = (await res.json()) as { results?: SearchResultItem[]; error?: string };
-      if (!res.ok) throw new Error(data.error ?? "Search failed");
-      return (data.results ?? []).map((r) => {
-        const scenario = r.scenario ? { slug: slugify(r.scenario.name), version: r.scenario.version } : null;
-        const view: SpecsView = { feature: r.fileName, scenario, terms: r.terms };
-        return {
-          id: `${r.kind}:${r.fileName}:${r.scenario?.name ?? ""}@${r.scenario?.version ?? 0}`,
-          group: r.scenario ? "Scenarios" : "Features",
-          label: r.scenario ? r.scenario.name : r.featureName,
-          sub: r.scenario ? (
-            <>
-              {r.featureName}
-              {r.snippet && <> · {markText(r.snippet, r.terms)}</>}
-            </>
-          ) : r.snippet ? (
-            markText(r.snippet, r.terms)
-          ) : undefined,
-          icon: r.scenario ? (
-            <StatusIcon status={scenarioStatus(r.fileName, r.scenario)} size={14} />
-          ) : (
-            <FileText size={14} />
-          ),
-          href: resultHref(r),
-          view,
-          // Alt opens the scenario's card on its feature's page.
-          ...(r.scenario ? { altView: { ...view, page: true } } : {}),
-        };
-      });
-    },
-    recent: (view) => {
-      const listing = features.find((f) => f.fileName === view.feature);
-      const open = view.feature === selected ? feature : null;
-      const name = open?.name || listing?.name || titleFromFileName(view.feature);
-      if (!view.scenario) return { label: name, icon: <FileText size={14} /> };
-      const { slug, version } = view.scenario;
-      const s = (open?.scenarios ?? listing?.scenarios ?? []).find(
-        (x) => slugify(x.name) === slug && (version === undefined || x.version === version),
-      );
-      if (!s) return null;
-      return {
-        label: s.name,
-        sub: name,
-        icon: <StatusIcon status={scenarioStatus(view.feature, s)} size={14} />,
-        altView: { ...view, page: true },
-      };
-    },
     createFeature: () => void createFeature(),
     // Imports into the selected spec folder (specs/external-links/aha-import
     // .feature.md, OpenSpec's likewise), while their switches are on.
@@ -8265,10 +8140,6 @@ export function App() {
     // plugin tab's own commands.
     .filter((x) => (readOnly ? READ_ONLY_PALETTE.test(x.id) : !locked || !WRITES_SPECS.test(x.id)));
 
-  const scenarioStatus = (fileName: string, s: { name: string; version: number }) =>
-    features
-      .find((f) => f.fileName === fileName)
-      ?.scenarios.find((x) => x.name === s.name && x.version === s.version)?.status ?? "proposed";
   const resolvePalette = async (q: string, signal: AbortSignal): Promise<PaletteItem[]> => {
     // The tab on screen searches its own data when it offers a search — its
     // store (the server's full-text index knows only markdown), or its own
@@ -11986,18 +11857,9 @@ export function App() {
           <PageSkeleton cards={3} />
         )
   );
-  // The window title's page part for the open feature (specs/ui/
-  // navigation.feature.md): the feature, and the scenario open in the pane.
-  const specsTitle =
-    feature && selected
-      ? paneScenario
-        ? `${feature.name || titleFromFileName(selected)} · ${paneScenario.name} v${paneScenario.version}`
-        : feature.name || titleFromFileName(selected)
-      : null;
   provideSpecsHost({
     sidebar: specsSidebar,
     pane: specsPane,
-    title: specsTitle,
   });
 
   return (
