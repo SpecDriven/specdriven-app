@@ -10,6 +10,7 @@ import {
   setDescEdit,
   setRenameDraft,
 } from "../src/frontend/specs/featurePageState";
+import { resetSpecsDialogs, setAhaImportOpen, setImportOpen, specsDialogs } from "../src/frontend/specs/dialogs";
 import { resetListing, scenarioStatus, setFeatures } from "../src/frontend/specs/listing";
 import {
   openFeatureState,
@@ -23,6 +24,14 @@ import {
 } from "../src/frontend/specs/openFeature";
 import { recentSpec } from "../src/frontend/specs/palette";
 import type { EditState } from "../src/frontend/specs/scenarioEdit";
+import {
+  resetSpecSelection,
+  scenarioKey,
+  scenarioSelected,
+  specSelection,
+  toggleScenarioSelected,
+  toggleSpecSelected,
+} from "../src/frontend/specs/selection";
 import { createStore } from "../src/frontend/specs/store";
 import type { FeatureListing } from "../src/server/features";
 import type { Feature, Scenario } from "../src/server/parser";
@@ -44,6 +53,8 @@ afterEach(() => {
   resetOpenFeature();
   resetEditorState();
   resetFeaturePageState();
+  resetSpecSelection();
+  resetSpecsDialogs();
   resetListing();
 });
 
@@ -176,4 +187,46 @@ test("the feature page's state keeps a description draft by its file, and a rese
   expect(featurePageState().descEdit).toBeNull();
   expect(featurePageState().renameDraft).toBeNull();
   expect(featurePageState().cardMenu).toBeNull();
+});
+
+test("a spec's checkbox takes the whole spec, and takes it back", () => {
+  toggleSpecSelected(FILE);
+  expect(specSelection().get(FILE)).toBe("all");
+  expect(scenarioSelected(FILE, { name: "Create a quote", version: 1 })).toBe(true);
+  toggleSpecSelected(FILE);
+  expect(specSelection().has(FILE)).toBe(false);
+  expect(scenarioSelected(FILE, { name: "Create a quote", version: 1 })).toBe(false);
+});
+
+test("a scenario's checkbox keeps the rest of a whole spec, and the last one checked makes it whole again", () => {
+  const all = [
+    { name: "Create a quote", version: 1 },
+    { name: "Send a quote", version: 2 },
+  ];
+  toggleSpecSelected(FILE);
+  toggleScenarioSelected(FILE, all, scenarioKey(all[0]!));
+  expect(scenarioSelected(FILE, all[0]!)).toBe(false);
+  expect(scenarioSelected(FILE, all[1]!)).toBe(true);
+  toggleScenarioSelected(FILE, all, scenarioKey(all[0]!));
+  expect(specSelection().get(FILE)).toBe("all");
+  // Unchecking every scenario leaves the spec out altogether.
+  toggleScenarioSelected(FILE, all, scenarioKey(all[0]!));
+  toggleScenarioSelected(FILE, all, scenarioKey(all[1]!));
+  expect(specSelection().has(FILE)).toBe(false);
+});
+
+test("a scenario's key is its heading: the name and the version", () => {
+  expect(scenarioKey({ name: "Create a quote", version: 3 })).toBe("Create a quote@v3");
+});
+
+test("an import dialog is open on the folder it lands in, and a reset closes every dialog", () => {
+  expect(specsDialogs().ahaImportOpen).toBeNull();
+  setAhaImportOpen({ folder: "billing" });
+  setImportOpen({ folder: null, mode: "jira" });
+  expect(specsDialogs().ahaImportOpen).toEqual({ folder: "billing" });
+  expect(specsDialogs().importOpen).toEqual({ folder: null, mode: "jira" });
+  resetSpecsDialogs();
+  expect(specsDialogs().ahaImportOpen).toBeNull();
+  expect(specsDialogs().importOpen).toBeNull();
+  expect(specsDialogs().linkTestsOpen).toBe(false);
 });

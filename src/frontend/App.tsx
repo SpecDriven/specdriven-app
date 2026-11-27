@@ -414,7 +414,30 @@ import {
   setResizingDesc,
   useFeaturePageState,
 } from "./specs/featurePageState";
+import {
+  resetSpecsDialogs,
+  setAhaImportOpen,
+  setConfluenceFolder,
+  setConfluencePublishOpen,
+  setExtractOpen,
+  setImportOpen,
+  setLinkTestsOpen,
+  setOpenSpecImportOpen,
+  setPublishOpen,
+  setQtestPublishOpen,
+  setWikiQtestPublishOpen,
+  useSpecsDialogs,
+} from "./specs/dialogs";
 import { provideSpecsHost } from "./specs/host";
+import {
+  resetSpecSelection,
+  scenarioKey,
+  scenarioSelected,
+  setSpecSelection,
+  toggleScenarioSelected,
+  toggleSpecSelected,
+  useSpecSelection,
+} from "./specs/selection";
 import {
   resetOpenFeature,
   setDirty,
@@ -1289,6 +1312,8 @@ export function App() {
     resetOpenFeature();
     resetEditorState();
     resetFeaturePageState();
+    resetSpecSelection();
+    resetSpecsDialogs();
   });
   const { features, folders, folderDescriptions, folderOrders, featureOrders } = useSpecsListing();
   // The open feature — its file, what was read of it, the card highlighted
@@ -1402,11 +1427,10 @@ export function App() {
   const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth);
   /** True while the sidebar divider is being dragged. */
   const [resizingSidebar, setResizingSidebar] = useState(false);
-  // Code gen sessions (specs/agents/claude.feature.md): specs checked in the
-  // sidebar, and scenarios checked on their cards, go into a named session
-  // that runs the coding agent. Per file the selection is the whole spec
-  // ("all") or a set of scenario keys.
-  const [specSelection, setSpecSelection] = useState<Map<string, "all" | Set<string>>>(new Map());
+  // Code gen sessions (specs/agents/claude.feature.md): what is checked for
+  // one, in a store the tree and the feature page set
+  // (src/frontend/specs/selection.ts).
+  const specSelection = useSpecSelection();
   const treePickAnchor = useRef<string | null>(null);
   const [sessionRunning, setSessionRunning] = useState(false);
   /** The Start session dialog (src/frontend/StartSessionDialog.tsx), open or not. */
@@ -1577,58 +1601,50 @@ export function App() {
   /** Whether features and scenarios link qTest test cases
       (specs/external-links/qtest-test-cases.feature.md); default OFF. */
   const [qtestLinks, setQtestLinks] = useState(false);
+  // Which of the Specs tab's dialogs is open — imports, publishing,
+  // extracting, linking tests — is in a store their openers set
+  // (src/frontend/specs/dialogs.ts); they are still rendered here.
+  const {
+    confluencePublishOpen,
+    confluenceFolder,
+    qtestPublishOpen,
+    wikiQtestPublishOpen,
+    ahaImportOpen,
+    openSpecImportOpen,
+    extractOpen,
+    importOpen,
+    publishOpen,
+    linkTestsOpen,
+  } = useSpecsDialogs();
   /** Confluence (specs/external-links/confluence-wiki.feature.md): the wikis
-      this device holds a token for, the last parent page published under,
-      and whether the publish dialog is open. */
+      this device holds a token for. */
   const [confluenceWikis, setConfluenceWikis] = useState<ConfluenceWiki[]>([]);
-  const [confluencePublishOpen, setConfluencePublishOpen] = useState(false);
-  /** "Publish to Confluence…" on a folder ("Publish a folder's features to
-      Confluence"): the folder, as the sidebar names it, and its features —
-      null until the server says which pages they link. */
-  const [confluenceFolder, setConfluenceFolder] = useState<{
-    path: string;
-    label: string;
-    features: FolderFeature[] | null;
-  } | null>(null);
   /** qTest (specs/external-links/qtest-test-cases.feature.md "Create qTest
       test cases from a feature"): the sites this device holds a token for,
-      the last parent module created under, and whether the dialog is open. */
+      and the last parent module created under. */
   const [qtestSites, setQtestSites] = useState<QtestSite[]>([]);
   const [qtestParentUrl, setQtestParentUrl] = useState("");
-  const [qtestPublishOpen, setQtestPublishOpen] = useState(false);
-  /** "Publish to Wiki & qTest…" (specs/external-links/qtest-test-cases.feature.md
-      "Publish the page and the test cases from one dialog"): the page first,
-      then the test cases, from one dialog. */
-  const [wikiQtestPublishOpen, setWikiQtestPublishOpen] = useState(false);
   /** Aha! (specs/external-links/aha-import.feature.md): the sites this
-      device holds an API key for, and the folder an open import lands in
-      (null for the top level) — or null while the dialog is closed. */
+      device holds an API key for. */
   const [ahaSites, setAhaSites] = useState<AhaSite[]>([]);
-  const [ahaImportOpen, setAhaImportOpen] = useState<{ folder: string | null } | null>(null);
   /** Whether "Import from Aha!" is offered at all — switched on in Settings
       → Aha!, default OFF. Never in the demo or the hosted app, which keep
       no API key. */
   const [ahaImportOn, setAhaImportOn] = useState(false);
   const ahaImport = ahaImportOn && !demo && !hosted;
-  /** Import from OpenSpec (specs/external-links/openspec-import.feature.md):
-      the folder an open import lands in (null for the top level), or null
-      while the dialog is closed. Needs no key, so no Settings switch; never
-      in the demo or the hosted app, which have no code repo on disk. */
-  const [openSpecImportOpen, setOpenSpecImportOpen] = useState<{ folder: string | null } | null>(null);
+  /** Import from OpenSpec (specs/external-links/openspec-import.feature.md)
+      needs no key, so no Settings switch; never in the demo or the hosted
+      app, which have no code repo on disk. */
   const openSpecImport = !demo && !hosted;
   /** Extract specs from a code project (specs/app/extract-specs-from-code
-      .feature.md): the project the dialog starts on — the open code
-      repository — or null to ask for one; null while the dialog is closed.
-      Offered wherever a code repository can be opened: the user's own
-      machine, never the demo, the hosted app or the read-only site. */
-  const [extractOpen, setExtractOpen] = useState<{ codeDir: string | null } | null>(null);
+      .feature.md) is offered wherever a code repository can be opened: the
+      user's own machine, never the demo, the hosted app or the read-only
+      site. */
   const extractSpecs = canOpenCodeRepo && !demo && !hosted;
   /** Import from Jira/Wiki (specs/external-links/jira-wiki-import
-      .feature.md): the Jira sites this device holds a token for, and the
-      folder an open import lands in (null for the top level) — or null
-      while the dialog is closed. Never in the demo or the hosted app. */
+      .feature.md): the Jira sites this device holds a token for. Never in
+      the demo or the hosted app. */
   const [jiraSites, setJiraSites] = useState<JiraSite[]>([]);
-  const [importOpen, setImportOpen] = useState<{ folder: string | null; mode: "both" | "jira" | "wiki" } | null>(null);
   /** Whether Jira and Confluence are switched on at all — in Settings → Jira /
       Confluence, each default OFF (specs/external-links/jira-wiki-import
       .feature.md, confluence-wiki.feature.md). Jira off hides the Jira import;
@@ -2325,11 +2341,9 @@ export function App() {
     extractKick,
     () => void loadFeatures(),
   );
-  const [publishOpen, setPublishOpen] = useState(false);
-  /** "Link tests to specs" (specs/app/extract-specs-from-code.feature.md
-      "Tests are linked later, on their own"): offered on a specification
-      folder that is open, where specs can be extracted at all. */
-  const [linkTestsOpen, setLinkTestsOpen] = useState(false);
+  // "Link tests to specs" (specs/app/extract-specs-from-code.feature.md
+  // "Tests are linked later, on their own") is offered on a specification
+  // folder that is open, where specs can be extracted at all.
   const linkTestsTrapRef = useFocusTrap(linkTestsOpen);
   const canLinkTests = extractSpecs && !needsRepo && codeRepoDir === null;
   // The desktop app's File → Extract Specs from Code Project… (src/electron/
@@ -3668,48 +3682,6 @@ export function App() {
     } else {
       toast.error(data.error ?? "Could not create the feature");
     }
-  };
-
-  /** A scenario's identity within its file: the `<name>@v<version>` heading
-      syntax, used as both a publish-progress and a selection key. Declared
-      before the selection helpers that call it during render. */
-  const scenarioKey = (s: { name: string; version: number }) => `${s.name}@v${s.version}`;
-
-  // The spec's own checkbox: none or some scenarios → the whole spec;
-  // the whole spec → cleared.
-  const toggleSpecSelected = (fileName: string) =>
-    setSpecSelection((prev) => {
-      const next = new Map(prev);
-      if (next.get(fileName) === "all") next.delete(fileName);
-      else next.set(fileName, "all");
-      return next;
-    });
-
-  // A scenario's checkbox on its card: unchecking one of a whole-spec
-  // selection keeps the rest; checking the last missing one promotes back to
-  // the whole spec. `all` is every scenario the file has, so "the whole
-  // spec" and "all of its scenarios" stay the same selection.
-  const toggleScenarioSelected = (
-    fileName: string,
-    all: { name: string; version: number }[],
-    key: string,
-  ) =>
-    setSpecSelection((prev) => {
-      const next = new Map(prev);
-      const entry = next.get(fileName);
-      const picked = new Set(entry === "all" ? all.map(scenarioKey) : (entry ?? []));
-      if (picked.has(key)) picked.delete(key);
-      else picked.add(key);
-      if (picked.size === 0) next.delete(fileName);
-      else if (all.every((s) => picked.has(scenarioKey(s)))) next.set(fileName, "all");
-      else next.set(fileName, picked);
-      return next;
-    });
-
-  /** True when this scenario is in the session selection. */
-  const scenarioSelected = (fileName: string, s: { name: string; version: number }) => {
-    const entry = specSelection.get(fileName);
-    return entry === "all" || (entry instanceof Set && entry.has(scenarioKey(s)));
   };
 
   // What the current selection sends to a session. Selections can outlive
