@@ -13,6 +13,26 @@
 import type { ReactNode } from "react";
 import type { OpenViewOptions, TabShortcut } from "../../plugins/client/tabs";
 import type { SpecsView } from "../../plugins/builtin/specs/route";
+import type { Scenario } from "../../server/parser";
+
+/**
+ * What the feature page, the scenario page and the editor still call in
+ * App.tsx — the handlers that act on App's state, and what it derives for
+ * them. They read their own state from the stores beside this file; a
+ * handler leaves this list when it moves there too.
+ */
+export interface SpecsActions {
+  /** `<` and ESC: back to the feature, on the scenario's card. */
+  backToFeature(): void;
+  /** The url "Copy link" shares for a scenario: versionless on the public site. */
+  scenarioLink(fileName: string, scenario: Pick<Scenario, "name" | "version">): string;
+  /** Whether the open scenario has one before and one after it, in the tree's order. */
+  scenarioNav: { prev: boolean; next: boolean };
+  /** Step to the scenario before (-1) or after (1) the open one. */
+  stepScenario(step: -1 | 1): void | false;
+  /** The clickable test-links table at the end of a scenario (specs/traceability.feature.md). */
+  testsTable(tests: string[]): ReactNode;
+}
 
 export interface SpecsHost {
   /** The tree: the Specs tab's sidebar panel. */

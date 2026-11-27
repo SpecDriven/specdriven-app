@@ -105,6 +105,7 @@ import { VersionChip } from "./updateHint";
 import { Popover } from "./Popover";
 import { HeightResizer } from "./HeightResizer";
 import { Breadcrumbs, type Crumb } from "./Breadcrumbs";
+import { CopyLinkButton } from "./CopyLinkButton";
 import { CommandPalette, type PaletteItem } from "./CommandPalette";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { createPromiseQueue } from "./promiseQueue";
@@ -414,6 +415,7 @@ import {
   setResizingDesc,
   useFeaturePageState,
 } from "./specs/featurePageState";
+import { folderCrumbs } from "./specs/crumbs";
 import {
   resetSpecsDialogs,
   setAhaImportOpen,
@@ -428,7 +430,7 @@ import {
   setWikiQtestPublishOpen,
   useSpecsDialogs,
 } from "./specs/dialogs";
-import { provideSpecsHost } from "./specs/host";
+import { provideSpecsHost, type SpecsActions } from "./specs/host";
 import {
   DEFAULT_PROJECT_MANAGEMENT_TOOL,
   NO_RESOURCE_LINKS,
@@ -459,6 +461,7 @@ import {
   toggleSpecSelected,
   useSpecSelection,
 } from "./specs/selection";
+import { ScenarioPage } from "./specs/ScenarioPage";
 import {
   resetOpenFeature,
   setDirty,
@@ -1091,35 +1094,6 @@ function decodeSegment(segment: string): string {
   } catch {
     return segment;
   }
-}
-
-/**
- * "Copy link" as an icon button (specs/ui/navigation.feature.md "share a
- * link"): a link icon that flips to a check mark while `copied`.
- */
-function CopyLinkButton({
-  copied,
-  onCopy,
-  disabled,
-  size = 16,
-  keys,
-  label = "Copy link",
-}: {
-  copied: boolean;
-  onCopy: () => void;
-  disabled?: boolean;
-  size?: number;
-  /** The shortcut, where mod+shift+c copies this same url. */
-  keys?: string;
-  label?: string;
-}) {
-  return (
-    <Tooltip label={copied ? "Copied" : "Copy link"} keys={keys}>
-      <button type="button" className="ibtn" aria-label={label} disabled={disabled} onClick={onCopy}>
-        {copied ? <Check size={size} aria-hidden="true" /> : <Link size={size} aria-hidden="true" />}
-      </button>
-    </Tooltip>
-  );
 }
 
 /** The shortcuts the read-only site keeps (beside each tab's `go-…`): moving around, never writing. */
@@ -8263,25 +8237,6 @@ export function App() {
     goHome,
     readOnly: locked,
   };
-  const folderCrumbs = (fileName: string): Crumb[] => {
-    const parts = fileName.split("/").slice(0, -1);
-    return parts.map((part, i) => {
-      const path = parts.slice(0, i + 1).join("/");
-      return {
-        label: part,
-        title: `Select the folder ${path}`,
-        onClick: () => {
-          setSelectedFolder(path);
-          setCollapsed((prev) => {
-            const next = new Set(prev);
-            for (let k = 1; k <= i + 1; k++) next.delete(parts.slice(0, k).join("/"));
-            return next;
-          });
-        },
-      };
-    });
-  };
-
   // The way back into a module (src/plugins/client/tabs.ts featureCrumbs): a
   // feature holding an Event Model slice's scenarios carries a crumb naming
   // the model, say, that opens its canvas. None while the module is off.
@@ -9972,104 +9927,21 @@ export function App() {
     treeRef,
   };
   const specsSidebar = <SpecsSidebar {...specsSidebarProps} />;
+  // What the Specs tab's page components still call here
+  // (src/frontend/specs/host.ts SpecsActions).
+  const specsActions: SpecsActions = {
+    backToFeature,
+    scenarioLink,
+    scenarioNav: { prev: scenarioNav.prev !== null, next: scenarioNav.next !== null },
+    stepScenario,
+    testsTable,
+  };
   // The open feature's page, its scenario's page or the editor: the Specs
   // tab's pane, built here and handed to the tab like the tree.
   const specsPane = (
     locked && editing && selected && feature ? (
-          /* The read-only site: a scenario's page is a page, not the editor —
-             its trail, the way to its neighbours, and the scenario rendered
-             with its links. */
-          <div className="scenario-pane">
-            <div className="editor-bar scenario-pane-bar page-header">
-              <div className="scenario-pane-title">
-                <Breadcrumbs
-                  items={[
-                    repoCrumb,
-                    ...folderCrumbs(selected),
-                    {
-                      label: feature.name || titleFromFileName(selected),
-                      href: featurePath(selected),
-                      title: `Back to ${feature.name || titleFromFileName(selected)}`,
-                      onClick: (e) => {
-                        e.preventDefault();
-                        backToFeature();
-                      },
-                    },
-                  ]}
-                />
-              </div>
-              <div className="editor-actions scenario-pane-actions">
-                <span className="scenario-nav" role="group" aria-label="Scenario navigation">
-                  <Tooltip label="Previous scenario" keys="<">
-                    <button
-                      type="button"
-                      className="ibtn"
-                      aria-label="Previous scenario"
-                      disabled={scenarioNav.prev === null}
-                      onClick={() => stepScenario(-1)}
-                    >
-                      <ChevronLeft size={18} aria-hidden="true" />
-                    </button>
-                  </Tooltip>
-                  <Tooltip label="Next scenario" keys=">">
-                    <button
-                      type="button"
-                      className="ibtn"
-                      aria-label="Next scenario"
-                      disabled={scenarioNav.next === null}
-                      onClick={() => stepScenario(1)}
-                    >
-                      <ChevronRight size={18} aria-hidden="true" />
-                    </button>
-                  </Tooltip>
-                </span>
-                <CopyLinkButton
-                  keys="mod+shift+c"
-                  copied={copied === scenarioLink(selected, editing.scenario)}
-                  onCopy={() => void copyLink(scenarioLink(selected, editing.scenario))}
-                />
-              </div>
-            </div>
-            <div className="scenario-pane-head">
-              {editing.index !== null && scenarioNumbers(feature.scenarios)[editing.index] != null && (
-                <span className="scenario-number">S{scenarioNumbers(feature.scenarios)[editing.index]}</span>
-              )}
-              <h2 className="scenario-pane-heading">{editing.scenario.name}</h2>
-              <span className="version">v{editing.scenario.version}</span>
-              <span className="chip static">
-                <StatusIcon status={editing.scenario.status} size={14} />
-                {editing.scenario.status}
-              </span>
-            </div>
-            <div className="scenario-pane-body read-only-scenario">
-              <div className="md-preview">{renderMarkdown(editing.scenario.body)}</div>
-              {showTestLinks && testsTable(editing.scenario.tests)}
-              {(editing.scenario.link || (editing.scenario.prs ?? []).length > 0) && (
-                <div className="props">
-                  {editing.scenario.link && (
-                    <a
-                      className="chip"
-                      href={editing.scenario.link.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      title={editing.scenario.link.url}
-                    >
-                      <Ticket size={14} aria-hidden="true" />
-                      {externalLinkLabel(editing.scenario.link)}
-                      <ExternalLink size={12} aria-hidden="true" />
-                    </a>
-                  )}
-                  {(editing.scenario.prs ?? []).map((pr) => (
-                    <a key={pr.url} className="chip" href={pr.url} target="_blank" rel="noreferrer" title={pr.url}>
-                      <GitPullRequest size={14} aria-hidden="true" />
-                      {pr.title || pr.url.replace(/^https:\/\/github\.com\//, "")}
-                      <ExternalLink size={12} aria-hidden="true" />
-                    </a>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
+          /* The read-only site: a scenario's page is a page, not the editor. */
+          <ScenarioPage app={tabApp} actions={specsActions} />
         ) : editing && selected && feature ? (
           /* specs/editor/spec-editor.feature.md "Spec editor pane": the
              scenario editor takes the feature pane's slot — the sidebar stays
