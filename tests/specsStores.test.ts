@@ -2,6 +2,14 @@
 // what App.tsx kept as its own state, set under the same names, so the Specs
 // tab can read it from its plugin.
 import { afterEach, expect, test } from "bun:test";
+import { editorState, resetEditorState, setLinkDraft, setPublishing, setSaving } from "../src/frontend/specs/editorState";
+import {
+  featurePageState,
+  resetFeaturePageState,
+  setCardMenu,
+  setDescEdit,
+  setRenameDraft,
+} from "../src/frontend/specs/featurePageState";
 import { resetListing, scenarioStatus, setFeatures } from "../src/frontend/specs/listing";
 import {
   openFeatureState,
@@ -34,6 +42,8 @@ const listed = {
 
 afterEach(() => {
   resetOpenFeature();
+  resetEditorState();
+  resetFeaturePageState();
   resetListing();
 });
 
@@ -138,4 +148,32 @@ test("Recent names a scenario under its feature, and drops one that is gone", ()
   setFeature(quotes);
   expect(recentSpec({ feature: FILE, scenario: { slug: "send-a-quote" } })?.label).toBe("Send a quote");
   expect(recentSpec({ feature: FILE, scenario: { slug: "no-such-scenario" } })).toBeNull();
+});
+
+test("the editor pane's state starts idle, and a reset takes back a save and a draft under way", () => {
+  expect(editorState().saving).toBe(false);
+  expect(editorState().publishing).toBeNull();
+  expect(editorState().linkDraft).toEqual({ program: "", ticket: "", url: "" });
+  setSaving(true);
+  setPublishing("Create a quote@v1");
+  setLinkDraft((d) => ({ ...d, ticket: "QUO-12" }));
+  expect(editorState().linkDraft.ticket).toBe("QUO-12");
+  // The feature page's store is its own: nothing of the editor's reaches it.
+  expect(featurePageState().renameDraft).toBeNull();
+  resetEditorState();
+  expect(editorState().saving).toBe(false);
+  expect(editorState().publishing).toBeNull();
+  expect(editorState().linkDraft.ticket).toBe("");
+});
+
+test("the feature page's state keeps a description draft by its file, and a reset closes everything", () => {
+  setDescEdit({ file: FILE, text: "Quotes are" });
+  setDescEdit((d) => (d ? { ...d, text: `${d.text} offers` } : d));
+  setRenameDraft("Offers");
+  setCardMenu(2);
+  expect(featurePageState().descEdit).toEqual({ file: FILE, text: "Quotes are offers" });
+  resetFeaturePageState();
+  expect(featurePageState().descEdit).toBeNull();
+  expect(featurePageState().renameDraft).toBeNull();
+  expect(featurePageState().cardMenu).toBeNull();
 });

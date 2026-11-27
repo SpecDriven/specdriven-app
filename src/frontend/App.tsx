@@ -214,7 +214,6 @@ import { definitionsFor, knownNames, parseAttributeDefinitions } from "../server
 import { ResourceLinkField, ResourceLinkList } from "./ResourceLinkField";
 import { ScenarioFileList, ScenarioFilesField } from "./ScenarioFilesField";
 import {
-  EMPTY_LINK_DRAFT,
   externalLinkLabel,
   isBlankLinkDraft,
   linkDraftOf,
@@ -357,6 +356,64 @@ import {
 } from "./specs/scenarioEdit";
 import type { EditState, Placement } from "./specs/scenarioEdit";
 import { initialsOf } from "./initials";
+import {
+  BODY_HEIGHT_KEY,
+  BODY_MIN,
+  DESC_HEIGHT_KEY,
+  DESC_MIN,
+  clampBodyHeight,
+  clampDescHeight,
+  storeEditorHeight,
+} from "./specs/editorHeight";
+import {
+  resetEditorState,
+  setBodyHeight,
+  setConflict,
+  setConflictDraft,
+  setEditorMenuOpen,
+  setLinkDraft,
+  setLinkError,
+  setPublishing,
+  setQtestDraft,
+  setQtestError,
+  setResizingBody,
+  setResolving,
+  setSavedAt,
+  setSaving,
+  setStatusMenuOpen,
+  setTestDraft,
+  setTestEdit,
+  setTestEditDraft,
+  setTestNameDraft,
+  setTestNameHint,
+  setTestsError,
+  setUnpublishing,
+  useEditorState,
+} from "./specs/editorState";
+import {
+  resetFeaturePageState,
+  setAssignedSaving,
+  setAssigneeMenuOpen,
+  setCardMenu,
+  setDescEdit,
+  setDescHeight,
+  setFeatureAttributesOpen,
+  setFeatureFlagsOpen,
+  setFeatureMenuOpen,
+  setFeaturePrsOpen,
+  setFeatureQtestDraft,
+  setFeatureQtestError,
+  setFeatureQtestSaving,
+  setFeatureResourceOpen,
+  setFeatureTicketsError,
+  setFeatureTicketsOpen,
+  setFeatureTicketsSaving,
+  setPublishMenuOpen,
+  setRenameDraft,
+  setRenaming,
+  setResizingDesc,
+  useFeaturePageState,
+} from "./specs/featurePageState";
 import { provideSpecsHost } from "./specs/host";
 import {
   resetOpenFeature,
@@ -398,15 +455,6 @@ import {
   setListing,
   useSpecsListing,
 } from "./specs/listing";
-
-interface Conflict {
-  ours: string;
-  theirs: string;
-  message: string;
-  /** Set when the conflicted publish targeted a single scenario — with its
-      document id, so the resolution still renames rather than doubles it. */
-  scenario?: ScenarioTarget;
-}
 
 /** Signed-in GitHub account as reported by /api/state (never the token). */
 interface AuthInfo {
@@ -536,52 +584,10 @@ function storeSidebarWidth(w: number): void {
   }
 }
 
-// Description editor height (specs/editor/feature-editor.feature.md): the
-// editor opens a third of the window tall and is dragged taller or shorter by
-// the strip along its lower boundary. Device-local, like the sidebar width.
-const DESC_MIN = 120;
-const DESC_HEIGHT_KEY = "sd-desc-height";
-
-export function clampDescHeight(h: number, windowHeight: number): number {
-  // The scenario list below keeps at least a quarter of the window, so the
-  // editor can never swallow the page it belongs to.
-  const max = Math.max(DESC_MIN, Math.round(windowHeight * 0.75));
-  return Math.min(Math.max(Math.round(h), DESC_MIN), max);
-}
-
-// Scenario body height (specs/editor/spec-editor.feature.md "Spec body
-// resize"): the body editor opens at least 40% of the window tall and is
-// dragged taller or shorter by the strip under it; the pane's column scrolls
-// to whatever is below. Device-local, like the description's.
-const BODY_MIN = 120;
-const BODY_HEIGHT_KEY = "sd-body-height";
-
-export function clampBodyHeight(h: number, windowHeight: number): number {
-  // The pane scrolls, so the body may outgrow it — but never past what fits
-  // the window, or the strip would end up off screen mid-drag.
-  const max = Math.max(BODY_MIN, Math.round(windowHeight * 0.85));
-  return Math.min(Math.max(Math.round(h), BODY_MIN), max);
-}
-
-function readEditorHeight(key: string, min: number): number | null {
-  try {
-    const h = Number(localStorage.getItem(key));
-    // Nothing stored, or junk: the CSS default stands until a first drag.
-    return Number.isFinite(h) && h >= min ? Math.round(h) : null;
-  } catch {
-    return null;
-  }
-}
-
-/** A height, or null to clear it on a double-click: back to the CSS default. */
-function storeEditorHeight(key: string, h: number | null): void {
-  try {
-    if (h === null) localStorage.removeItem(key);
-    else localStorage.setItem(key, String(h));
-  } catch {
-    // Storage unavailable (private mode): the height just won't stick.
-  }
-}
+// The description's and the scenario body's heights moved to
+// src/frontend/specs/editorHeight.ts; the clamps are re-exported for the
+// tests that import them from here.
+export { clampBodyHeight, clampDescHeight };
 
 // The sidebar's tabs, one per mounted plugin by its id (src/plugins/client/
 // tabs.ts) — Specs' feature tree, the special folders' page lists among
@@ -1281,6 +1287,8 @@ export function App() {
     resetListing();
     resetTreeState();
     resetOpenFeature();
+    resetEditorState();
+    resetFeaturePageState();
   });
   const { features, folders, folderDescriptions, folderOrders, featureOrders } = useSpecsListing();
   // The open feature — its file, what was read of it, the card highlighted
@@ -1288,6 +1296,54 @@ export function App() {
   // too (src/frontend/specs/openFeature.ts); set here under the same names.
   const { featureLoading, selected, feature, selectedScenario, dirty, editing, paneRequest, searchTerms } =
     useOpenFeature();
+  // What the editor pane and the feature page hold of their own — menus,
+  // drafts, heights, a save or a publish under way — likewise
+  // (src/frontend/specs/editorState.ts, featurePageState.ts).
+  const {
+    editorMenuOpen,
+    statusMenuOpen,
+    conflict,
+    conflictDraft,
+    resolving,
+    saving,
+    savedAt,
+    publishing,
+    unpublishing,
+    testDraft,
+    testNameDraft,
+    testEdit,
+    testEditDraft,
+    testNameHint,
+    testsError,
+    linkDraft,
+    linkError,
+    qtestDraft,
+    qtestError,
+    bodyHeight,
+    resizingBody,
+  } = useEditorState();
+  const {
+    featureMenuOpen,
+    cardMenu,
+    assigneeMenuOpen,
+    publishMenuOpen,
+    assignedSaving,
+    renameDraft,
+    renaming,
+    featureTicketsOpen,
+    featureTicketsError,
+    featureTicketsSaving,
+    featureQtestDraft,
+    featureQtestError,
+    featureQtestSaving,
+    featurePrsOpen,
+    featureFlagsOpen,
+    featureAttributesOpen,
+    featureResourceOpen,
+    descEdit,
+    descHeight,
+    resizingDesc,
+  } = useFeaturePageState();
   // Project members (src/server/members.ts): the data repo's
   // project-settings.yaml, as the feature's "Assigned" dropdown offers them.
   const [members, setMembers] = useState<ProjectMember[]>([]);
@@ -1323,8 +1379,6 @@ export function App() {
     for (const f of features) for (const s of f.scenarios) t[s.status]++;
     return t;
   }, [features]);
-  /** Whether an assignment change is in flight — the dropdown waits for it. */
-  const [assignedSaving, setAssignedSaving] = useState(false);
   // The tree's own state (src/frontend/specs/treeState.ts): folds, outlines,
   // the folder picked, drags, the row menu, scenario picks and the filter.
   const {
@@ -1376,16 +1430,6 @@ export function App() {
   const [palette, setPalette] = useState<{ query: string } | null>(null);
   /** The pages opened most recently — the palette's empty state. */
   const [recent, setRecent] = useState<RecentEntry[]>(readRecent);
-  /** The header's ⋯ menu, a card's ⋯ menu (by index), the assignee chips. */
-  const [featureMenuOpen, setFeatureMenuOpen] = useState(false);
-  // The scenario pane's ⋯ menu, its status chip's menu, and the feature
-  // page's publish-rollup menu (specs/editor/spec-editor.feature.md "Spec
-  // editor pane"): actions as menus, not a row of filled buttons.
-  const [editorMenuOpen, setEditorMenuOpen] = useState(false);
-  const [statusMenuOpen, setStatusMenuOpen] = useState(false);
-  const [publishMenuOpen, setPublishMenuOpen] = useState(false);
-  const [cardMenu, setCardMenu] = useState<number | null>(null);
-  const [assigneeMenuOpen, setAssigneeMenuOpen] = useState(false);
   /** Sidebar collapsed to a rail ("["), remembered on this device. */
   const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
   /** The editor column hidden ("\"), so the coding agent pane can have the
@@ -1410,9 +1454,6 @@ export function App() {
       ]),
     [features, feature],
   );
-  /** Draft for the inline file-name editor; null while not editing. */
-  const [renameDraft, setRenameDraft] = useState<string | null>(null);
-  const [renaming, setRenaming] = useState(false);
   // The header field saves on blur, and a blur can arrive from a stale
   // render (the field closing on ESC, or while a save is out) — these refs
   // carry the current draft and whether a rename is in flight.
@@ -1481,21 +1522,9 @@ export function App() {
   /** Bumped every time the dialog opens or closes, so a save that lands after
       the user has moved on cannot stamp its result onto another scenario. */
   const editorSession = useRef(0);
-  const [conflict, setConflict] = useState<Conflict | null>(null);
-  const [conflictDraft, setConflictDraft] = useState("");
-  /** Which resolution is being published, if any — the buttons disable while it runs. */
-  const [resolving, setResolving] = useState<"ours" | "theirs" | "draft" | null>(null);
-  /** Autosave state behind the header's Saved indicator. */
-  const [saving, setSaving] = useState(false);
-  const [savedAt, setSavedAt] = useState<number | null>(null);
   /** The `?` keyboard cheat sheet. */
   const [sheetOpen, setSheetOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  /** "all", a scenario key (`name@vN`), or null while no publish is running. */
-  const [publishing, setPublishing] = useState<string | null>(null);
-  // The editor pane's Back to proposed is away (specs/editor/spec-editor.
-  // feature.md "Unpublish a Spec"): its route commits and pushes first.
-  const [unpublishing, setUnpublishing] = useState(false);
   const [reloadSeconds, setReloadSeconds] = useState(60);
   const [previewLines, setPreviewLines] = useState(8);
   /**
@@ -1775,58 +1804,14 @@ export function App() {
   const [settingsSyncDraft, setSettingsSyncDraft] = useState(DEFAULT_SYNC_SERVER_URL);
   /** The Settings switch: off saves an empty url, which turns live sync off. */
   const [settingsSyncOnDraft, setSettingsSyncOnDraft] = useState(false);
-  /** Url being typed into the edit dialog's "Add test link" field. */
-  const [testDraft, setTestDraft] = useState("");
-  /** The test's name beside it: read from the code on GitHub, or typed. */
-  const [testNameDraft, setTestNameDraft] = useState("");
-  /** Index of the test link opened for in-place ✎ editing, if any. */
-  const [testEdit, setTestEdit] = useState<number | null>(null);
-  const [testEditDraft, setTestEditDraft] = useState<TestDraft>({ url: "", name: "" });
-  /** What the last name lookup is doing or why it found nothing, under the field. */
-  const [testNameHint, setTestNameHint] = useState<string | null>(null);
   /** Serial of the latest name lookup: an older one landing late is ignored. */
   const testLookup = useRef(0);
   /** The url and name an ✎ row opened with, to tell a changed url from a re-open. */
   const testEditOpened = useRef<TestDraft>({ url: "", name: "" });
-  /** Why the last Save was blocked by the tests field, if it was. */
-  const [testsError, setTestsError] = useState<string | null>(null);
-  /** The edit dialog's "Ticket link" fields as typed
-      (specs/external-links/project-management-jira-linear-etc.feature.md). */
-  const [linkDraft, setLinkDraft] = useState<LinkDraft>(EMPTY_LINK_DRAFT);
-  /** Why the last Save was blocked by the ticket-link fields, if it was. */
-  const [linkError, setLinkError] = useState<string | null>(null);
-  /** The feature's tickets popover (specs/external-links/project-management-
-      jira-linear-etc.feature.md "Several tickets on a feature"): open or not,
-      why the server refused the last list, and whether one is on its way. */
-  const [featureTicketsOpen, setFeatureTicketsOpen] = useState(false);
-  const [featureTicketsError, setFeatureTicketsError] = useState<string | null>(null);
-  const [featureTicketsSaving, setFeatureTicketsSaving] = useState(false);
-  /** The edit dialog's "qTest test case" fields as typed
-      (specs/external-links/qtest-test-cases.feature.md), and why the last
-      Save was blocked by them; then the feature's own qTest dialog. */
-  const [qtestDraft, setQtestDraft] = useState<LinkDraft>(EMPTY_LINK_DRAFT);
-  const [qtestError, setQtestError] = useState<string | null>(null);
-  const [featureQtestDraft, setFeatureQtestDraft] = useState<LinkDraft | null>(null);
-  const [featureQtestError, setFeatureQtestError] = useState<string | null>(null);
-  const [featureQtestSaving, setFeatureQtestSaving] = useState(false);
-  /** The feature's "Pull requests" popover
-      (specs/external-links/related-pull-requests.feature.md). */
-  const [featurePrsOpen, setFeaturePrsOpen] = useState(false);
-  const [featureFlagsOpen, setFeatureFlagsOpen] = useState(false);
-  /** The feature's attributes popover (specs/app/custom-attributes.feature.md). */
-  const [featureAttributesOpen, setFeatureAttributesOpen] = useState(false);
-  /** The feature's Aha! or Figma popover, whichever is open
-      (specs/external-links/aha-and-figma-links.feature.md). */
-  const [featureResourceOpen, setFeatureResourceOpen] = useState<ResourceLinkKind | null>(null);
-  // The feature description editor (specs/editor/feature-editor.feature.md):
-  // the free markdown above the first scenario, edited in place and autosaved
-  // at the scenario editor's interval like the home README. Keyed by file so
-  // the editor belongs to the feature it was opened on — it shows only while
-  // that feature is selected, and a save that lands after the user moved on
-  // stamps nothing onto the feature opened since. `descSaved` is the text
-  // last landed on the server; refs, because a tick reads them between
-  // renders and must not cause one.
-  const [descEdit, setDescEdit] = useState<{ file: string; text: string } | null>(null);
+  // The feature description editor's draft is in the feature page's store
+  // (src/frontend/specs/featurePageState.ts). `descSaved` is the text last
+  // landed on the server; refs, because a tick reads them between renders
+  // and must not cause one.
   const descEditRef = useRef(descEdit);
   descEditRef.current = descEdit;
   const selectedRef = useRef(selected);
@@ -1841,21 +1826,7 @@ export function App() {
    * started.
    */
   const descSaveQueue = useRef(createPromiseQueue());
-  // The editor's height, dragged by the strip along its lower boundary. null
-  // until a first drag or a stored height: then the CSS third-of-the-window
-  // default stands, and follows the window.
-  const [descHeight, setDescHeight] = useState<number | null>(() =>
-    readEditorHeight(DESC_HEIGHT_KEY, DESC_MIN),
-  );
-  const [resizingDesc, setResizingDesc] = useState(false);
   const descPaneRef = useRef<HTMLDivElement | null>(null);
-  // The scenario body's height, the same way (specs/editor/spec-editor.
-  // feature.md "Spec body resize"): null until a first drag or a stored
-  // height, while the CSS default stands.
-  const [bodyHeight, setBodyHeight] = useState<number | null>(() =>
-    readEditorHeight(BODY_HEIGHT_KEY, BODY_MIN),
-  );
-  const [resizingBody, setResizingBody] = useState(false);
   const bodyFieldRef = useRef<HTMLDivElement | null>(null);
   // Git access (specs/app/user-info-settings.feature.md "Git access"): the
   // GitHub CLI (the default wherever gh is installed), a personal access
