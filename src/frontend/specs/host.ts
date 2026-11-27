@@ -11,7 +11,7 @@
 // plugin"). Each later move takes a field off it.
 
 import type { ReactNode } from "react";
-import type { OpenViewOptions, RecentItem, TabShortcut } from "../../plugins/client/tabs";
+import type { OpenViewOptions, TabShortcut } from "../../plugins/client/tabs";
 import type { SpecsView } from "../../plugins/builtin/specs/route";
 
 export interface SpecsHost {
@@ -19,12 +19,8 @@ export interface SpecsHost {
   sidebar: ReactNode;
   /** The open feature's page, its scenario's page or the editor. */
   pane: ReactNode;
-  /** The window title's page part — the feature, and the scenario open in the pane — or null while it loads. */
-  title: string | null;
   /** Open a feature, or a scenario's page when the view names one. */
   open(view: SpecsView, opts: OpenViewOptions): void;
-  /** How the palette's Recent list shows a feature or a scenario that was open. */
-  recent(view: SpecsView): RecentItem<SpecsView> | null;
   /** `c` from the tree: a new feature, in the folder selected. */
   createFeature(): void;
   /** `c` on an open feature: a new scenario. */
@@ -36,9 +32,7 @@ export interface SpecsHost {
 const NO_HOST: SpecsHost = {
   sidebar: null,
   pane: null,
-  title: null,
   open: () => {},
-  recent: () => null,
   createFeature: () => {},
   createInView: null,
   shortcuts: [],

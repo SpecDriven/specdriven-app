@@ -5,14 +5,16 @@
 // features' urls (./route.ts). The feature tree, the feature page and the
 // editor are still built inside App.tsx, which hands them to this tab
 // through src/frontend/specs/host.ts; the tab renders them, and opens a
-// feature through it.
+// feature through it. The palette's search and Recent entries, and the
+// window title, it reads from the stores in src/frontend/specs/.
 
 import { FileText } from "lucide-react";
 import type { Context, Plugin } from "../../kernel";
 import type { TabPlugin } from "../../client/tabs";
 import { SPECS_PLUGIN } from "../../profile";
 import { specsHost } from "../../../frontend/specs/host";
-import { searchSpecs } from "../../../frontend/specs/search";
+import { openFeatureTitle } from "../../../frontend/specs/openFeature";
+import { recentSpec, searchSpecs } from "../../../frontend/specs/palette";
 import { titleFromFileName } from "../../../server/parser";
 import { manifest } from "./manifest";
 import { matchSpecsRoute, specsPath, type SpecsView } from "./route";
@@ -33,7 +35,7 @@ export const specsTab: TabPlugin<SpecsView> = {
     path: specsPath,
     // The feature alone: opening one of its scenarios keeps the pane.
     key: (view) => view.feature,
-    title: (view) => specsHost()?.title ?? titleFromFileName(view.feature),
+    title: (view) => openFeatureTitle() ?? titleFromFileName(view.feature),
     // The tab's door is the folder's README, App's home.
     home: null,
   },
@@ -59,7 +61,7 @@ export const specsTab: TabPlugin<SpecsView> = {
     fallback: true,
     search: searchSpecs,
   },
-  recent: (view) => specsHost()?.recent(view) ?? null,
+  recent: recentSpec,
   // The imports into a spec folder, while their switches are on.
   get shortcuts() {
     return specsHost()?.shortcuts ?? [];

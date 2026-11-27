@@ -358,6 +358,18 @@ import {
 import type { EditState, Placement } from "./specs/scenarioEdit";
 import { initialsOf } from "./initials";
 import { provideSpecsHost } from "./specs/host";
+import {
+  resetOpenFeature,
+  setDirty,
+  setEditing,
+  setFeature,
+  setFeatureLoading,
+  setPaneRequest,
+  setSearchTerms,
+  setSelected,
+  setSelectedScenario,
+  useOpenFeature,
+} from "./specs/openFeature";
 import { SpecsSidebar, type SpecsSidebarProps } from "./specs/SpecsSidebar";
 import {
   resetTreeState,
@@ -380,7 +392,6 @@ import {
 } from "./specs/treeState";
 import {
   resetListing,
-  scenarioStatus,
   setFeatureOrders,
   setFeatures,
   setFolderOrders,
@@ -1269,8 +1280,14 @@ export function App() {
   useState(() => {
     resetListing();
     resetTreeState();
+    resetOpenFeature();
   });
   const { features, folders, folderDescriptions, folderOrders, featureOrders } = useSpecsListing();
+  // The open feature — its file, what was read of it, the card highlighted
+  // and the scenario in the editor — lives in a store the Specs tab reads
+  // too (src/frontend/specs/openFeature.ts); set here under the same names.
+  const { featureLoading, selected, feature, selectedScenario, dirty, editing, paneRequest, searchTerms } =
+    useOpenFeature();
   // Project members (src/server/members.ts): the data repo's
   // project-settings.yaml, as the feature's "Assigned" dropdown offers them.
   const [members, setMembers] = useState<ProjectMember[]>([]);
@@ -1380,10 +1397,6 @@ export function App() {
   const compact = useMediaQuery(COMPACT_QUERY);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const drawerTrapRef = useFocusTrap(compact && drawerOpen);
-  /** A feature is being fetched — the skeleton shows until it lands. */
-  const [featureLoading, setFeatureLoading] = useState(false);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [feature, setFeature] = useState<Feature | null>(null);
   // What the data repo's attributes use, for the chips' checks and the
   // editor's suggestions (specs/app/custom-attributes.feature.md): every
   // listed feature, and the open one as it stands — its drafts and an edit
@@ -1406,7 +1419,6 @@ export function App() {
   const renameDraftRef = useRef(renameDraft);
   renameDraftRef.current = renameDraft;
   const renamingRef = useRef(false);
-  const [selectedScenario, setSelectedScenario] = useState<number | null>(null);
   const scenarioRefs = useRef<(HTMLElement | null)[]>([]);
   /** The sidebar's folder tree, for scrolling its highlighted row into view. */
   const treeRef = useRef<HTMLDivElement | null>(null);
@@ -1417,25 +1429,6 @@ export function App() {
    * folders above it open and the listing is in.
    */
   const revealPending = useRef(false);
-  const [dirty, setDirty] = useState(false);
-  const [editing, setEditing] = useState<EditState | null>(null);
-  /**
-   * A scenario deep link asks for that scenario's page (specs/navigation.spec
-   * .md "open a scenario link"). The pane opens from an effect rather than
-   * straight from the navigation: any pane the link replaced closes first, so
-   * the new one starts a fresh editor session — its own autosave baseline,
-   * with the outgoing one's last save unable to reach back into it.
-   */
-  const [paneRequest, setPaneRequest] = useState<{
-    scenario: Scenario;
-    /** Search terms to mark in the pane (specs/search.feature.md), when a hit opened it. */
-    terms: string[] | null;
-  } | null>(null);
-  /**
-   * The words marked in the open scenario editor (specs/search.feature.md):
-   * the terms of the search hit that opened it, gone when the pane closes.
-   */
-  const [searchTerms, setSearchTerms] = useState<string[] | null>(null);
   // Editor autosave (specs/editor/editor-autosave.feature.md): the signature of
   // what the open dialog last had saved, and whether a tick is still saving.
   // Refs, because a tick reads them between renders and must not cause one.
@@ -7600,26 +7593,9 @@ export function App() {
     if (!to) return false;
     openScenarioRow(to.file, to.scenario);
   };
-  // What the Specs tab's Recent list and `c` read (src/plugins/
+  // What the Specs tab's `c` and its own commands read (src/plugins/
   // builtin/specs/client.tsx), published before they are read below.
   provideSpecsHost({
-    recent: (view) => {
-      const listing = features.find((f) => f.fileName === view.feature);
-      const open = view.feature === selected ? feature : null;
-      const name = open?.name || listing?.name || titleFromFileName(view.feature);
-      if (!view.scenario) return { label: name, icon: <FileText size={14} /> };
-      const { slug, version } = view.scenario;
-      const s = (open?.scenarios ?? listing?.scenarios ?? []).find(
-        (x) => slugify(x.name) === slug && (version === undefined || x.version === version),
-      );
-      if (!s) return null;
-      return {
-        label: s.name,
-        sub: name,
-        icon: <StatusIcon status={scenarioStatus(view.feature, s)} size={14} />,
-        altView: { ...view, page: true },
-      };
-    },
     createFeature: () => void createFeature(),
     // Imports into the selected spec folder (specs/external-links/aha-import
     // .feature.md, OpenSpec's likewise), while their switches are on.
@@ -11942,18 +11918,9 @@ export function App() {
           <PageSkeleton cards={3} />
         )
   );
-  // The window title's page part for the open feature (specs/ui/
-  // navigation.feature.md): the feature, and the scenario open in the pane.
-  const specsTitle =
-    feature && selected
-      ? paneScenario
-        ? `${feature.name || titleFromFileName(selected)} · ${paneScenario.name} v${paneScenario.version}`
-        : feature.name || titleFromFileName(selected)
-      : null;
   provideSpecsHost({
     sidebar: specsSidebar,
     pane: specsPane,
-    title: specsTitle,
   });
 
   return (
