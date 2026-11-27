@@ -10,6 +10,7 @@
 
 import { useSyncExternalStore } from "react";
 import type { FeatureListing } from "../../server/features";
+import type { ScenarioStatus } from "../../server/parser";
 
 export interface SpecsListing {
   features: FeatureListing[];
@@ -84,6 +85,18 @@ export function resetListing() {
 
 export function specsListing(): SpecsListing {
   return state;
+}
+
+/**
+ * A listed scenario's status — what a palette hit or a Recent entry shows
+ * beside its name. One the listing does not know reads as proposed.
+ */
+export function scenarioStatus(fileName: string, s: { name: string; version: number }): ScenarioStatus {
+  return (
+    state.features
+      .find((f) => f.fileName === fileName)
+      ?.scenarios.find((x) => x.name === s.name && x.version === s.version)?.status ?? "proposed"
+  );
 }
 
 function subscribe(l: () => void) {

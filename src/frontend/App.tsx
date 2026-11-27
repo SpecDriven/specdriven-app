@@ -31,7 +31,6 @@ import type { ResourceLinkKind } from "../server/resourceLinks";
 import type { FeatureListing } from "../server/features";
 import type { ProjectMember } from "../server/members";
 import type { GitHubRepo } from "../server/issues";
-import type { SearchResultItem } from "../server/search";
 import type { CurrentUser } from "../server/user";
 import {
   codeGenTargetLabel,
@@ -133,7 +132,6 @@ import {
   applyExcalidrawPref,
   useExcalidrawEnabled,
 } from "./excalidrawPref";
-import { markText } from "./highlight";
 import { PageSkeleton } from "./Skeleton";
 import { AppOutdated, watchDataTooNew } from "./AppOutdated";
 import { useModalPrompts } from "./ModalPrompts";
@@ -382,6 +380,7 @@ import {
 } from "./specs/treeState";
 import {
   resetListing,
+  scenarioStatus,
   setFeatureOrders,
   setFeatures,
   setFolderOrders,
@@ -6919,14 +6918,6 @@ export function App() {
     });
 
   /**
-   * Open a search hit exactly like its deep link (specs/search.feature.md): a
-   * scenario hit opens that scenario's page — or, with ⌘⏎ in the palette,
-   * its feature page with the card highlighted.
-   */
-  const resultHref = (r: SearchResultItem) =>
-    r.scenario ? scenarioPath(r.fileName, r.scenario) : featurePath(r.fileName);
-
-  /**
    * A scenario in the sidebar tree (specs/ui/navigation.feature.md "Scenario
    * navigation"): opens that scenario's page, from the feature page or
    * straight from another scenario's pane — the whole point, switching
@@ -7609,40 +7600,9 @@ export function App() {
     if (!to) return false;
     openScenarioRow(to.file, to.scenario);
   };
-  // What the Specs tab's palette, Recent list and `c` read (src/plugins/
+  // What the Specs tab's Recent list and `c` read (src/plugins/
   // builtin/specs/client.tsx), published before they are read below.
   provideSpecsHost({
-    search: async (q, signal) => {
-      const res = await fetch(`/api/search?scope=specs&q=${encodeURIComponent(q)}`, { signal });
-      const data = (await res.json()) as { results?: SearchResultItem[]; error?: string };
-      if (!res.ok) throw new Error(data.error ?? "Search failed");
-      return (data.results ?? []).map((r) => {
-        const scenario = r.scenario ? { slug: slugify(r.scenario.name), version: r.scenario.version } : null;
-        const view: SpecsView = { feature: r.fileName, scenario, terms: r.terms };
-        return {
-          id: `${r.kind}:${r.fileName}:${r.scenario?.name ?? ""}@${r.scenario?.version ?? 0}`,
-          group: r.scenario ? "Scenarios" : "Features",
-          label: r.scenario ? r.scenario.name : r.featureName,
-          sub: r.scenario ? (
-            <>
-              {r.featureName}
-              {r.snippet && <> · {markText(r.snippet, r.terms)}</>}
-            </>
-          ) : r.snippet ? (
-            markText(r.snippet, r.terms)
-          ) : undefined,
-          icon: r.scenario ? (
-            <StatusIcon status={scenarioStatus(r.fileName, r.scenario)} size={14} />
-          ) : (
-            <FileText size={14} />
-          ),
-          href: resultHref(r),
-          view,
-          // Alt opens the scenario's card on its feature's page.
-          ...(r.scenario ? { altView: { ...view, page: true } } : {}),
-        };
-      });
-    },
     recent: (view) => {
       const listing = features.find((f) => f.fileName === view.feature);
       const open = view.feature === selected ? feature : null;
@@ -8265,10 +8225,6 @@ export function App() {
     // plugin tab's own commands.
     .filter((x) => (readOnly ? READ_ONLY_PALETTE.test(x.id) : !locked || !WRITES_SPECS.test(x.id)));
 
-  const scenarioStatus = (fileName: string, s: { name: string; version: number }) =>
-    features
-      .find((f) => f.fileName === fileName)
-      ?.scenarios.find((x) => x.name === s.name && x.version === s.version)?.status ?? "proposed";
   const resolvePalette = async (q: string, signal: AbortSignal): Promise<PaletteItem[]> => {
     // The tab on screen searches its own data when it offers a search — its
     // store (the server's full-text index knows only markdown), or its own

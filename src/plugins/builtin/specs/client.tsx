@@ -12,6 +12,7 @@ import type { Context, Plugin } from "../../kernel";
 import type { TabPlugin } from "../../client/tabs";
 import { SPECS_PLUGIN } from "../../profile";
 import { specsHost } from "../../../frontend/specs/host";
+import { searchSpecs } from "../../../frontend/specs/search";
 import { titleFromFileName } from "../../../server/parser";
 import { manifest } from "./manifest";
 import { matchSpecsRoute, specsPath, type SpecsView } from "./route";
@@ -56,7 +57,7 @@ export const specsTab: TabPlugin<SpecsView> = {
   palette: {
     group: "Features",
     fallback: true,
-    search: (query, signal) => specsHost()?.search(query, signal) ?? [],
+    search: searchSpecs,
   },
   recent: (view) => specsHost()?.recent(view) ?? null,
   // The imports into a spec folder, while their switches are on.
