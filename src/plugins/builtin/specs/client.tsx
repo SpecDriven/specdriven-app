@@ -49,6 +49,9 @@ export const specsTab: TabPlugin<SpecsView> = {
     host.open(view, opts);
     return true;
   },
+  // The pane goes to another tab's view, an app page or home: the editor
+  // pane's last save goes out and the feature is no longer open.
+  leave: () => specsHost()?.leave(),
   // The open feature goes with a coding agent message.
   current: (view) => view.feature,
   // `c` makes a feature from the tree, and a scenario on a feature's page.
@@ -83,6 +86,10 @@ const plugin: Plugin<Context> = {
   inject: ["tabs"],
   apply(ctx) {
     ctx.effect(() => ctx.need("tabs").add(specsTab as TabPlugin));
+    // Switched off: the tab is gone from the registry, so no one will ask it
+    // to leave — it lets go of its open feature itself, the editor pane's
+    // last save going out first.
+    ctx.effect(() => () => specsHost()?.leave());
     // A data folder switch: the open scenario's and the description's last
     // saves land in the folder they were typed in, as every tab's do.
     ctx.on("data/leaving", async () => {

@@ -2474,6 +2474,16 @@ export function App() {
   });
 
   /**
+   * The pane is being given to something else — another tab's view, an app
+   * page, home: every tab lets go of the view it holds, saving what its
+   * editor has (src/plugins/client/tabs.ts `leave`). `taking` is the tab
+   * whose view is about to take the pane, which keeps its own.
+   */
+  const leaveViews = (taking?: string) => {
+    for (const tab of tabs.list()) if (tab.id !== taking) tab.leave?.();
+  };
+
+  /**
    * Home — the data folder's README editor (app-startup.md
    * "The data folder name links to the README"). Drops the feature selection
    * and pushes `/`, so Back returns to the feature that was open. The README
@@ -2485,13 +2495,10 @@ export function App() {
   const goHome = () => {
     // A code repository's home is the Files tab's (its README.md, if any).
     if (codeRepoRef.current && openPluginView(FILES_TAB, FILES_HOME, { push: true })) return;
-    editorRef.current.close();
+    leaveViews();
     setPluginView(null);
     setAppPage(null);
     setSelectedFolder(null);
-    setSelected(null);
-    setFeature(null);
-    setSelectedScenario(null);
     if (location.pathname !== "/") history.pushState(null, "", "/");
   };
 
@@ -2531,10 +2538,7 @@ export function App() {
     // A tab that loads its views itself — Specs reads the feature first —
     // takes it from here, the leaving and the url included.
     if (owner.open) return owner.open(view, opts);
-    editorRef.current.close();
-    setSelected(null);
-    setFeature(null);
-    setSelectedScenario(null);
+    leaveViews(tab);
     setSelectedFolder(null);
     selectSidebarTab(tab);
     setAppPage(null);
@@ -2561,11 +2565,8 @@ export function App() {
    * closing either returns to what was open before both.
    */
   const openAppPage = (page: AppPage, opts: { push?: boolean } = { push: true }) => {
-    editorRef.current.close();
+    leaveViews();
     setPluginView(null);
-    setSelected(null);
-    setFeature(null);
-    setSelectedScenario(null);
     setSelectedFolder(null);
     setDrawerOpen(false);
     setSettingsError(null);
@@ -2945,13 +2946,11 @@ export function App() {
       // .ts): with Specs off it matches nothing and reads as home.
       if (!openPluginView(pluginHit.tab.id, pluginHit.view, { pullProblem })) goHome();
     } else {
-      // Back to home while the editor pane is open: it leaves the way `<`
-      // does (specs/editor/spec-editor.feature.md "Spec editor pane").
-      editorRef.current.close();
+      // Back to home while a tab's view is open: it lets go of it — the
+      // editor pane leaves the way `<` does (specs/editor/spec-editor
+      // .feature.md "Spec editor pane").
+      leaveViews();
       setPluginView(null);
-      setSelected(null);
-      setFeature(null);
-      setSelectedScenario(null);
     }
   };
 
@@ -4154,6 +4153,7 @@ export function App() {
     folderMenuKey,
     knownAttributes,
     landSpecsEditors,
+    leaveFeature,
     markSaved,
     moveFeaturePrompt,
     moveFeatureTo,
@@ -4244,6 +4244,7 @@ export function App() {
   // builtin/specs/client.tsx), published before they are read below.
   provideSpecsHost({
     land: landSpecsEditors,
+    leave: leaveFeature,
     refresh: refreshOpenFeature,
     createFeature: () => void createFeature(),
     // Imports into the selected spec folder (specs/external-links/aha-import

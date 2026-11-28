@@ -73,6 +73,7 @@ import { App } from "../src/frontend/App";
 import { handleApi, reloader, syncedOnStart } from "../src/server/api";
 import { syncPlugins } from "../src/plugins/host/loader";
 import { syncClientPlugins } from "../src/plugins/client/loader";
+import { openFeatureState } from "../src/frontend/specs/openFeature";
 import { syncDataDir } from "../src/server/reload";
 import { writeState } from "../src/server/state";
 
@@ -389,6 +390,27 @@ describe("The Specs tab's behaviour, kept through its move into the plugin", () 
     await until(() => readmeOpen(), "home");
     expect(featureOpen()).toBe(false);
     expect(location.pathname).toBe("/");
+  });
+
+  test("switched off with a feature open and on again, Specs has let the feature go", async () => {
+    await setUp(BOTH);
+    await open("/features/quotes");
+    await until(() => document.title === "SpecDriven — Quotes", "the feature");
+    const switchTo = async (enabled: string[]) =>
+      act(async () => {
+        await putState({ plugins: { enabled } });
+        const state = await (await api("/api/state")).json();
+        await syncClientPlugins(state.plugins);
+      });
+    await switchTo(["notebook"]);
+    await until(() => readmeOpen(), "home");
+    // The tab was gone from the registry when the pane went home, so it let
+    // go of the feature itself.
+    expect(openFeatureState().selected).toBeNull();
+    await switchTo(["specs", "notebook"]);
+    await until(() => specsPanel() || sideTabs().includes("Specs"), "the Specs tab back");
+    expect(featureOpen()).toBe(false);
+    expect(readmeOpen()).toBe(true);
   });
 
   test("a scenario found in the palette opens its page, and with mod-Enter its card on the feature's page", async () => {

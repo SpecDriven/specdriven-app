@@ -23,7 +23,7 @@ import { useFeatureOps } from "./featureOps";
 import { setDescEdit, useFeaturePageState } from "./featurePageState";
 import { type Listing } from "./listing";
 import { useOpenFeatureActions } from "./openActions";
-import { useOpenFeature } from "./openFeature";
+import { setFeature, setSelected, setSelectedScenario, useOpenFeature } from "./openFeature";
 import { useFeaturePageKeys } from "./pageKeys";
 import { useSpecsPaletteActions } from "./paletteActions";
 import { usePublish } from "./publish";
@@ -422,6 +422,18 @@ export function useSpecs(deps: SpecsShell) {
    * the editor is emptied so no later tick can.
    */
   /**
+   * The pane is given to something else (the tab's `leave`): an open editor
+   * pane leaves the way `<` does — its last save goes out before the
+   * selection drops (specs/editor/spec-editor.feature.md "Spec editor pane")
+   * — and no feature is open.
+   */
+  const leaveFeature = () => {
+    editorRef.current.close();
+    setSelected(null);
+    setFeature(null);
+    setSelectedScenario(null);
+  };
+  /**
    * The reload tick (the plugin's `reload/tick`): the open feature as the
    * folder now has it, without clobbering an in-progress edit or conflict
    * resolution.
@@ -492,6 +504,7 @@ export function useSpecs(deps: SpecsShell) {
     folderMenuKey,
     knownAttributes,
     landSpecsEditors,
+    leaveFeature,
     markSaved,
     moveFeaturePrompt,
     moveFeatureTo,
