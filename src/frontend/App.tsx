@@ -8,12 +8,8 @@ import type {
 import {
   scenarioNumbers,
   slugify,
-  titleFromFileName,
 } from "../server/parser";
-import type {
-  Scenario,
-  ScenarioPick,
-} from "../server/parser";
+import type { ScenarioPick } from "../server/parser";
 import { RESOURCE_LINK_KINDS, RESOURCE_LINK_TOOLS } from "../server/resourceLinks";
 import type { ResourceLinkKind } from "../server/resourceLinks";
 import type { FeatureListing } from "../server/features";
@@ -32,7 +28,6 @@ import {
   AppWindow,
   Activity,
   Import,
-  Pencil,
   Timer,
   Plus,
   RefreshCw,
@@ -41,7 +36,6 @@ import {
   ExternalLink,
   FolderInput,
   Home,
-  Tag,
   Keyboard,
   Link,
   Menu as MenuIcon,
@@ -51,11 +45,8 @@ import {
   Puzzle,
   Settings,
   Sun,
-  Trash2,
   UserRound,
   X,
-  ArrowDown,
-  ArrowUp,
   Bot,
   KeyRound,
   LogOut,
@@ -85,7 +76,7 @@ import {
   type ReadOnlyProjectInfo,
 } from "./readOnlyProject";
 import { SaveIndicator, Toaster, toast } from "./Toasts";
-import { missedFeatureNote, pullProblemOf, syncForLink } from "./linkSync";
+import { pullProblemOf, syncForLink } from "./linkSync";
 import { currentSyncProblem, pushHint, setSyncProblem, syncProblemMessage, useSyncProblem } from "./syncProblem";
 import { currentRepoReadOnly, parseRepoReadOnly, readOnlySummary, setRepoReadOnly, useRepoReadOnly } from "./repoReadOnly";
 import type { RepoReadOnly } from "./repoReadOnly";
@@ -102,7 +93,7 @@ import { PageSkeleton } from "./Skeleton";
 import { AppOutdated, watchDataTooNew } from "./AppOutdated";
 import { useModalPrompts } from "./ModalPrompts";
 import { PluginUpdatesDialog, dismissPluginUpdates, usePluginUpdatesOffer } from "./PluginUpdatesDialog";
-import { cleanLine, cleanSegments } from "../server/text";
+import { cleanLine } from "../server/text";
 import { AppPageLayout, PageSection } from "./AppPage";
 import { PluginsPage } from "./PluginsPage";
 import { askToCloneCodeRepo, codeReposToOffer, ProjectSettingsPage } from "./ProjectSettingsPage";
@@ -113,7 +104,7 @@ import { WhatsNewPage, hasUnseenNotes, markNotesSeen } from "./WhatsNewPage";
 import { UpdatesPage } from "./UpdatesPage";
 import type { MarketplaceRef } from "../plugins/marketplace";
 import type { PromptOptions } from "./ModalPrompts";
-import { StartSessionDialog, aiTabState, hostedSessionPick, sessionSelection } from "./StartSessionDialog";
+import { StartSessionDialog, aiTabState, hostedSessionPick } from "./StartSessionDialog";
 import { pomodoro, titlePrefix, usePomodoro } from "./pomodoro";
 import { PomodoroBar, PomodoroToggle } from "./PomodoroBar";
 import { applyPomodoroEnabled, applyPomodoroShown, usePomodoroEnabled } from "./pomodoroPref";
@@ -163,18 +154,14 @@ import {
   isFiltering,
 } from "./treeFilter";
 import { CustomAttributesEditor } from "./CustomAttributesEditor";
-import { knownNames, parseAttributeDefinitions } from "../server/customAttributes";
-import { linkDraftOf } from "./externallinks";
 import {
   appPagePath,
   featurePath,
   isLinkEntry,
-  latestScenarioPath,
   matchAppPage,
   pagePath,
   parseRoute,
   repoDisplayName,
-  resolveScenario,
   scenarioPath,
   splitRepoPath,
 } from "./route";
@@ -182,20 +169,7 @@ import type { AppPage } from "./route";
 import {
   testLinkTarget,
   openTestInIdea,
-  type TestDraft,
 } from "./testlinks";
-import {
-  buildTree,
-  folderLabel,
-  revealed,
-  folderOptions,
-  scenarioNeighbors,
-  scenarioRows,
-  treeScenarioKey,
-  scenarioSequence,
-  withOpenScenarios,
-} from "./tree";
-import type { FolderNode, ScenarioRow } from "./tree";
 import { useFocusTrap } from "./useFocusTrap";
 import {
   FOLDER_KIND_LABEL,
@@ -227,7 +201,6 @@ import { SignedCommits } from "./SignedCommits";
 import { ConfluenceTokens, fetchConfluenceTokens, type ConfluenceWiki } from "./ConfluenceToken";
 import { JiraTokens, fetchJiraTokens, type JiraSite } from "./JiraToken";
 import { AgentModelList, agentModelsOf, agentsWithoutSection, type AgentModels } from "./AgentModels";
-import { type FolderFeature } from "./ConfluenceFolderPublishDialog";
 import { QtestTokens, fetchQtestTokens, type QtestSite } from "./QtestToken";
 import { AhaTokens, fetchAhaTokens, type AhaSite } from "./AhaToken";
 import { ExtractSpecsDialog, type ExtractCreated } from "./ExtractSpecsDialog";
@@ -248,7 +221,6 @@ import { ClaudeWebNote } from "./ClaudeWebNote";
 import { openWebLink } from "./weblinks";
 import {
   cardOfScenario,
-  featureFromResponse,
   insertAfterScenario,
   isCardControl,
   landedScenario,
@@ -271,18 +243,7 @@ import {
 } from "./specs/editorHeight";
 import {
   resetEditorState,
-  setConflict,
-  setLinkDraft,
-  setLinkError,
-  setQtestDraft,
-  setQtestError,
-  setResolving,
   setSaving,
-  setTestDraft,
-  setTestEdit,
-  setTestNameDraft,
-  setTestNameHint,
-  setTestsError,
   useEditorState,
 } from "./specs/editorState";
 import {
@@ -294,7 +255,6 @@ import {
   setFeatureQtestDraft,
   setFeatureResourceOpen,
   setFeatureTicketsOpen,
-  setRenameDraft,
   useFeaturePageState,
 } from "./specs/featurePageState";
 import {
@@ -319,6 +279,15 @@ import { useFeatureFields } from "./specs/featureFields";
 import { useScenarioSave } from "./specs/scenarioSave";
 import { usePublish } from "./specs/publish";
 import { useFeatureOps } from "./specs/featureOps";
+import { useSpecsRefs } from "./specs/refs";
+import { useEditorEffects } from "./specs/editorEffects";
+import { useOpenFeatureActions } from "./specs/openActions";
+import { useSessionSelection } from "./specs/sessionSelection";
+import { useFeaturePageKeys } from "./specs/pageKeys";
+import { useFeatureCommands } from "./specs/featureCommands";
+import { useSpecsDerived } from "./specs/derived";
+import { useSpecsPaletteActions } from "./specs/paletteActions";
+import { useSpecsShortcuts } from "./specs/specsShortcuts";
 import { provideSpecsHost, type SpecsActions } from "./specs/host";
 import {
   DEFAULT_PROJECT_MANAGEMENT_TOOL,
@@ -343,29 +312,20 @@ import {
 } from "./specs/settings";
 import {
   resetSpecSelection,
-  scenarioKey,
   setSpecSelection,
   toggleSpecSelected,
   useSpecSelection,
 } from "./specs/selection";
 import {
   resetOpenFeature,
-  setDirty,
-  setEditing,
   setFeature,
-  setFeatureLoading,
-  setPaneRequest,
-  setSearchTerms,
   setSelected,
   setSelectedScenario,
   useOpenFeature,
-  type OpenOptions,
 } from "./specs/openFeature";
 import { SpecsSidebar, type SpecsSidebarProps } from "./specs/SpecsSidebar";
 import {
   resetTreeState,
-  setCollapsed,
-  setOutlined,
   setSelectedFolder,
   useTreeState,
 } from "./specs/treeState";
@@ -1117,11 +1077,11 @@ export function App() {
     resetSpecsDialogs();
     resetSpecsSettings();
   });
-  const { features, folders, folderDescriptions, folderOrders, featureOrders } = useSpecsListing();
+  const { features } = useSpecsListing();
   // The open feature — its file, what was read of it, the card highlighted
   // and the scenario in the editor — lives in a store the Specs tab reads
   // too (src/frontend/specs/openFeature.ts); set here under the same names.
-  const { featureLoading, selected, feature, selectedScenario, dirty, editing, paneRequest } = useOpenFeature();
+  const { featureLoading, selected, feature, dirty, editing } = useOpenFeature();
   // What the editor pane and the feature page hold of their own — menus,
   // drafts, heights, a save or a publish under way — likewise
   // (src/frontend/specs/editorState.ts, featurePageState.ts).
@@ -1132,13 +1092,6 @@ export function App() {
     resolving,
     saving,
     savedAt,
-    publishing,
-    testDraft,
-    testNameDraft,
-    testEdit,
-    testEditDraft,
-    linkDraft,
-    qtestDraft,
   } = useEditorState();
   const {
     featureMenuOpen,
@@ -1152,7 +1105,6 @@ export function App() {
     featureFlagsOpen,
     featureAttributesOpen,
     featureResourceOpen,
-    descEdit,
   } = useFeaturePageState();
   // The switches of Settings the tree, the feature page and the editor read
   // (src/frontend/specs/settings.ts), set from /api/state further down.
@@ -1193,20 +1145,6 @@ export function App() {
   // repo's definitions as written, from the listing; null until one has been
   // read, so Settings offers the editor only for a folder.
   const [customAttributesText, setCustomAttributesText] = useState<string | null>(null);
-  const attributeDefs = useMemo(
-    () => parseAttributeDefinitions(customAttributesText ?? ""),
-    [customAttributesText],
-  );
-  /**
-   * Project-wide status rollup for the Specs section head: how many scenarios
-   * are draft / proposed / published across every feature. Always the full
-   * totals — independent of any active filter.
-   */
-  const statusTotals = useMemo(() => {
-    const t = { draft: 0, proposed: 0, published: 0 };
-    for (const f of features) for (const s of f.scenarios) t[s.status]++;
-    return t;
-  }, [features]);
   // The tree's own state (src/frontend/specs/treeState.ts): folds, outlines,
   // the folder picked, drags, the row menu, scenario picks and the filter.
   const {
@@ -1234,7 +1172,6 @@ export function App() {
   // one, in a store the tree and the feature page set
   // (src/frontend/specs/selection.ts).
   const specSelection = useSpecSelection();
-  const treePickAnchor = useRef<string | null>(null);
   const [sessionRunning, setSessionRunning] = useState(false);
   /** The Start session dialog (src/frontend/StartSessionDialog.tsx), open or not. */
   const [startDialog, setStartDialog] = useState(false);
@@ -1268,87 +1205,39 @@ export function App() {
   const compact = useMediaQuery(COMPACT_QUERY);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const drawerTrapRef = useFocusTrap(compact && drawerOpen);
-  // What the data repo's attributes use, for the chips' checks and the
-  // editor's suggestions (specs/app/custom-attributes.feature.md): every
-  // listed feature, and the open one as it stands — its drafts and an edit
-  // the listing has not caught up with included.
-  const knownAttributes = useMemo(
-    () =>
-      knownNames([
-        ...features.flatMap((f) => [f.attributes, ...f.scenarios.map((s) => s.attributes)]),
-        feature?.attributes,
-        ...(feature?.scenarios.map((s) => s.attributes) ?? []),
-      ]),
-    [features, feature],
-  );
-  // The header field saves on blur, and a blur can arrive from a stale
-  // render (the field closing on ESC, or while a save is out) — these refs
-  // carry the current draft and whether a rename is in flight.
-  const renameDraftRef = useRef(renameDraft);
-  renameDraftRef.current = renameDraft;
-  const renamingRef = useRef(false);
-  const scenarioRefs = useRef<(HTMLElement | null)[]>([]);
-  /** The sidebar's folder tree, for scrolling its highlighted row into view. */
-  const treeRef = useRef<HTMLDivElement | null>(null);
-  /**
-   * True from a selection change until the tree has scrolled its highlighted
-   * row into view (specs/ui/navigation.feature.md "the tree follows the open
-   * feature") — the row may only render a commit or two later, once the
-   * folders above it open and the listing is in.
-   */
-  const revealPending = useRef(false);
-  // Editor autosave (specs/editor/editor-autosave.feature.md): the signature of
-  // what the open dialog last had saved, and whether a tick is still saving.
-  // Refs, because a tick reads them between renders and must not cause one.
-  // Scenario PUTs share a queue with the description editor's reason: a folder
-  // switch must wait for a tick already on its way. A boolean in-flight flag
-  // would make that wait a no-op, and the server resolves the data folder per
-  // request, so the late PUT would write this scenario into the folder that
-  // comes next.
-  const autosaved = useRef<string | null>(null);
-  /** A scenario just added with `+` (specs/ui/ui.feature.md "Add A Scenario
-      Button") is saved the moment its pane opens, empty body and all. */
-  const saveOnOpen = useRef(false);
-  /** The tick still saving, resolving to where it left the scenario — null when none is away. */
-  const autosaveInFlight = useRef<Promise<Placement> | null>(null);
-  const scenarioSaveQueue = useRef(createPromiseQueue());
-  /**
-   * The feature's path is about to change (move, rename-file) or go away
-   * (delete). `retiring` blocks new autosave ticks while a flush lands;
-   * `sealed` refuses every further write to the retired path — the same
-   * pair a page editor uses (PagesPane flush/seal).
-   */
-  const featureEditorsRetiring = useRef(false);
-  const featureEditorsSealed = useRef(false);
-  /** The editor pane's title field, so a tick can see whether the name is
-      still being typed (specs/editor/editor-autosave.feature.md). Null once the
-      scenario is published, when the name is no longer editable. */
-  const nameFieldRef = useRef<HTMLInputElement | null>(null);
-  /** The ways out of the editor pane, for the handlers that leave it from
-      outside the render that defines them — ESC, and every navigation away
-      from the feature (specs/editor/spec-editor.feature.md "Spec editor
-      pane"). Kept in a ref so they always run the current ones. `close`
-      returns the last save when one went out, for a caller that must order
-      itself after it. `flush` / `seal` land and then refuse writes when the
-      file is about to be renamed, moved or deleted. */
-  const editorRef = useRef<{
-    close: () => Promise<{ ok: boolean; placed: Placement }> | null;
-    back: () => void;
-    flush: () => Promise<void>;
-    seal: () => void;
-  }>({
-    close: () => null,
-    back: () => {},
-    flush: async () => {},
-    seal: () => {},
+  const {
+    attributeDefs,
+    knownAttributes,
+    statusTotals,
+  } = useSpecsDerived({
+    customAttributesText,
   });
-  /** True from the moment Delete is pressed until the removal is away, so no
-      tick saves the scenario back while the confirmation is on screen — and
-      so nothing re-sorts the feature under the entry being deleted. */
-  const deletingScenario = useRef(false);
-  /** Bumped every time the dialog opens or closes, so a save that lands after
-      the user has moved on cannot stamp its result onto another scenario. */
-  const editorSession = useRef(0);
+  const {
+    autosaveInFlight,
+    autosaved,
+    bodyFieldRef,
+    deletingScenario,
+    descEditRef,
+    descPaneRef,
+    descSaveQueue,
+    descSaved,
+    editorRef,
+    editorSession,
+    featureEditorsRetiring,
+    featureEditorsSealed,
+    nameFieldRef,
+    renameDraftRef,
+    renamingRef,
+    revealPending,
+    saveOnOpen,
+    scenarioRefs,
+    scenarioSaveQueue,
+    selectedRef,
+    testEditOpened,
+    testLookup,
+    treePickAnchor,
+    treeRef,
+  } = useSpecsRefs();
   /** The `?` keyboard cheat sheet. */
   const [sheetOpen, setSheetOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -1582,30 +1471,6 @@ export function App() {
   const [settingsSyncDraft, setSettingsSyncDraft] = useState(DEFAULT_SYNC_SERVER_URL);
   /** The Settings switch: off saves an empty url, which turns live sync off. */
   const [settingsSyncOnDraft, setSettingsSyncOnDraft] = useState(false);
-  /** Serial of the latest name lookup: an older one landing late is ignored. */
-  const testLookup = useRef(0);
-  /** The url and name an ✎ row opened with, to tell a changed url from a re-open. */
-  const testEditOpened = useRef<TestDraft>({ url: "", name: "" });
-  // The feature description editor's draft is in the feature page's store
-  // (src/frontend/specs/featurePageState.ts). `descSaved` is the text last
-  // landed on the server; refs, because a tick reads them between renders
-  // and must not cause one.
-  const descEditRef = useRef(descEdit);
-  descEditRef.current = descEdit;
-  const selectedRef = useRef(selected);
-  selectedRef.current = selected;
-  const descSaved = useRef<string | null>(null);
-  /**
-   * Description PUTs go through one queue, so a flush (leaving the feature, or
-   * switching data folder) waits for a tick already on its way and then writes
-   * what the editor still holds — the same reason the page editor and the
-   * model canvas have queues of their own. A boolean in-flight flag would make
-   * that flush a no-op instead, dropping whatever was typed since the tick
-   * started.
-   */
-  const descSaveQueue = useRef(createPromiseQueue());
-  const descPaneRef = useRef<HTMLDivElement | null>(null);
-  const bodyFieldRef = useRef<HTMLDivElement | null>(null);
   // Git access (specs/app/user-info-settings.feature.md "Git access"): the
   // GitHub CLI (the default wherever gh is installed), a personal access
   // token, or the GitHub account sign-in — the server picks the engine.
@@ -1929,20 +1794,6 @@ export function App() {
   const refreshViewRef = useRef(refreshView);
   refreshViewRef.current = refreshView;
 
-  /**
-   * The read-only site's tick for an open scenario page: the feature as the
-   * server has it now, and when it differs from the one on screen, the same
-   * scenario's page opened again on it — by name and version, the way its
-   * link resolves, so a scenario that is gone says so and closes.
-   */
-  const refreshReadOnlyPane = async (file: string, open: Scenario): Promise<void> => {
-    const res = await fetch(`/api/features/${encodeURIComponent(file)}`).catch(() => null);
-    if (!res?.ok) return;
-    const fresh = featureFromResponse(await res.json(), file);
-    if (JSON.stringify(fresh) === JSON.stringify(feature)) return;
-    await openFeature(file, { scenario: { slug: slugify(open.name), version: open.version }, pane: true });
-  };
-
   // Mirror the server's cron reload: refresh on the same cadence so pulled
   // changes show up.
   // Not for a code repository, which nothing syncs: its tree refreshes when
@@ -1957,122 +1808,21 @@ export function App() {
   // meanings, "/" for search and the rest — is declared in one registry
   // further down (`shortcuts`) and dispatched by one listener.
 
-  // The dialog's "Add test link" field starts empty each time it opens, with
-  // no row left open for ✎ editing (specs/traceability.feature.md).
-  const editingOpen = editing !== null;
-  /** The scenario whose page is open — what the url and the title name. */
-  const paneScenario = pageScenario(editing, feature?.scenarios);
   /** Whether the url already stands for an open scenario page. */
   const panePushed = useRef(false);
-  useEffect(() => {
-    setTestDraft("");
-    setTestNameDraft("");
-    setTestEdit(null);
-    setTestNameHint(null);
-    testLookup.current++;
-    // The ticket-link fields open showing the scenario's link, if any.
-    setLinkDraft(linkDraftOf(editing?.scenario.link));
-    setQtestDraft(linkDraftOf(editing?.scenario.qtest));
-  }, [editingOpen]);
-
-  // The tree reads the open feature's scenarios from its live state, every
-  // other feature's from the listing — which only refreshes on start and on
-  // the reload cron. So whatever the open feature now holds goes into its
-  // listing entry too, or a scenario deleted (or renamed, or added) there
-  // would come back the moment another feature is opened.
-  useEffect(() => {
-    if (!selected || !feature) return;
-    setFeatures((prev) => withOpenScenarios(prev, selected, feature));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [feature]);
-
-  // Autosave measures against what the dialog opened with, so a scenario that
-  // is opened and read but not edited is never re-saved
-  // (specs/editor/editor-autosave.feature.md).
-  useEffect(() => {
-    editorSession.current += 1;
-    autosaved.current = editing
-      ? scenarioSignature(editing.scenario, editing.scenario.version)
-      : null;
-    autosaveInFlight.current = null;
-    // The delete that closed the dialog may still be in flight, but with no
-    // dialog open there is no tick for the flag to hold back.
-    deletingScenario.current = false;
-  }, [editingOpen]);
-
-  // A scenario deep link honored above left its scenario here: open its page
-  // now that the feature it belongs to is on screen
-  // (specs/ui/navigation.feature.md "open a scenario link"). By identity, like
-  // every other card lookup — the link resolved against the same feature, so it
-  // is still there.
-  useEffect(() => {
-    if (!paneRequest) return;
-    setPaneRequest(null);
-    if (!feature) return;
-    const idx = cardOfScenario(feature.scenarios, paneRequest.scenario);
-    if (idx !== null) {
-      setEditing({ index: idx, scenario: { ...feature.scenarios[idx]! } });
-      setSearchTerms(paneRequest.terms);
-    }
-  }, [paneRequest, feature]);
-
-  // The tree follows the open feature (specs/ui/navigation.feature.md "the
-  // tree follows the open feature"): whatever opened it — a search hit, a
-  // link, a card, the palette — the folders above it open, a scenario pane
-  // expands its feature's outline, and the highlighted row is scrolled into
-  // view. The scroll itself waits for the next commit (the effect below),
-  // since the row it wants may not be rendered yet.
-  const paneKey = paneScenario ? `${paneScenario.name}@v${paneScenario.version}` : null;
-  useEffect(() => {
-    if (!selected) return;
-    revealPending.current = true;
-    setCollapsed((prev) => revealed(prev, selected));
-    if (paneKey !== null)
-      setOutlined((prev) => {
-        if (prev.has(selected)) return prev;
-        return new Set(prev).add(selected);
-      });
-  }, [selected, paneKey]);
-
-  // After every commit: the pending reveal scrolls the tree's highlighted
-  // row — the open scenario's while a pane is open, else the feature's —
-  // into view, and is done once it found it. A listing still loading, a
-  // folder still opening or an outline still expanding leaves it pending for
-  // the next commit; a pane must wait for its own row, since the feature's is
-  // there a commit earlier and the scenario's may sit below the fold.
-  useEffect(() => {
-    if (!revealPending.current) return;
-    const tree = treeRef.current;
-    if (!tree) return;
-    const row = tree.querySelector<HTMLElement>(
-      paneKey !== null ? "a.tree-scenario.active" : "a.tree-feature.active",
-    );
-    if (!row) return;
-    revealPending.current = false;
-    row.scrollIntoView({ block: "nearest" });
+  const {
+    editingOpen,
+    paneScenario,
+  } = useEditorEffects({
+    autosaveInFlight,
+    autosaved,
+    deletingScenario,
+    editorSession,
+    revealPending,
+    scenarioRefs,
+    testLookup,
+    treeRef,
   });
-
-  // The marks belong to the pane the hit opened: closing it takes them along,
-  // so the scenario reopened from its card shows plain text. Not while a pane
-  // request is pending — opening a hit closes the previous pane first, and
-  // the request above is what carries the new terms in.
-  useEffect(() => {
-    if (editing === null && paneRequest === null) setSearchTerms(null);
-  }, [editing === null, paneRequest]);
-
-  // A "Save was blocked" message stops applying the moment the tests widgets
-  // change — typing, adding, or opening/closing an ✎ row.
-  useEffect(() => {
-    setTestsError(null);
-  }, [editingOpen, testDraft, testNameDraft, testEditDraft, testEdit]);
-
-  useEffect(() => {
-    setLinkError(null);
-  }, [editingOpen, linkDraft]);
-
-  useEffect(() => {
-    setQtestError(null);
-  }, [editingOpen, qtestDraft]);
 
   const featureLinkOpen = featureTicketsOpen;
   const featureQtestOpen = featureQtestDraft !== null;
@@ -2145,15 +1895,6 @@ export function App() {
   }, [foldersOpen]);
   const switchTrapRef = useFocusTrap(switching !== null);
   const sessionErrorTrapRef = useFocusTrap(sessionError !== null);
-
-  // Also re-run when the editor pane gives the feature page back: the cards
-  // mount afresh, so the highlighted one is scrolled to even if the highlight
-  // itself did not move (specs/editor/spec-editor.feature.md "Spec editor
-  // pane").
-  useEffect(() => {
-    if (selectedScenario !== null)
-      scenarioRefs.current[selectedScenario]?.scrollIntoView({ block: "nearest" });
-  }, [selectedScenario, editingOpen]);
 
   // Canonical url (specs/ui/navigation.feature.md "Resolution rules"): the
   // address bar shows the page that is open — the scenario page's own url while
@@ -2800,95 +2541,21 @@ export function App() {
     }
   };
 
-  const openFeature = async (file: string, opts: OpenOptions = {}) => {
-    setFeatureLoading(true);
-    const res = await fetch(`/api/features/${encodeURIComponent(file)}`).finally(() =>
-      setFeatureLoading(false),
-    );
-    if (res.ok) {
-      const data = await res.json();
-      const parsed = featureFromResponse(data, file);
-      // An open editor pane leaves the way `<` does — its last save goes out
-      // now (specs/editor/spec-editor.feature.md "Spec editor pane"). Before
-      // the selection moves on: the save places its scenario in the feature
-      // it belongs to with a synchronous setFeature, which the feature opened
-      // here must land on top of, not under. And not before the fetch, or
-      // the old feature page would show for the duration of the request.
-      editorRef.current.close();
-      // A move / rename-file sealed the editors so the close above could not
-      // PUT the retired path after git-mv. This is a live feature again.
-      unsealFeatureEditors();
-      // Opening a feature leaves the open plugin view — a page saves what
-      // its editor still holds as it unmounts, the same courtesy the README
-      // editor gets. An app page — Settings, Plugins — leaves too.
-      setPluginView(null);
-      setAppPage(null);
-      // A new feature shows up in the tree, so the sidebar turns to the Specs
-      // tab; a same-file refresh (sync, cron) leaves the tab where it is.
-      if (file !== selected) selectSidebarTab(SPECS_TAB);
-      setSelected(file);
-      setFeature(parsed);
-      let missingScenario: string | null = null;
-      if (opts.scenario !== undefined) {
-        // Deep link (specs/ui/navigation.feature.md): resolve slug (+ version)
-        // to a card; a miss opens the feature with no selection and a note.
-        const idx = opts.scenario === null ? null : resolveScenario(parsed.scenarios, opts.scenario);
-        if (opts.scenario !== null && idx === null) missingScenario = opts.scenario.slug;
-        setSelectedScenario(idx);
-        // A scenario link opens that scenario's page
-        // (specs/ui/navigation.feature.md "open a scenario link") — the whole
-        // point of the card's "Copy link".
-        setPaneRequest(
-          opts.pane && idx !== null
-            ? { scenario: parsed.scenarios[idx]!, terms: opts.terms ?? null }
-            : null,
-        );
-      } else {
-        // Keep the keyboard highlight across a same-file refresh (sync, cron);
-        // drop it when switching files or when the list shrank past it.
-        setSelectedScenario((prev) =>
-          file === selected && prev !== null && prev < parsed.scenarios.length ? prev : null,
-        );
-      }
-      if (opts.push && location.pathname !== featurePath(file)) {
-        history.pushState(null, "", featurePath(file));
-      }
-      setDirty(false);
-      // A same-file refresh keeps a feature name being edited in the header.
-      if (file !== selected) setRenameDraft(null);
-      setConflict(null);
-      if (opts.editDescription) openDescriptionEditor(file, parsed.description);
-      if (missingScenario) {
-        toast.error(
-          `Scenario "${missingScenario}" not found — it may have been renamed or deleted.`,
-        );
-      }
-    } else {
-      // The file is gone — deleted, renamed by the `.feature.md` migration, or
-      // a stale deep link. Drop a stale selection rather than re-fetching it
-      // on every reload tick; a link or click that misses leaves a note.
-      unsealFeatureEditors();
-      if (file === selected) {
-        // The file is gone, so an editor open on it has nothing to save into.
-        setEditing(null);
-        setSelected(null);
-        setFeature(null);
-        setSelectedScenario(null);
-      }
-      if (opts.push || opts.scenario !== undefined) {
-        // Said by what the app knows (linkSync.ts): "stale" only for a file
-        // that is not there in a folder that was pulled.
-        const body = (await res.json().catch(() => null)) as { error?: unknown } | null;
-        toast.error(
-          missedFeatureNote(file, res.status, {
-            pullProblem: opts.pullProblem ?? null,
-            error: typeof body?.error === "string" ? body.error : null,
-          }),
-        );
-      }
-      await loadFeatures();
-    }
-  };
+  const {
+    openFeature,
+    refreshReadOnlyPane,
+  } = useOpenFeatureActions({
+    editorRef,
+    loadFeatures,
+    // Declared further down: called through, not passed.
+    openDescriptionEditor: (file, text) => openDescriptionEditor(file, text),
+    // Declared further down: called through, not passed.
+    selectSidebarTab: (tab) => selectSidebarTab(tab),
+    setAppPage,
+    setPluginView,
+    // Declared further down: called through, not passed.
+    unsealFeatureEditors: () => unsealFeatureEditors(),
+  });
 
   // How the Specs tab opens a feature from its url (src/plugins/builtin/
   // specs/client.tsx) — a link, Back, a palette hit: published here, before
@@ -3401,132 +3068,20 @@ export function App() {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
-  // With a folder selected, the new feature is created inside it — the same
-  // insertion point "+ New folder" uses; `folder/name` nests further below
-  // it (specs/ui/folders.feature.md).
-  const createFeature = () => createFeatureIn(selectedFolder);
-  /** `parent` is a repo-relative folder path, or null for the top level. */
-  const createFeatureIn = async (parent: string | null) => {
-    const input = await prompt({
-      title: parent ? `New feature in "${parent}"` : "New feature",
-      hint: parent ? undefined : "Use folder/name to create inside a folder.",
-      placeholder: parent ? "Basic Quote" : "billing/Basic Quote",
-      confirmLabel: "Create feature",
-    });
-    if (!input) return;
-    const name = cleanSegments(input);
-    const res = await fetch("/api/features", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: parent ? `${parent}/${name}` : name }),
-    });
-    const data = await res.json();
-    if (res.ok) {
-      // Reveal the new feature: a selected folder may be collapsed, since
-      // clicking one both selects it and toggles its subtree.
-      if (parent) setCollapsed((prev) => {
-        const next = new Set(prev);
-        next.delete(parent);
-        return next;
-      });
-      await loadFeatures();
-      // A new feature opens on its description editor (specs/editor/feature-
-      // editor.feature.md "Edit feature descrition").
-      await openFeature(data.fileName, { push: true, editDescription: true });
-    } else {
-      toast.error(data.error ?? "Could not create the feature");
-    }
-  };
 
-  // What the current selection sends to a session. Selections can outlive
-  // the list (a checked spec deleted elsewhere, a scenario replaced by a new
-  // version) — only specs and scenarios still listed go in.
-  // With nothing checked, the scenarios picked in the tree, the open
-  // scenario, or the open feature stand in (sessionSelection).
-  const sessionFiles = (): { fileName: string; scenarios?: ScenarioPick[] }[] => {
-    const picks: { file: string; row: ScenarioRow }[] = [];
-    if (!locked && treePicks.size > 0) {
-      for (const f of features) {
-        for (const row of scenarioRows(f, selected, feature)) {
-          if (treePicks.has(treeScenarioKey(f.fileName, row))) picks.push({ file: f.fileName, row });
-        }
-      }
-    }
-    return sessionSelection({
-      checked: checkedSessionFiles(),
-      treePicks: picks,
-      openFeature: selected && feature ? selected : null,
-      openScenario: paneScenario,
-    });
-  };
-
-  /** The specs and scenarios checked for a session, still listed. */
-  const checkedSessionFiles = (): { fileName: string; scenarios?: ScenarioPick[] }[] => {
-    const files: { fileName: string; scenarios?: ScenarioPick[] }[] = [];
-    for (const f of features) {
-      const entry = specSelection.get(f.fileName);
-      if (entry === undefined) continue;
-      if (entry === "all") {
-        files.push({ fileName: f.fileName });
-        continue;
-      }
-      const picked = f.scenarios.filter((s) => entry.has(scenarioKey(s)));
-      if (picked.length > 0) {
-        files.push({
-          fileName: f.fileName,
-          scenarios: picked.map(({ name, version }) => ({ name, version })),
-        });
-      }
-    }
-    return files;
-  };
-
-  /**
-   * What the open plugin view bundles into a session beyond the picked specs
-   * (src/plugins/client/tabs.ts `session`) — the Event Model on the Models
-   * plugin's canvas, whose JSON goes into the prompt after the specs — sent
-   * as `attachments` under the plugin's id. What a tab bundles alone is a
-   * session too (src/server/api.ts resolveSessionRequest).
-   */
-  const sessionBundle = (): {
-    attachments: Record<string, string[]>;
-    labels: string[];
-    count: number;
-  } => {
-    const bundle = pluginView && activeTab ? activeTab.session?.(pluginView.view) : null;
-    return bundle && activeTab
-      ? { attachments: { [activeTab.id]: bundle.refs }, labels: bundle.labels, count: bundle.refs.length }
-      : { attachments: {}, labels: [], count: 0 };
-  };
-
-  /** "2 whole specs and 3 scenarios from 1 spec" — the button and the name
-      dialog both say what a session would run over. */
-  const describeSelection = (
-    files: { scenarios?: ScenarioPick[] }[],
-    bundled: string[] = sessionBundle().labels,
-  ): string => {
-    const whole = files.filter((f) => !f.scenarios).length;
-    const partial = files.length - whole;
-    const scenarios = files.reduce((n, f) => n + (f.scenarios?.length ?? 0), 0);
-    const parts: string[] = [];
-    if (whole > 0) parts.push(`${whole} whole spec${whole === 1 ? "" : "s"}`);
-    if (partial > 0) {
-      parts.push(
-        `${scenarios} scenario${scenarios === 1 ? "" : "s"} from ` +
-          `${partial} spec${partial === 1 ? "" : "s"}`,
-      );
-    }
-    parts.push(...bundled);
-    return parts.join(" and ");
-  };
-
-  const selectionLabel = describeSelection(sessionFiles());
-  /** The sidebar's "Selected:" note: what was checked, not what stands in. */
-  const checkedLabel = describeSelection(checkedSessionFiles());
-  // What a session would run over, counted: the Start session button is
-  // off at zero (nothing checked, picked or open).
-  const sessionCount = sessionFiles().length + sessionBundle().count;
-
+  const {
+    checkedLabel,
+    describeSelection,
+    selectionLabel,
+    sessionBundle,
+    sessionCount,
+    sessionFiles,
+  } = useSessionSelection({
+    activeTab,
+    locked,
+    paneScenario,
+    pluginView,
+  });
   /** The target the next session dialog opens on. */
   const sessionTarget = resolveCodeGenTarget(codeGenTarget, canOpenClaudeDesktop, agents);
 
@@ -3881,42 +3436,7 @@ export function App() {
     }
   };
 
-  const resolveWith = async (which: "ours" | "theirs" | "draft", resolved: string) => {
-    if (!selected || resolving) return;
-    setResolving(which);
-    try {
-      const res = await fetch(`/api/features/${encodeURIComponent(selected)}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          content: resolved,
-          resolveConflict: true,
-          // Keep an individual publish scoped to its scenario — and, by its
-          // document id, renaming rather than doubling — through the
-          // conflict resolution.
-          scenario: conflict?.scenario,
-        }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        // openFeature closes the dialog by clearing the conflict.
-        await openFeature(selected);
-      } else {
-        toast.error(data.error ?? "Publish failed");
-      }
-    } catch {
-      toast.error("Publish failed — is the server running?");
-    } finally {
-      setResolving(null);
-    }
-  };
 
-  /** Close the conflict dialog without resolving. The unfinished merge stays
-      in the repo, so Publish brings the same choices back. */
-  const dismissConflict = () => {
-    setConflict(null);
-    toast.info("Merge conflict left unresolved — Publish again to pick a resolution.");
-  };
 
   /** Handle a link in-app on a plain click; cmd/ctrl/shift-clicks keep their
       native behavior (new tab etc — specs/ui/navigation.feature.md "share a
@@ -3941,12 +3461,6 @@ export function App() {
     setCopied(path);
     window.setTimeout(() => setCopied((p) => (p === path ? null : p)), 2000);
   };
-  // The scenario url "Copy link" shares. The public specs site hands links to
-  // people outside the team, so there it is the versionless url, which still
-  // opens after the scenario gets a new version (specs/app/public-specs-site
-  // .feature.md "copies a deep link"); everywhere else, the versioned one.
-  const scenarioLink = (fileName: string, s: Pick<Scenario, "name" | "version">) =>
-    readOnly ? latestScenarioPath(fileName, s) : scenarioPath(fileName, s);
 
   const {
     draftVersion,
@@ -4729,25 +4243,7 @@ export function App() {
     scenarioSaveQueue,
     selectedRef,
   });
-  const toggleFolder = (path: string) =>
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      return next;
-    });
 
-  /**
-   * Open or close a feature's scenario outline
-   * (specs/ui/navigation.feature.md).
-   */
-  const toggleOutline = (file: string) =>
-    setOutlined((prev) => {
-      const next = new Set(prev);
-      if (next.has(file)) next.delete(file);
-      else next.add(file);
-      return next;
-    });
 
   // The scenario as last saved into the feature: what a delete removes, and
   // what the Draft checkbox is locked against — neither follows the dialog's
@@ -4787,38 +4283,6 @@ export function App() {
     treeRef,
   });
 
-  /**
-   * Folders then features, indented per depth (specs/ui/folders.feature.md).
-   * A folder's whole subtree is its drop zone — dropping on a feature drops
-   * into the folder that holds it; nested folders win via stopPropagation.
-   */
-  // "Publish to Confluence…" on a folder: the dialog opens on the folder's
-  // features in the sidebar's order, its subfolders' after its own, then
-  // learns from the server which pages they link and where they were last
-  // published under.
-  const openConfluenceFolder = async (node: FolderNode) => {
-    const inOrder: FeatureListing[] = [];
-    const walk = (n: FolderNode) => {
-      inOrder.push(...n.features);
-      n.folders.forEach(walk);
-    };
-    walk(node);
-    const path = node.path;
-    setConfluenceFolder({ path, label: folderLabel(node), features: null });
-    let known = new Map<string, FolderFeature>();
-    try {
-      const res = await fetch(`/api/folders/${encodeURIComponent(path)}/confluence`);
-      if (res.ok) {
-        const data = (await res.json()) as { features: FolderFeature[] };
-        known = new Map(data.features.map((f) => [f.file, f]));
-      }
-    } catch {
-      // Without the server's answer every feature reads as a new page; the
-      // publish itself still finds the pages they link.
-    }
-    const features = inOrder.map((f) => known.get(f.fileName) ?? { file: f.fileName, name: f.name });
-    setConfluenceFolder((open) => (open?.path === path ? { ...open, features } : open));
-  };
 
   // One keyboard model (specs/ui/ui.feature.md "Design system"): every
   // shortcut is declared once here, dispatched by one listener
@@ -4870,7 +4334,6 @@ export function App() {
    * command palette").
    */
   const quietBehindPalette = quiet && palette === null;
-  const onFeaturePage = selected !== null && feature !== null && editing === null;
   // On a small screen "[" and the sidebar buttons work the drawer instead of
   // the rail; the rail preference is left alone for the next big window.
   const toggleSidebar = () => {
@@ -4896,59 +4359,21 @@ export function App() {
   useEffect(() => {
     setDrawerOpen(false);
   }, [compact, selected, pluginViewKey, editing !== null]);
-  // specs/editor/spec-editor.feature.md "Adding Scanarios": a small dialog
-  // asks for the scenario's name first; the editor pane opens with it. A
-  // new scenario starts as a draft: autosave
-  // (specs/editor/editor-autosave.feature.md) writes the editor out every few
-  // seconds, and a draft stays in the document. Proposing it — into the
-  // .feature.md — takes the editor's Propose button, an explicit act.
-  const newScenario = async (insertAt?: number) => {
-    const name = await prompt({
-      title: "New scenario",
-      placeholder: "Scenario name",
-      confirmLabel: "Create",
-    });
-    if (!name || !cleanLine(name)) return;
-    // At `insertAt` — "New scenario below" on a card — or at the end.
-    saveOnOpen.current = true;
-    setEditing(newScenarioDraft(name, insertAt));
-  };
-  // specs/ui/ui.feature.md "Select scenarios via up and down keys": the
-  // highlight walks the cards; Enter opens the highlighted one in the editor
-  // pane.
-  const moveScenarioSelection = (e: KeyboardEvent, delta: 1 | -1) => {
-    if (!feature) return;
-    const count = feature.scenarios.length;
-    // Steal focus from a clicked button (e.g. the feature just opened in the
-    // sidebar) so a following Enter edits the highlighted scenario instead
-    // of re-activating that button.
-    if (e.target instanceof HTMLElement) e.target.blur();
-    setSelectedScenario((i) =>
-      delta > 0
-        ? i === null
-          ? 0
-          : Math.min(i + 1, count - 1)
-        : i === null
-          ? count - 1
-          : Math.max(i - 1, 0),
-    );
-  };
-  const openSelectedScenario = (e: KeyboardEvent): void | false => {
-    if (!feature || selectedScenario === null) return false;
-    const t = e.target;
-    if (e.key === "Enter") {
-      // A focused button or link keeps its native Enter activation — except
-      // the highlighted card's own title link, which a click left focused:
-      // Enter there edits the scenario rather than re-selecting it.
-      const titleLink = scenarioRefs.current[selectedScenario]?.querySelector(
-        ".scenario-title > a",
-      );
-      if (t instanceof HTMLButtonElement) return false;
-      if (t instanceof HTMLAnchorElement && t !== titleLink) return false;
-    }
-    const s = feature.scenarios[selectedScenario];
-    if (s) setEditing({ index: selectedScenario, scenario: { ...s } });
-  };
+  const {
+    moveScenarioSelection,
+    newScenario,
+    onFeaturePage,
+    openSelectedScenario,
+    scenarioLink,
+    scenarioNav,
+    stepScenario,
+  } = useFeaturePageKeys({
+    openScenarioRow,
+    prompt,
+    readOnly,
+    saveOnOpen,
+    scenarioRefs,
+  });
   // ESC closes whatever is on top (specs/ui/ui.feature.md "Dialogs"): a dialog;
   // then the editor pane — its way back, leaving the scenario autosaved
   // (specs/editor/spec-editor.feature.md "Spec editor pane") — unless the
@@ -5002,28 +4427,6 @@ export function App() {
     if (selectedFolder !== null) return setSelectedFolder(null);
     return false;
   };
-  // The scenario editor's `<` / `>` and their keys: step to the scenario
-  // before or after the open one, through every scenario in the tree in the
-  // order the sidebar lists them — across features too. The same way the
-  // tree's own rows switch scenarios (openScenarioRow), so the open pane
-  // autosaves on the way out. Located by the scenario as last saved, not by
-  // a name still being typed; a new scenario not yet saved has no place in
-  // the walk, so both ways are off until it does.
-  const editedEntry =
-    editing !== null && editing.index !== null ? (feature?.scenarios[editing.index] ?? null) : null;
-  const scenarioNav =
-    selected && editedEntry
-      ? scenarioNeighbors(
-          scenarioSequence(buildTree(folders, features, folderDescriptions, folderOrders, featureOrders), selected, feature),
-          selected,
-          editedEntry,
-        )
-      : { prev: null, next: null };
-  const stepScenario = (step: -1 | 1): void | false => {
-    const to = step < 0 ? scenarioNav.prev : scenarioNav.next;
-    if (!to) return false;
-    openScenarioRow(to.file, to.scenario);
-  };
   // What the Specs tab's `c` and its own commands read (src/plugins/
   // builtin/specs/client.tsx), published before they are read below.
   provideSpecsHost({
@@ -5059,6 +4462,21 @@ export function App() {
       : onFeaturePage
         ? { label: "New scenario", run: () => void newScenario() }
         : null,
+  });
+  const {
+    specsShortcuts,
+  } = useSpecsShortcuts({
+    moveScenarioSelection,
+    onFeaturePage,
+    openSelectedScenario,
+    proposeScenario,
+    publish,
+    publishScenario,
+    quiet,
+    quietBehindPalette,
+    reorderScenario,
+    scenarioNav,
+    stepScenario,
   });
   // `c` (specs/app/plugins.feature.md): what the open view makes — a
   // scenario on a feature's page — else the shown tab's own "new": a
@@ -5304,86 +4722,8 @@ export function App() {
       palette: () => pomodoroOn && !quietBehindPalette && editing === null && pom.timer === null,
       run: () => startPomodoro(),
     },
-    {
-      id: "next",
-      keys: ["j", "arrowdown"],
-      label: "Next scenario",
-      group: "Scenarios",
-      when: () => !quiet && onFeaturePage && feature !== null && feature.scenarios.length > 0,
-      run: (e) => moveScenarioSelection(e, 1),
-    },
-    {
-      id: "prev",
-      keys: ["k", "arrowup"],
-      label: "Previous scenario",
-      group: "Scenarios",
-      when: () => !quiet && onFeaturePage && feature !== null && feature.scenarios.length > 0,
-      run: (e) => moveScenarioSelection(e, -1),
-    },
-    {
-      id: "move-up",
-      keys: "alt+arrowup",
-      label: "Move the selected scenario up",
-      group: "Scenarios",
-      when: () => !quiet && onFeaturePage && editing === null && selectedScenario !== null,
-      run: () => void reorderScenario(selectedScenario!, -1),
-    },
-    {
-      id: "move-down",
-      keys: "alt+arrowdown",
-      label: "Move the selected scenario down",
-      group: "Scenarios",
-      when: () => !quiet && onFeaturePage && editing === null && selectedScenario !== null,
-      run: () => void reorderScenario(selectedScenario!, 1),
-    },
-    {
-      id: "open",
-      keys: ["enter", "e", "o"],
-      label: "Open the selected scenario",
-      group: "Scenarios",
-      when: () => !quiet && onFeaturePage && selectedScenario !== null,
-      run: openSelectedScenario,
-    },
-    {
-      id: "editor-prev",
-      keys: ["<", "k"],
-      label: "Previous scenario (in the scenario editor)",
-      group: "Scenarios",
-      when: () => !quiet && editing !== null && scenarioNav.prev !== null,
-      run: () => stepScenario(-1),
-    },
-    {
-      id: "editor-next",
-      keys: [">", "j"],
-      label: "Next scenario (in the scenario editor)",
-      group: "Scenarios",
-      when: () => !quiet && editing !== null && scenarioNav.next !== null,
-      run: () => stepScenario(1),
-    },
-    {
-      id: "publish",
-      keys: "mod+enter",
-      label: editing
-        ? editing.scenario.status === "draft"
-          ? "Propose the scenario"
-          : "Publish the scenario"
-        : "Publish all",
-      group: "Publish",
-      inFields: true,
-      when: () => !quiet && (editing !== null || onFeaturePage),
-      palette: () => !quietBehindPalette && (editing !== null || onFeaturePage),
-      run: () => {
-        if (publishing !== null) return false;
-        if (editing) {
-          if (editing.scenario.status === "published" || !editing.scenario.name.trim())
-            return false;
-          if (editing.scenario.status === "draft") void proposeScenario();
-          else void publishScenario();
-          return;
-        }
-        void publish();
-      },
-    },
+    // The feature page's and the editor's own keys, in their place in the sheet.
+    ...specsShortcuts,
     {
       id: "copy-link",
       keys: "mod+shift+c",
@@ -5461,23 +4801,23 @@ export function App() {
       run: () => void s.run(new KeyboardEvent("keydown", { key: "Enter" })),
     };
   };
-  // Move to folder… (specs/ui/folders.feature.md "move a feature from its
-  // menu"): the keyboard's way to what a drag does — pick a folder from the
-  // list, the top level included, and the same git mv runs.
-  const moveFeaturePrompt = async (fileName: string | null = selected) => {
-    if (!fileName) return;
-    const from = fileName.slice(0, fileName.lastIndexOf("/"));
-    const options = folderOptions(buildTree(folders, features, folderDescriptions, folderOrders, featureOrders), from);
-    const to = await pick({
-      title: `Move “${fileStem(fileName)}”`,
-      hint: "To another folder — a git mv, committed and pushed.",
-      placeholder: "Find a folder…",
-      options,
-      empty: options.length === 0 ? "There is no other folder to move it to." : "No folder matches.",
-    });
-    if (to === null) return;
-    await moveTo(fileName, to);
-  };
+  const {
+    createFeature,
+    createFeatureIn,
+    dismissConflict,
+    moveFeaturePrompt,
+    openConfluenceFolder,
+    resolveWith,
+    toggleFolder,
+    toggleOutline,
+  } = useFeatureCommands({
+    fileStem,
+    loadFeatures,
+    moveTo,
+    openFeature,
+    pick,
+    prompt,
+  });
   const action = (
     id: string,
     label: string,
@@ -5485,7 +4825,20 @@ export function App() {
     run: () => void,
     extra: Partial<PaletteItem> = {},
   ): PaletteItem => ({ id: `action:${id}`, group: "Actions", label, text: label, icon, run, ...extra });
-  const listing = selected ? features.find((f) => f.fileName === selected) : undefined;
+  const {
+    specsFeatureActions,
+    specsFolderActions,
+  } = useSpecsPaletteActions({
+    action,
+    editFolderDisplayName,
+    moveFeaturePrompt,
+    moveFolderPrompt,
+    removeFeature,
+    removeFolder,
+    renameFolder,
+    reorderFeature,
+    reorderFolder,
+  });
   const paletteActions: PaletteItem[] = [
     shortcutAction(
       "create",
@@ -5500,60 +4853,10 @@ export function App() {
     shortcutAction("extract-specs", <Sparkles size={14} />),
     shortcutAction("link-tests", <Sparkles size={14} />),
     shortcutAction("publish-folder", <Import size={14} />),
-    ...(selectedFolder
-      ? [
-          action("rename-folder", `Rename folder “${selectedFolder.split("/").pop()}”`, <Pencil size={14} />, () =>
-            void renameFolder(selectedFolder),
-          ),
-          action(
-            "folder-display-name",
-            `Edit display name of folder “${selectedFolder.split("/").pop()}”`,
-            <Tag size={14} />,
-            () => void editFolderDisplayName(selectedFolder),
-          ),
-          action(
-            "move-folder",
-            `Move folder “${selectedFolder.split("/").pop()}” to folder…`,
-            <FolderInput size={14} />,
-            () => void moveFolderPrompt(selectedFolder),
-          ),
-          action("move-folder-up", `Move folder “${selectedFolder.split("/").pop()}” up`, <ArrowUp size={14} />, () =>
-            reorderFolder(selectedFolder, -1),
-          ),
-          action(
-            "move-folder-down",
-            `Move folder “${selectedFolder.split("/").pop()}” down`,
-            <ArrowDown size={14} />,
-            () => reorderFolder(selectedFolder, 1),
-          ),
-          action("delete-folder", `Delete folder “${selectedFolder.split("/").pop()}”`, <Trash2 size={14} />, () =>
-            void removeFolder(selectedFolder),
-          ),
-        ]
-      : []),
+    ...specsFolderActions,
     shortcutAction("publish", <StatusIcon status="published" size={14} />),
     shortcutAction("copy-link", <Link size={14} />),
-    ...(selected && feature
-      ? [
-          action("rename", "Rename feature", <Pencil size={14} />, () =>
-            setRenameDraft(feature.name || titleFromFileName(selected)),
-          ),
-          action("move", "Move feature to folder…", <FolderInput size={14} />, () =>
-            void moveFeaturePrompt(),
-          ),
-          action("move-feature-up", "Move feature up", <ArrowUp size={14} />, () => reorderFeature(selected, -1)),
-          action("move-feature-down", "Move feature down", <ArrowDown size={14} />, () =>
-            reorderFeature(selected, 1),
-          ),
-          ...(listing
-            ? [
-                action("delete", "Delete feature", <Trash2 size={14} />, () =>
-                  void removeFeature(listing),
-                ),
-              ]
-            : []),
-        ]
-      : []),
+    ...specsFeatureActions,
     ...(codeGen && sessionCount > 0 && !sessionRunning
       ? [action("session", hosted ? "Open Prompt in Claude Code" : "Start AI Session", <StartSessionIcon size={14} />, () => startSession())]
       : []),
