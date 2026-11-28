@@ -29,7 +29,7 @@ import {
   setTestsError,
   useEditorState,
 } from "./editorState";
-import { setFeatures, useSpecsListing } from "./listing";
+import { setFeatures } from "./listing";
 import { setDirty, setEditing, setFeature, setSelectedScenario, useOpenFeature } from "./openFeature";
 import {
   type Placement,
@@ -63,7 +63,6 @@ export interface ScenarioSaveDeps {
 
 export function useScenarioSave(deps: ScenarioSaveDeps) {
   const { editing, feature, selected } = useOpenFeature();
-  const { features } = useSpecsListing();
   const { linkDraft, qtestDraft, testDraft, testEdit, testEditDraft, testNameDraft } = useEditorState();
   const {
     autosaveInFlight,

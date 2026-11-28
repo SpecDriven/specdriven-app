@@ -16,7 +16,7 @@ import { toast } from "../Toasts";
 import { type ScenarioRow, withOpenScenarios } from "../tree";
 import { setUnpublishing, useEditorState } from "./editorState";
 import { setCardMenu, setDescEdit } from "./featurePageState";
-import { setFeatures, useSpecsListing } from "./listing";
+import { setFeatures } from "./listing";
 import { setDirty, setEditing, setFeature, setSelectedScenario, useOpenFeature } from "./openFeature";
 import {
   type Placement,
@@ -53,8 +53,7 @@ export interface ScenarioOpsDeps {
 
 export function useScenarioOps(deps: ScenarioOpsDeps) {
   const { editing, feature, selected } = useOpenFeature();
-  const { features } = useSpecsListing();
-  const { publishing, saving, testDraft, testEdit, testEditDraft, testNameDraft } = useEditorState();
+  const { publishing, testDraft, testEdit, testEditDraft, testNameDraft } = useEditorState();
   const {
     autosaveInFlight,
     autosaved,

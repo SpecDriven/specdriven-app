@@ -14,8 +14,8 @@ import { type PromiseQueue } from "../promiseQueue";
 import { type QtestPublishResult } from "../QtestPublishDialog";
 import { toast } from "../Toasts";
 import { setQtestPublishOpen } from "./dialogs";
-import { setConflict, setConflictDraft, setPublishing, useEditorState } from "./editorState";
-import { type Listing, useSpecsListing } from "./listing";
+import { setConflict, setConflictDraft, setPublishing } from "./editorState";
+import { type Listing } from "./listing";
 import {
   type OpenOptions,
   setDirty,
@@ -43,9 +43,7 @@ export interface PublishDeps {
 }
 
 export function usePublish(deps: PublishDeps) {
-  const { conflict, publishing } = useEditorState();
   const { feature, selected } = useOpenFeature();
-  const { features } = useSpecsListing();
   const {
     confirm,
     descSaveQueue,

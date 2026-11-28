@@ -32,7 +32,6 @@ import {
   setFeatureTicketsSaving,
   useFeaturePageState,
 } from "./featurePageState";
-import { useSpecsListing } from "./listing";
 import { setDirty, setEditing, setFeature, useOpenFeature } from "./openFeature";
 import { featureFromResponse } from "./scenarioEdit";
 
@@ -46,7 +45,6 @@ export interface FeatureFieldsDeps {
 export function useFeatureFields(deps: FeatureFieldsDeps) {
   const { editing, feature, selected } = useOpenFeature();
   const { featureQtestDraft } = useFeaturePageState();
-  const { features } = useSpecsListing();
   const {
     confirm,
     markSaved,

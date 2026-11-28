@@ -7,7 +7,6 @@
 
 import { type RefObject, useRef } from "react";
 import { type Feature, type Scenario, serializeFeature, slugify, titleFromFileName } from "../../server/parser";
-import { type AgentChatStore } from "../agentChat";
 import { type ConfirmOptions, type PickOptions } from "../ModalPrompts";
 import { type PromiseQueue } from "../promiseQueue";
 import { toast } from "../Toasts";
@@ -44,7 +43,6 @@ export interface TreeScenariosDeps {
   markSaved: () => void;
   moveScenarioTo: (i: number, to: number) => Promise<void>;
   openFeature: (file: string, opts?: OpenOptions) => Promise<void>;
-  pane: AgentChatStore;
   paneScenario: Scenario | null;
   pick: (opts: PickOptions) => Promise<string | null>;
   savedEntry: Scenario | null;
@@ -70,7 +68,6 @@ export function useTreeScenarios(deps: TreeScenariosDeps) {
     markSaved,
     moveScenarioTo,
     openFeature,
-    pane,
     paneScenario,
     pick,
     savedEntry,

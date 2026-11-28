@@ -11,7 +11,6 @@ import { type PromiseQueue } from "../promiseQueue";
 import { toast } from "../Toasts";
 import { setSaving } from "./editorState";
 import { setDescEdit, useFeaturePageState } from "./featurePageState";
-import { useSpecsListing } from "./listing";
 import { setFeature, useOpenFeature } from "./openFeature";
 import { featureFromResponse } from "./scenarioEdit";
 
@@ -29,7 +28,6 @@ export interface DescriptionEditorDeps {
 export function useDescriptionEditor(deps: DescriptionEditorDeps) {
   const { descEdit } = useFeaturePageState();
   const { feature, selected } = useOpenFeature();
-  const { features } = useSpecsListing();
   const {
     autosaveSeconds,
     descEditRef,
