@@ -2371,7 +2371,7 @@ export function App() {
    * the code repository or folder that was open, and what could not be done
    * on the way — the repository on GitHub, the project's specs link — is said.
    */
-  const afterExtract = async ({ created, codeDir, folders, agent, model, linkTests }: ExtractCreated) => {
+  const afterExtract = async ({ created, codeDir, folders, agent, model, linkTests, instructions }: ExtractCreated) => {
     setExtractOpen(null);
     setFoldersOpen(false);
     // A repository that was cloned opens by its url, as it would from the folder field.
@@ -2402,6 +2402,8 @@ export function App() {
           ...(model ? { model } : {}),
           // And the project's tests linked to the scenarios, once they are drafted.
           ...(linkTests ? { tests: true } : {}),
+          // And the writing instructions, when they were changed on the prompt step.
+          ...(instructions ? { instructions } : {}),
         }),
       });
       if (!res.ok) {

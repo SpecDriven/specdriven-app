@@ -12178,6 +12178,42 @@ aside.rail .rail-btn.pomodoro-chip.flash {
   margin-top: 0;
 }
 
+/* The drafting prompt: the half a user may change, tall enough to read,
+   and the half the app always adds, set apart beneath it. */
+.extract-dialog .extract-prompt {
+  width: 100%;
+  min-height: 12rem;
+  resize: vertical;
+  font: inherit;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.extract-dialog .extract-prompt-note {
+  border-left: 2px solid var(--border-strong);
+  margin: 0;
+  padding-left: 0.6rem;
+  font-size: 0.8125rem;
+}
+
+.extract-dialog .extract-rules {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+.extract-dialog .extract-rules p {
+  margin: 0;
+}
+
+.extract-dialog .extract-rules .hint {
+  margin-bottom: 0.25rem;
+}
+
 .extract-dialog .extract-tree,
 .extract-dialog .extract-tree ul {
   list-style: none;

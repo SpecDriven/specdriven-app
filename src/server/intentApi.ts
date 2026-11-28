@@ -7,9 +7,13 @@
 //   POST /api/extract/refine    have an agent regroup the proposal; GET and DELETE on its id
 //   POST /api/extract/repo      make its specification folder, with the chosen folders —
 //                               or add them to one that already exists
+//   POST /api/extract/prompt    the drafting prompt a specification folder keeps, to show
+//                               before anything is made
 //   POST /api/extract/publish   give the open folder its repository on GitHub, later
 //   POST /api/extract/draft     start drafting specs for the chosen folders — and, with
 //                               `tests`, linking the project's tests to them afterwards
+//                               — with the writing instructions the wizard showed, when
+//                               they were changed there
 //   GET  /api/extract/tests     what of the open folder could have tests linked
 //   POST /api/extract/tests     start linking tests to the features extracted before
 //   GET  /api/extract/draft     how the drafting stands
@@ -45,6 +49,8 @@ import {
   startLinking,
 } from "./intentExtraction";
 import { extractedRoots } from "./intentDraft";
+import { instructionsProblem, isDefaultInstructions, tidyInstructions } from "./intentDraftPrompt";
+import { readSavedInstructions, savedInstructionsAt, writeSavedInstructions } from "./intentPromptFile";
 import { isTestPath } from "./intentModules";
 import { testLinkBase, type TestLinking } from "./intentTestUrl";
 import { listFeatures, readFeature } from "./features";
@@ -215,7 +221,32 @@ async function status(dir: string) {
   };
 }
 
-// POST /api/extract/draft { folders, codeDir?, specsDir?, agent?, model? }: start drafting.
+// POST /api/extract/prompt { folder? }: the writing instructions a
+// specification folder on this computer keeps for drafting, for the wizard
+// to show before anything is made; null when it has none of its own.
+const postPrompt: Handler = async (req) => {
+  const body = await bodyOf(req);
+  return json({ saved: await savedInstructionsAt(body.folder) });
+};
+
+/**
+ * The writing instructions a run drafts with, or nothing for the built-in
+ * ones. Text the wizard sends is what the user was shown and changed: it is
+ * checked, and kept in the folder for the next run — the built-in text
+ * takes the folder's file away. Without any, the folder's own are used.
+ */
+async function instructionsFor(dir: string, sent: unknown): Promise<string | undefined> {
+  if (sent === undefined || sent === null) return (await readSavedInstructions(dir)) ?? undefined;
+  if (typeof sent !== "string") throw new ExtractError(400, "The prompt must be text");
+  if (!isDefaultInstructions(sent)) {
+    const problem = instructionsProblem(sent);
+    if (problem) throw new ExtractError(400, problem);
+  }
+  await writeSavedInstructions(dir, sent);
+  return isDefaultInstructions(sent) ? undefined : tidyInstructions(sent);
+}
+
+// POST /api/extract/draft { folders, codeDir?, specsDir?, agent?, model?, tests?, instructions? }: start drafting.
 const postDraft = (dir: string): Handler => async (req) => {
   const body = await bodyOf(req);
   // The page names the folder it made the specs for: when another one is
@@ -228,12 +259,14 @@ const postDraft = (dir: string): Handler => async (req) => {
   const folders = chosenFolders(body.folders, known);
   const agent = typeof body.agent === "string" && body.agent.trim() ? body.agent.trim() : undefined;
   const model = modelOf(body.model);
+  const instructions = await instructionsFor(dir, body.instructions);
   await startExtraction({
     dataDir: dir,
     codeDir,
     folders,
     ...(agent ? { agent } : {}),
     ...(model ? { model } : {}),
+    ...(instructions ? { instructions } : {}),
     ...(body.tests === true ? { linkTests: true } : {}),
   });
   return json(await status(dir), 202);
@@ -315,6 +348,7 @@ export function extractRoutes(wrap: RouteWrappers): Route[] {
     ["GET", "/api/extract/refine/:id", open(getRefine)],
     ["DELETE", "/api/extract/refine/:id", open(deleteRefine)],
     ["POST", "/api/extract/repo", open(postRepo)],
+    ["POST", "/api/extract/prompt", open(postPrompt)],
     ["POST", "/api/extract/publish", onFolder(postPublish)],
     ["GET", "/api/extract/github", onFolder(getGithub)],
     ["POST", "/api/extract/draft/cancel", onFolder(postDraftCancel)],

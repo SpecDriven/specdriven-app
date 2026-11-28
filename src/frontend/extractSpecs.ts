@@ -7,6 +7,7 @@
 import type { Language, ModuleProposal, ModuleSource, ProposedFolder } from "../server/intentModules";
 import type { ExtractionJob, JobFolder, JobLink } from "../server/intentExtraction";
 import type { ChosenFolder } from "../server/intentRepo";
+import { DRAFT_INSTRUCTIONS, tidyInstructions } from "../server/intentDraftPrompt";
 import { slugify } from "../server/parser";
 
 /** How deep folders may be nested by hand: the app's own limit for chosen folders. */
@@ -314,3 +315,78 @@ export function folderLine(folder: JobFolder): string {
       return done.length > 0 ? `stopped after ${plural(done.length, "feature")}` : "not drafted";
   }
 }
+
+// --- The drafting prompt ------------------------------------------------------------------
+
+/** The prompt step's text, and what it is measured against. */
+export interface PromptDraft {
+  /** The writing instructions as the step shows them. */
+  text: string;
+  /** What the step started from: the named folder's own prompt, else the built-in one. */
+  loaded: string;
+  /** The existing specification folder `loaded` was read for; "" when none was asked about. */
+  loadedFor: string;
+}
+
+/** The step as it starts: the built-in instructions, no folder asked about. */
+export const builtInPrompt = (): PromptDraft => ({ text: DRAFT_INSTRUCTIONS, loaded: DRAFT_INSTRUCTIONS, loadedFor: "" });
+
+const samePrompt = (a: string, b: string): boolean => tidyInstructions(a) === tidyInstructions(b);
+
+/** Whether the user changed the text from what the step started with. */
+export const promptChanged = (prompt: PromptDraft): boolean => !samePrompt(prompt.text, prompt.loaded);
+
+/** Whether the folder named keeps a prompt of its own. */
+export const hasFolderPrompt = (prompt: PromptDraft): boolean => !samePrompt(prompt.loaded, DRAFT_INSTRUCTIONS);
+
+/** Why the user is shown the prompt step again, once a folder is named after it. */
+export type PromptReview =
+  /** The folder keeps its own prompt, which is now the text shown. */
+  | "folder"
+  /** The folder keeps none, and the text shown before was another folder's: the built-in one is shown. */
+  | "builtin"
+  /** The user's text would replace the prompt the folder keeps. */
+  | "replaces";
+
+export const PROMPT_REVIEW: Record<PromptReview, string> = {
+  folder: "The specification folder you chose has its own drafting prompt, shown here. Check it, then go on.",
+  builtin: "The specification folder you chose has no drafting prompt of its own: it drafts with the built-in one, shown here.",
+  replaces:
+    "The specification folder you chose has its own drafting prompt. Yours replaces it for everyone who uses the folder — or go back to the folder’s.",
+};
+
+/**
+ * The prompt once the specification folder is named: `folder` is the
+ * existing one ("" for a new folder, which keeps no prompt yet) and `saved`
+ * the prompt it keeps, or null. Text the user has not changed follows the
+ * folder; text they changed stays theirs. `review` says the step must be
+ * shown again before anything is made — specs are never drafted with a
+ * prompt the user did not see, and a folder's own is never replaced unseen.
+ */
+export function promptFor(prompt: PromptDraft, folder: string, saved: string | null): { prompt: PromptDraft; review: PromptReview | null } {
+  if (folder === prompt.loadedFor) return { prompt, review: null };
+  const loaded = saved ?? DRAFT_INSTRUCTIONS;
+  if (!promptChanged(prompt)) {
+    const review = samePrompt(loaded, prompt.text) ? null : saved !== null ? "folder" : "builtin";
+    return { prompt: { text: loaded, loaded, loadedFor: folder }, review };
+  }
+  const review = saved !== null && !samePrompt(saved, prompt.text) ? "replaces" : null;
+  return { prompt: { ...prompt, loaded, loadedFor: folder }, review };
+}
+
+/**
+ * What the prompt step says about being shown again, while it still holds:
+ * that the text is the folder's stops being so once the user changes it,
+ * and that theirs replaces the folder's once they go back to the folder's.
+ */
+export function promptReviewNote(prompt: PromptDraft, review: PromptReview | null): string | null {
+  if (review === null) return null;
+  return (review === "replaces") === promptChanged(prompt) ? PROMPT_REVIEW[review] : null;
+}
+
+/**
+ * What the drafting is asked to use: the text, when the user changed it —
+ * it is then saved in the folder — else nothing, and the folder's own
+ * prompt, or the built-in one, is used.
+ */
+export const promptToSend = (prompt: PromptDraft): string | undefined => (promptChanged(prompt) ? tidyInstructions(prompt.text) : undefined);
