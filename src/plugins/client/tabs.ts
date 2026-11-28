@@ -176,6 +176,12 @@ export interface TabPlugin<V = unknown> {
   };
   Sidebar: ComponentType<{ view: V | null; app: TabApp; navigate: Navigate<V> }>;
   Pane: ComponentType<{ view: V; app: TabApp; navigate: Navigate<V> }>;
+  /**
+   * The tab's own dialogs, rendered while the tab is on whatever the pane
+   * shows — an import into a spec folder opens from the tree or the palette
+   * while the pane is the folder's README, where `Pane` is not mounted.
+   */
+  Overlay?: ComponentType<{ app: TabApp }>;
   palette?: {
     group: PaletteGroup;
     /** The palette opened from this tab searches the tab's own data — its

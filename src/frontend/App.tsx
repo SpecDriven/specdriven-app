@@ -2,7 +2,6 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, use
 import { backdropDismiss } from "./backdropDismiss";
 import type {
   CSSProperties,
-  KeyboardEvent as ReactKeyboardEvent,
   MouseEvent,
   ReactNode,
 } from "react";
@@ -22,11 +21,10 @@ import type {
   Scenario,
   ScenarioFile,
   ScenarioPick,
-  ScenarioStatus,
   ScenarioTarget,
   SpecAttribute,
 } from "../server/parser";
-import { RESOURCE_LINK_KINDS, RESOURCE_LINK_TOOLS, resourceChipLabel } from "../server/resourceLinks";
+import { RESOURCE_LINK_KINDS, RESOURCE_LINK_TOOLS } from "../server/resourceLinks";
 import type { ResourceLinkKind } from "../server/resourceLinks";
 import type { FeatureListing } from "../server/features";
 import type { ProjectMember } from "../server/members";
@@ -40,17 +38,10 @@ import {
   type CodeGenTarget,
 } from "./codeGenTarget";
 import { Logo } from "./Logo";
-import { SidebarSection } from "./SidebarSection";
 import {
   AppWindow,
   Activity,
-  Check,
-  ChevronDown,
-  ChevronLeft,
-  ClipboardCheck,
   Import,
-  ChevronRight,
-  Ellipsis,
   Pencil,
   Timer,
   Plus,
@@ -58,15 +49,11 @@ import {
   RefreshCwOff,
   Search,
   ExternalLink,
-  FileText,
   FolderInput,
-  GitPullRequest,
-  Flag,
   Home,
   Tag,
   Keyboard,
   Link,
-  ListFilter,
   Menu as MenuIcon,
   PanelLeftClose,
   PanelLeftOpen,
@@ -74,36 +61,25 @@ import {
   Puzzle,
   Settings,
   Sun,
-  Ticket,
   Trash2,
   UserRound,
   X,
   ArrowDown,
   ArrowUp,
-  ArrowRightLeft,
-  CopyPlus,
   Bot,
   KeyRound,
-  Lightbulb,
   LogOut,
-  PenTool,
   ShieldCheck,
-  BookOpen,
-  History,
-  SendHorizontal,
-  CloudUpload,
   Database,
   Images,
   Sparkles,
   Lock,
 } from "lucide-react";
-import { PublishRing, StatusCounts, StatusIcon } from "./StatusIcon";
+import { StatusIcon } from "./StatusIcon";
 import { NewFeatureIcon, NewFolderIcon, StartSessionIcon } from "./ActionIcons";
 import { Tooltip } from "./Tooltip";
 import { Menu, type MenuItem } from "./Menu";
 import { VersionChip } from "./updateHint";
-import { Popover } from "./Popover";
-import { HeightResizer } from "./HeightResizer";
 import { Breadcrumbs, type Crumb } from "./Breadcrumbs";
 import { CommandPalette, type PaletteItem } from "./CommandPalette";
 import { ErrorBoundary } from "./ErrorBoundary";
@@ -192,34 +168,17 @@ import {
   defaultSessionName,
   useAgentChat,
 } from "./agentChat";
-import { ExternalLinkField } from "./ExternalLinkField";
-import { QtestLinkField } from "./QtestLinkField";
-import { PullRequestField, PullRequestList } from "./PullRequestField";
-import { TicketLinkField } from "./TicketLinkField";
-import { FeatureFlagChips, FeatureFlagsField } from "./FeatureFlagsField";
-import { PolarityPill } from "./PolarityPill";
-import { AttributeChips, AttributesField } from "./AttributesField";
 import {
-  NO_FILTER,
-  attributeFilterGroups,
-  attributeFilterLabel,
   featureMatches,
   isFiltering,
-  sameAttributeFilter,
-  scenarioMatches,
-  type TreeFilter,
 } from "./treeFilter";
 import { CustomAttributesEditor } from "./CustomAttributesEditor";
-import { definitionsFor, knownNames, parseAttributeDefinitions } from "../server/customAttributes";
-import { ResourceLinkField, ResourceLinkList } from "./ResourceLinkField";
-import { ScenarioFileList, ScenarioFilesField } from "./ScenarioFilesField";
+import { knownNames, parseAttributeDefinitions } from "../server/customAttributes";
 import {
   externalLinkLabel,
-  isBlankLinkDraft,
   linkDraftOf,
   resolveLinkDraft,
   resolveQtestDraft,
-  ticketChipLabel,
 } from "./externallinks";
 import type { LinkDraft } from "./externallinks";
 import {
@@ -256,10 +215,7 @@ import {
   buildTree,
   featuresBeneath,
   findFolder,
-  featureDrop,
   featureNamesMoved,
-  folderDrop,
-  folderDropsInto,
   folderLabel,
   folderNamesMoved,
   initialCaseDisplayName,
@@ -268,7 +224,6 @@ import {
   folderOptions,
   folderRenamed,
   scenarioDrop,
-  scenarioMovesInto,
   scenarioNeighbors,
   scenarioPlace,
   scenarioRows,
@@ -278,7 +233,6 @@ import {
 } from "./tree";
 import type { FolderNode, ScenarioRow } from "./tree";
 import { useFocusTrap } from "./useFocusTrap";
-import { authorshipLine } from "./authorship";
 import {
   FOLDER_KIND_LABEL,
   FolderKindIcon,
@@ -308,16 +262,12 @@ import { accessShown, GitAccessChoice, type GitAccess } from "./GitAccessChoice"
 import { SignedCommits } from "./SignedCommits";
 import { ConfluenceTokens, fetchConfluenceTokens, type ConfluenceWiki } from "./ConfluenceToken";
 import { JiraTokens, fetchJiraTokens, type JiraSite } from "./JiraToken";
-import { ImportFromJiraWikiDialog } from "./ImportFromJiraWikiDialog";
 import { AgentModelList, agentModelsOf, agentsWithoutSection, type AgentModels } from "./AgentModels";
-import { ConfluencePublishDialog, type ConfluencePublishResult } from "./ConfluencePublishDialog";
-import { ConfluenceFolderPublishDialog, type FolderFeature } from "./ConfluenceFolderPublishDialog";
+import { type ConfluencePublishResult } from "./ConfluencePublishDialog";
+import { type FolderFeature } from "./ConfluenceFolderPublishDialog";
 import { QtestTokens, fetchQtestTokens, type QtestSite } from "./QtestToken";
-import { QtestPublishDialog, type QtestPublishResult } from "./QtestPublishDialog";
-import { WikiQtestPublishDialog } from "./WikiQtestPublishDialog";
+import { type QtestPublishResult } from "./QtestPublishDialog";
 import { AhaTokens, fetchAhaTokens, type AhaSite } from "./AhaToken";
-import { AhaImportDialog } from "./AhaImportDialog";
-import { importSummary, OpenSpecImportDialog } from "./OpenSpecImportDialog";
 import { ExtractSpecsDialog, type ExtractCreated } from "./ExtractSpecsDialog";
 import { ExtractionProgress, PublishSpecsDialog, useExtraction } from "./ExtractionProgress";
 import { LinkTestsDialog } from "./LinkTestsDialog";
@@ -355,32 +305,22 @@ import {
   withScenarioPolarity,
 } from "./specs/scenarioEdit";
 import type { EditState, Placement } from "./specs/scenarioEdit";
-import { initialsOf } from "./initials";
 import {
-  BODY_HEIGHT_KEY,
-  BODY_MIN,
-  DESC_HEIGHT_KEY,
-  DESC_MIN,
   clampBodyHeight,
   clampDescHeight,
-  storeEditorHeight,
 } from "./specs/editorHeight";
 import {
   resetEditorState,
-  setBodyHeight,
   setConflict,
   setConflictDraft,
-  setEditorMenuOpen,
   setLinkDraft,
   setLinkError,
   setPublishing,
   setQtestDraft,
   setQtestError,
-  setResizingBody,
   setResolving,
   setSavedAt,
   setSaving,
-  setStatusMenuOpen,
   setTestDraft,
   setTestEdit,
   setTestEditDraft,
@@ -393,13 +333,10 @@ import {
 import {
   resetFeaturePageState,
   setAssignedSaving,
-  setAssigneeMenuOpen,
   setCardMenu,
   setDescEdit,
-  setDescHeight,
   setFeatureAttributesOpen,
   setFeatureFlagsOpen,
-  setFeatureMenuOpen,
   setFeaturePrsOpen,
   setFeatureQtestDraft,
   setFeatureQtestError,
@@ -408,10 +345,8 @@ import {
   setFeatureTicketsError,
   setFeatureTicketsOpen,
   setFeatureTicketsSaving,
-  setPublishMenuOpen,
   setRenameDraft,
   setRenaming,
-  setResizingDesc,
   useFeaturePageState,
 } from "./specs/featurePageState";
 import {
@@ -428,7 +363,7 @@ import {
   setWikiQtestPublishOpen,
   useSpecsDialogs,
 } from "./specs/dialogs";
-import { provideSpecsHost } from "./specs/host";
+import { provideSpecsHost, type SpecsActions } from "./specs/host";
 import {
   DEFAULT_PROJECT_MANAGEMENT_TOOL,
   NO_RESOURCE_LINKS,
@@ -453,9 +388,7 @@ import {
 import {
   resetSpecSelection,
   scenarioKey,
-  scenarioSelected,
   setSpecSelection,
-  toggleScenarioSelected,
   toggleSpecSelected,
   useSpecSelection,
 } from "./specs/selection";
@@ -477,11 +410,6 @@ import {
   setCollapsed,
   setDragging,
   setDropTarget,
-  setFeatureDropAt,
-  setFilter,
-  setFilterMenuOpen,
-  setFolderDrag,
-  setFolderDropAt,
   setOutlined,
   setScenarioDrag,
   setScenarioDropAt,
@@ -583,7 +511,6 @@ const PROJECT_MANAGEMENT_TOOLS = ["Jira", "Linear", "GitHub", "GitLab", "Asana",
 // each tool is offered only once its Settings switch is on — both start off.
 /** The Settings key that switches each tool on. */
 const RESOURCE_LINK_SETTING = { aha: "ahaLinks", figma: "figmaLinks" } as const;
-const RESOURCE_LINK_ICON = { aha: Lightbulb, figma: PenTool } as const;
 
 /** The switches as /api/state reports them; anything but `true` is off. */
 export function resourceLinkSwitches(state: Record<string, unknown>): ResourceLinkSwitches {
@@ -1093,35 +1020,6 @@ function decodeSegment(segment: string): string {
   }
 }
 
-/**
- * "Copy link" as an icon button (specs/ui/navigation.feature.md "share a
- * link"): a link icon that flips to a check mark while `copied`.
- */
-function CopyLinkButton({
-  copied,
-  onCopy,
-  disabled,
-  size = 16,
-  keys,
-  label = "Copy link",
-}: {
-  copied: boolean;
-  onCopy: () => void;
-  disabled?: boolean;
-  size?: number;
-  /** The shortcut, where mod+shift+c copies this same url. */
-  keys?: string;
-  label?: string;
-}) {
-  return (
-    <Tooltip label={copied ? "Copied" : "Copy link"} keys={keys}>
-      <button type="button" className="ibtn" aria-label={label} disabled={disabled} onClick={onCopy}>
-        {copied ? <Check size={size} aria-hidden="true" /> : <Link size={size} aria-hidden="true" />}
-      </button>
-    </Tooltip>
-  );
-}
-
 /** The shortcuts the read-only site keeps (beside each tab's `go-…`): moving around, never writing. */
 const READ_ONLY_SHORTCUTS = new Set([
   "search",
@@ -1338,8 +1236,7 @@ export function App() {
   // The open feature — its file, what was read of it, the card highlighted
   // and the scenario in the editor — lives in a store the Specs tab reads
   // too (src/frontend/specs/openFeature.ts); set here under the same names.
-  const { featureLoading, selected, feature, selectedScenario, dirty, editing, paneRequest, searchTerms } =
-    useOpenFeature();
+  const { featureLoading, selected, feature, selectedScenario, dirty, editing, paneRequest } = useOpenFeature();
   // What the editor pane and the feature page hold of their own — menus,
   // drafts, heights, a save or a publish under way — likewise
   // (src/frontend/specs/editorState.ts, featurePageState.ts).
@@ -1347,46 +1244,30 @@ export function App() {
     editorMenuOpen,
     statusMenuOpen,
     conflict,
-    conflictDraft,
     resolving,
     saving,
     savedAt,
     publishing,
-    unpublishing,
     testDraft,
     testNameDraft,
     testEdit,
     testEditDraft,
-    testNameHint,
-    testsError,
     linkDraft,
-    linkError,
     qtestDraft,
-    qtestError,
-    bodyHeight,
-    resizingBody,
   } = useEditorState();
   const {
     featureMenuOpen,
     cardMenu,
     assigneeMenuOpen,
     publishMenuOpen,
-    assignedSaving,
     renameDraft,
-    renaming,
     featureTicketsOpen,
-    featureTicketsError,
-    featureTicketsSaving,
     featureQtestDraft,
-    featureQtestError,
-    featureQtestSaving,
     featurePrsOpen,
     featureFlagsOpen,
     featureAttributesOpen,
     featureResourceOpen,
     descEdit,
-    descHeight,
-    resizingDesc,
   } = useFeaturePageState();
   // The switches of Settings the tree, the feature page and the editor read
   // (src/frontend/specs/settings.ts), set from /api/state further down.
@@ -2321,12 +2202,6 @@ export function App() {
   const userInfoTrapRef = useFocusTrap(userInfoOpen);
   const settingsFileTrapRef = useFocusTrap(settingsFileOpen);
   const tokenSignInTrapRef = useFocusTrap(tokenSignInOpen);
-  const confluenceTrapRef = useFocusTrap(confluencePublishOpen);
-  const confluenceFolderTrapRef = useFocusTrap(confluenceFolder !== null);
-  const qtestTrapRef = useFocusTrap(qtestPublishOpen);
-  const wikiQtestTrapRef = useFocusTrap(wikiQtestPublishOpen);
-  const ahaTrapRef = useFocusTrap(ahaImportOpen !== null);
-  const openSpecTrapRef = useFocusTrap(openSpecImportOpen !== null);
   const extractTrapRef = useFocusTrap(extractOpen !== null);
   // The drafting of the open folder's specs from its code, as it goes: asked
   // of the server when the folder opens and while a run is at work; each
@@ -2354,7 +2229,6 @@ export function App() {
     window.addEventListener(EXTRACT_SPECS_EVENT, onMenu);
     return () => window.removeEventListener(EXTRACT_SPECS_EVENT, onMenu);
   }, [extractSpecs, needsRepo]);
-  const importTrapRef = useFocusTrap(importOpen !== null);
   const foldersTrapRef = useFocusTrap(foldersOpen);
   // The folder dialog lists what is so now (specs/app/multiple-windows
   // .feature.md "The folder dialog and the windows"): a folder another
@@ -2385,7 +2259,6 @@ export function App() {
     };
   }, [foldersOpen]);
   const switchTrapRef = useFocusTrap(switching !== null);
-  const conflictTrapRef = useFocusTrap(conflict !== null);
   const sessionErrorTrapRef = useFocusTrap(sessionError !== null);
 
   // Also re-run when the editor pane gives the feature page back: the cards
@@ -8263,25 +8136,6 @@ export function App() {
     goHome,
     readOnly: locked,
   };
-  const folderCrumbs = (fileName: string): Crumb[] => {
-    const parts = fileName.split("/").slice(0, -1);
-    return parts.map((part, i) => {
-      const path = parts.slice(0, i + 1).join("/");
-      return {
-        label: part,
-        title: `Select the folder ${path}`,
-        onClick: () => {
-          setSelectedFolder(path);
-          setCollapsed((prev) => {
-            const next = new Set(prev);
-            for (let k = 1; k <= i + 1; k++) next.delete(parts.slice(0, k).join("/"));
-            return next;
-          });
-        },
-      };
-    });
-  };
-
   // The way back into a module (src/plugins/client/tabs.ts featureCrumbs): a
   // feature holding an Event Model slice's scenarios carries a crumb naming
   // the model, say, that opens its canvas. None while the module is off.
@@ -8563,7 +8417,6 @@ export function App() {
   // (specs/editor/spec-editor.feature.md "Delete Published Spec").
   const editingDeletable =
     savedEntry !== null && (savedEntry.status !== "published" || deletePublished);
-  const hasProposed = feature?.scenarios.some((s) => s.status === "proposed") ?? false;
 
   // Settings (specs/ui/ui.feature.md "Settings", specs/user-info-settings.
   // feature.md "open Settings"): a page in the editor pane with the room a
@@ -9972,1894 +9825,95 @@ export function App() {
     treeRef,
   };
   const specsSidebar = <SpecsSidebar {...specsSidebarProps} />;
-  // The open feature's page, its scenario's page or the editor: the Specs
-  // tab's pane, built here and handed to the tab like the tree.
-  const specsPane = (
-    locked && editing && selected && feature ? (
-          /* The read-only site: a scenario's page is a page, not the editor —
-             its trail, the way to its neighbours, and the scenario rendered
-             with its links. */
-          <div className="scenario-pane">
-            <div className="editor-bar scenario-pane-bar page-header">
-              <div className="scenario-pane-title">
-                <Breadcrumbs
-                  items={[
-                    repoCrumb,
-                    ...folderCrumbs(selected),
-                    {
-                      label: feature.name || titleFromFileName(selected),
-                      href: featurePath(selected),
-                      title: `Back to ${feature.name || titleFromFileName(selected)}`,
-                      onClick: (e) => {
-                        e.preventDefault();
-                        backToFeature();
-                      },
-                    },
-                  ]}
-                />
-              </div>
-              <div className="editor-actions scenario-pane-actions">
-                <span className="scenario-nav" role="group" aria-label="Scenario navigation">
-                  <Tooltip label="Previous scenario" keys="<">
-                    <button
-                      type="button"
-                      className="ibtn"
-                      aria-label="Previous scenario"
-                      disabled={scenarioNav.prev === null}
-                      onClick={() => stepScenario(-1)}
-                    >
-                      <ChevronLeft size={18} aria-hidden="true" />
-                    </button>
-                  </Tooltip>
-                  <Tooltip label="Next scenario" keys=">">
-                    <button
-                      type="button"
-                      className="ibtn"
-                      aria-label="Next scenario"
-                      disabled={scenarioNav.next === null}
-                      onClick={() => stepScenario(1)}
-                    >
-                      <ChevronRight size={18} aria-hidden="true" />
-                    </button>
-                  </Tooltip>
-                </span>
-                <CopyLinkButton
-                  keys="mod+shift+c"
-                  copied={copied === scenarioLink(selected, editing.scenario)}
-                  onCopy={() => void copyLink(scenarioLink(selected, editing.scenario))}
-                />
-              </div>
-            </div>
-            <div className="scenario-pane-head">
-              {editing.index !== null && scenarioNumbers(feature.scenarios)[editing.index] != null && (
-                <span className="scenario-number">S{scenarioNumbers(feature.scenarios)[editing.index]}</span>
-              )}
-              <h2 className="scenario-pane-heading">{editing.scenario.name}</h2>
-              <span className="version">v{editing.scenario.version}</span>
-              <span className="chip static">
-                <StatusIcon status={editing.scenario.status} size={14} />
-                {editing.scenario.status}
-              </span>
-            </div>
-            <div className="scenario-pane-body read-only-scenario">
-              <div className="md-preview">{renderMarkdown(editing.scenario.body)}</div>
-              {showTestLinks && testsTable(editing.scenario.tests)}
-              {(editing.scenario.link || (editing.scenario.prs ?? []).length > 0) && (
-                <div className="props">
-                  {editing.scenario.link && (
-                    <a
-                      className="chip"
-                      href={editing.scenario.link.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      title={editing.scenario.link.url}
-                    >
-                      <Ticket size={14} aria-hidden="true" />
-                      {externalLinkLabel(editing.scenario.link)}
-                      <ExternalLink size={12} aria-hidden="true" />
-                    </a>
-                  )}
-                  {(editing.scenario.prs ?? []).map((pr) => (
-                    <a key={pr.url} className="chip" href={pr.url} target="_blank" rel="noreferrer" title={pr.url}>
-                      <GitPullRequest size={14} aria-hidden="true" />
-                      {pr.title || pr.url.replace(/^https:\/\/github\.com\//, "")}
-                      <ExternalLink size={12} aria-hidden="true" />
-                    </a>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        ) : editing && selected && feature ? (
-          /* specs/editor/spec-editor.feature.md "Spec editor pane": the
-             scenario editor takes the feature pane's slot — the sidebar stays
-             beside it — with a bar on top and one scrolling column below. */
-          <div className="scenario-pane">
-            <div className="editor-bar scenario-pane-bar page-header">
-              <div className="scenario-pane-title">
-                {/* The top line is the trail alone — the data folder, the
-                    feature's folders and the feature (specs/editor/
-                    spec-editor.feature.md "Adding Scanarios"). The feature
-                    crumb is the way back: like ESC, it leaves the scenario in
-                    its autosaved state and lands on its card. */}
-                <Breadcrumbs
-                  items={[
-                    repoCrumb,
-                    ...folderCrumbs(selected),
-                    {
-                      label: feature.name || titleFromFileName(selected),
-                      href: featurePath(selected),
-                      title: `Back to ${feature.name || titleFromFileName(selected)}`,
-                      onClick: (e) => {
-                        e.preventDefault();
-                        backToFeature();
-                      },
-                    },
-                  ]}
-                />
-              </div>
-              <div className="editor-actions scenario-pane-actions">
-                {/* Previous / next scenario across the whole tree, as `<`
-                    and `>` (or k / j) do from the keyboard. */}
-                <span className="scenario-nav" role="group" aria-label="Scenario navigation">
-                  <Tooltip
-                    label={
-                      scenarioNav.prev
-                        ? `Previous: ${scenarioNav.prev.scenario.name} v${scenarioNav.prev.scenario.version}`
-                        : "No previous scenario"
-                    }
-                    keys="<"
-                  >
-                    <button
-                      type="button"
-                      className="ibtn"
-                      aria-label="Previous scenario"
-                      disabled={scenarioNav.prev === null}
-                      onClick={() => stepScenario(-1)}
-                    >
-                      <ChevronLeft size={18} aria-hidden="true" />
-                    </button>
-                  </Tooltip>
-                  <Tooltip
-                    label={
-                      scenarioNav.next
-                        ? `Next: ${scenarioNav.next.scenario.name} v${scenarioNav.next.scenario.version}`
-                        : "No next scenario"
-                    }
-                    keys=">"
-                  >
-                    <button
-                      type="button"
-                      className="ibtn"
-                      aria-label="Next scenario"
-                      disabled={scenarioNav.next === null}
-                      onClick={() => stepScenario(1)}
-                    >
-                      <ChevronRight size={18} aria-hidden="true" />
-                    </button>
-                  </Tooltip>
-                </span>
-                {/* Copy link (specs/ui/navigation.feature.md "share a link"):
-                    the scenario's versioned url, as the card's ⋯ menu and
-                    mod+shift+c copy it. A scenario with no name has no url
-                    yet. */}
-                <Tooltip
-                  label={copied === scenarioPath(selected, editing.scenario) ? "Copied" : "Copy link"}
-                  keys="mod+shift+c"
-                >
-                  <button
-                    type="button"
-                    className="ibtn"
-                    aria-label="Copy link"
-                    disabled={!editing.scenario.name.trim()}
-                    onClick={() => void copyLink(scenarioPath(selected, editing.scenario))}
-                  >
-                    {copied === scenarioPath(selected, editing.scenario) ? (
-                      <Check size={16} aria-hidden="true" />
-                    ) : (
-                      <Link size={16} aria-hidden="true" />
-                    )}
-                  </button>
-                </Tooltip>
-                {/* The next scenario, from here (specs/editor/
-                    spec-editor.feature.md "Spec editor pane"): the pane saves
-                    on the way out and the new draft opens right after it. */}
-                <Tooltip label="New scenario after this one" keys="c">
-                  <button
-                    type="button"
-                    className="ibtn"
-                    aria-label="New scenario after this one"
-                    disabled={!canAddAfter || publishing !== null}
-                    onClick={() => void newScenarioAfterCurrent()}
-                  >
-                    <Plus size={16} aria-hidden="true" />
-                  </button>
-                </Tooltip>
-                <SaveIndicator saving={saving} savedAt={savedAt} dirty={dirty} />
-                {/* The rest of the pane's actions as a menu, like a card's ⋯.
-                    Delete sits last, apart and red: proposed scenarios and
-                    drafts can be deleted (specs/editor/spec-editor.feature.md)
-                    — published ones too while Settings allows it ("Delete
-                    Published Spec") — confirmed first, then saved out of the
-                    feature or removed from the document. Propose and Publish
-                    are not here: they are the status chip's, under the bar. A
-                    published scenario is read-only apart from its links, which
-                    save themselves, so its bar carries no save action. */}
-                <span className="page-more editor-more">
-                  <Tooltip label="More actions">
-                    <button
-                      type="button"
-                      className="ibtn"
-                      aria-label="Scenario actions"
-                      aria-haspopup="menu"
-                      aria-expanded={editorMenuOpen}
-                      onClick={() => setEditorMenuOpen((o) => !o)}
-                    >
-                      <Ellipsis size={15} aria-hidden="true" />
-                    </button>
-                  </Tooltip>
-                  <Menu
-                    open={editorMenuOpen}
-                    onClose={() => setEditorMenuOpen(false)}
-                    label="Scenario actions"
-                    className="page-menu"
-                    containerSelector=".editor-more"
-                    items={[
-                      {
-                        id: "new-below",
-                        label: "New scenario below",
-                        icon: <Plus size={13} />,
-                        keys: "c",
-                        disabled: !canAddAfter || publishing !== null,
-                        onSelect: () => void newScenarioAfterCurrent(),
-                      },
-                      {
-                        id: "clone",
-                        label: "Clone",
-                        icon: <CopyPlus size={13} />,
-                        disabled: savedEntry === null,
-                        onSelect: () => {
-                          if (savedEntry) void cloneTreeScenario(selected, savedEntry);
-                        },
-                      },
-                      ...(editingPublished && editing.index !== null
-                        ? [
-                            {
-                              id: "new-version",
-                              label: "New version",
-                              icon: <History size={13} />,
-                              onSelect: () => newVersion(editing.index!),
-                            },
-                          ]
-                        : []),
-                      {
-                        id: "copy",
-                        label:
-                          copied === scenarioPath(selected, editing.scenario) ? "Copied" : "Copy link",
-                        icon: <Link size={13} />,
-                        keys: "mod+shift+c",
-                        disabled: !editing.scenario.name.trim(),
-                        onSelect: () => void copyLink(scenarioPath(selected, editing.scenario)),
-                      },
-                      ...(editingDeletable
-                        ? [
-                            {
-                              id: "delete",
-                              label: "Delete",
-                              icon: <Trash2 size={13} />,
-                              danger: true,
-                              onSelect: () => void deleteScenario(),
-                            },
-                          ]
-                        : []),
-                    ]}
-                  />
-                </span>
-              </div>
-            </div>
-            {/* The scenario's name sits above the editor's top left corner
-                (specs/editor/spec-editor.feature.md "Adding Scanarios") —
-                editable until published (specs/ui/ui.feature.md "Scenario
-                editor"), a read-only heading after. The version is assigned by
-                the app, never typed: a new scenario takes the next version for
-                its name (specs/ui/ui.feature.md). The status rides along as a
-                badge: a scenario starts as a draft — persisted by autosave,
-                kept out of the .feature.md — until Propose or Publish advances
-                it. */}
-            <div className="scenario-pane-head">
-              {editing.index !== null &&
-                feature !== null &&
-                scenarioNumbers(feature.scenarios)[editing.index] != null && (
-                  <span className="scenario-number">
-                    S{scenarioNumbers(feature.scenarios)[editing.index]}
-                  </span>
-                )}
-              {editingPublished ? (
-                <h2 className="scenario-pane-heading">{editing.scenario.name}</h2>
-              ) : (
-                <input
-                  className="scenario-pane-name"
-                  // While this field has the caret autosave stands down, so
-                  // the name is saved once, whole
-                  // (specs/editor/editor-autosave.feature.md).
-                  ref={nameFieldRef}
-                  value={editing.scenario.name}
-                  placeholder="Scenario name"
-                  aria-label="Scenario name"
-                  spellCheck={false}
-                  onChange={(e) =>
-                    setEditing({
-                      ...editing,
-                      scenario: { ...editing.scenario, name: e.target.value },
-                    })
-                  }
-                />
-              )}
-              {/* Its polarity (specs/ui/scenario-polarity.feature.md),
-                  flipped in the draft; the pane's save writes it. */}
-              {scenarioPolarity && (
-                <PolarityPill
-                  negative={!!editing.scenario.negative}
-                  onToggle={() =>
-                    setEditing({
-                      ...editing,
-                      scenario: withPolarity(editing.scenario, !editing.scenario.negative),
-                    })
-                  }
-                />
-              )}
-              {/* The status as a chip (specs/editor/spec-editor.feature.md
-                  "Spec editor pane"): a draft's menu offers the two ways
-                  forward — Propose moves it into the .feature.md as
-                  [proposed]; Publish takes it straight to [published],
-                  committed and pushed — a proposed scenario's only Publish,
-                  and a published one is a plain badge, unless Settings allows
-                  deleting published specs: then its menu offers Back to
-                  proposed ("Unpublish a Spec"). Closing without either keeps
-                  the autosaved draft. mod+enter picks the first. */}
-              <div className="version-field">
-                Version <span className="version">v{draftVersion}</span>
-                {editingPublished && deletePublished && savedEntry?.status === "published" ? (
-                  <span className="chip-anchor status-anchor">
-                    <button
-                      type="button"
-                      className="chip status-chip"
-                      aria-haspopup="menu"
-                      aria-expanded={statusMenuOpen}
-                      aria-label="Status: published"
-                      disabled={unpublishing}
-                      onClick={() => setStatusMenuOpen((o) => !o)}
-                    >
-                      <StatusIcon status="published" size={14} />
-                      published
-                      <ChevronDown size={12} aria-hidden="true" />
-                    </button>
-                    <Menu
-                      open={statusMenuOpen}
-                      onClose={() => setStatusMenuOpen(false)}
-                      label="Scenario status"
-                      className="chip-menu"
-                      containerSelector=".status-anchor"
-                      items={[
-                        {
-                          id: "unpublish",
-                          label: unpublishing ? "Moving back…" : "Back to proposed",
-                          icon: <StatusIcon status="proposed" size={13} />,
-                          disabled: unpublishing,
-                          onSelect: () => void unpublishScenario(),
-                        },
-                      ]}
-                    />
-                  </span>
-                ) : editingPublished ? (
-                  <span className="chip static status-chip">
-                    <StatusIcon status="published" size={14} />
-                    published
-                  </span>
-                ) : (
-                  <span className="chip-anchor status-anchor">
-                    <button
-                      type="button"
-                      className="chip status-chip"
-                      aria-haspopup="menu"
-                      aria-expanded={statusMenuOpen}
-                      aria-label={`Status: ${editing.scenario.status}`}
-                      disabled={publishing !== null}
-                      onClick={() => setStatusMenuOpen((o) => !o)}
-                    >
-                      <StatusIcon status={editing.scenario.status} size={14} />
-                      {editing.scenario.status}
-                      <ChevronDown size={12} aria-hidden="true" />
-                    </button>
-                    <Menu
-                      open={statusMenuOpen}
-                      onClose={() => setStatusMenuOpen(false)}
-                      label="Scenario status"
-                      className="chip-menu"
-                      containerSelector=".status-anchor"
-                      items={[
-                        ...(editing.scenario.status === "draft"
-                          ? [
-                              {
-                                id: "propose",
-                                label: "Propose",
-                                icon: <SendHorizontal size={13} />,
-                                keys: "mod+enter",
-                                disabled: !editing.scenario.name.trim() || publishing !== null,
-                                onSelect: () => void proposeScenario(),
-                              },
-                            ]
-                          : []),
-                        {
-                          id: "publish",
-                          label: publishing !== null ? "Publishing…" : "Publish",
-                          icon: <StatusIcon status="published" size={13} />,
-                          ...(editing.scenario.status === "proposed" ? { keys: "mod+enter" } : {}),
-                          disabled: !editing.scenario.name.trim() || publishing !== null,
-                          onSelect: () => void publishScenario(),
-                        },
-                      ]}
-                    />
-                  </span>
-                )}
-              </div>
-            </div>
-            <div className="scenario-pane-body">
-              <div
-                className={`body-field${bodyHeight === null ? "" : " sized"}${resizingBody ? " resizing" : ""}`}
-                ref={bodyFieldRef}
-                style={
-                  bodyHeight === null ? undefined : ({ "--body-h": `${bodyHeight}px` } as CSSProperties)
-                }
-              >
-                <span className="field-label">Body</span>
-                <MarkdownEditor
-                  value={editing.scenario.body}
-                  readOnly={editingPublished}
-                  highlight={searchTerms ?? undefined}
-                  placeholder="Describe the scenario in Markdown…"
-                  // Opens rendered, like the feature description; a new
-                  // scenario's blank body opens ready to type into instead.
-                  initialTab={editing.scenario.body.trim() ? "preview" : "write"}
-                  // specs/editor/table-editor.feature.md "variable creates a
-                  // column": a {var} in the body names an example column.
-                  tableVariables
-                  onChange={(body) =>
-                    setEditing({ ...editing, scenario: { ...editing.scenario, body } })
-                  }
-                />
-                {/* The body's lower boundary is a grab strip like the
-                    description editor's: drag it to give the body more room
-                    when the ticket and test links crowd it, double-click to
-                    restore the default. */}
-                <HeightResizer
-                  label="Resize the body editor"
-                  min={BODY_MIN}
-                  height={bodyHeight}
-                  target={bodyFieldRef}
-                  clamp={clampBodyHeight}
-                  onHeight={setBodyHeight}
-                  onCommit={(h) => storeEditorHeight(BODY_HEIGHT_KEY, h)}
-                  onReset={() => {
-                    setBodyHeight(null);
-                    storeEditorHeight(BODY_HEIGHT_KEY, null);
-                  }}
-                  onResizing={setResizingBody}
-                />
-              </div>
-              {/* specs/traceability.feature.md: GitHub links to the automated
-                  tests covering this scenario — added, corrected in place (✎)
-                  and removed (✕). Editable even for a published scenario: the
-                  links track the tests, not the immutable spec. Hidden
-                  entirely when the Settings toggle is off. */}
-              {showTestLinks && (
-                <div className="tests-field">
-                  <span className="field-label">Automated tests</span>
-                  {editing.scenario.tests.length > 0 && (
-                    <ul className="test-list">
-                      {editing.scenario.tests.map((t, i) => (
-                        <li key={t}>
-                          {testEdit === i ? (
-                            <form
-                              className="test-edit"
-                              onSubmit={(e) => {
-                                e.preventDefault();
-                                commitTestEdit();
-                              }}
-                            >
-                              <input
-                                value={testEditDraft.url}
-                                aria-label="Test link (GitHub url with #L line)"
-                                spellCheck={false}
-                                autoFocus
-                                onChange={(e) =>
-                                  setTestEditDraft({ ...testEditDraft, url: e.target.value })
-                                }
-                                // ESC backs out of the row, not out of the
-                                // whole editor pane (specs/ui/ui.feature.md).
-                                onKeyDown={(e) => {
-                                  if (e.key !== "Escape") return;
-                                  e.stopPropagation();
-                                  setTestEdit(null);
-                                  cancelTestLookup();
-                                }}
-                              />
-                              <input
-                                className="test-name"
-                                value={testEditDraft.name}
-                                placeholder="test name"
-                                aria-label="Test name"
-                                spellCheck={false}
-                                onChange={(e) =>
-                                  setTestEditDraft({ ...testEditDraft, name: e.target.value })
-                                }
-                                onKeyDown={(e) => {
-                                  if (e.key !== "Escape") return;
-                                  e.stopPropagation();
-                                  setTestEdit(null);
-                                  cancelTestLookup();
-                                }}
-                              />
-                              <button
-                                type="submit"
-                                className="link"
-                                disabled={
-                                  !canSetTestLink(editing.scenario.tests, i, testEditDraft)
-                                }
-                              >
-                                Save
-                              </button>
-                              <button
-                                type="button"
-                                className="link"
-                                onClick={() => {
-                                  setTestEdit(null);
-                                  cancelTestLookup();
-                                }}
-                              >
-                                Cancel
-                              </button>
-                            </form>
-                          ) : (
-                            <>
-                              <a
-                                href={testLinkUrl(t)}
-                                target="_blank"
-                                rel="noreferrer"
-                                title={testLinkUrl(t)}
-                                data-test-link=""
-                              >
-                                {testLinkLabel(t)}
-                              </a>
-                              <button
-                                type="button"
-                                className="link"
-                                title={`Edit ${testLinkUrl(t)}`}
-                                aria-label={`Edit ${testLinkUrl(t)}`}
-                                onClick={() => startTestEdit(i)}
-                              >
-                                <Pencil size={12} aria-hidden="true" />
-                              </button>
-                              <button
-                                type="button"
-                                className="link"
-                                title={`Remove ${testLinkUrl(t)}`}
-                                aria-label={`Remove ${testLinkUrl(t)}`}
-                                onClick={() => removeTest(i)}
-                              >
-                                <X size={12} aria-hidden="true" />
-                              </button>
-                            </>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  <form
-                    className="test-add"
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      addTest();
-                    }}
-                  >
-                    <input
-                      value={testDraft}
-                      placeholder="https://github.com/owner/repo/blob/main/…/MyTest.java#L32"
-                      aria-label="Test link (GitHub url with #L line)"
-                      spellCheck={false}
-                      onChange={(e) => setTestDraft(e.target.value)}
-                    />
-                    <input
-                      className="test-name"
-                      value={testNameDraft}
-                      placeholder="test name"
-                      aria-label="Test name"
-                      spellCheck={false}
-                      onChange={(e) => setTestNameDraft(e.target.value)}
-                    />
-                    <button
-                      type="submit"
-                      className="link"
-                      disabled={
-                        !canSetTestLink(editing.scenario.tests, null, {
-                          url: testDraft,
-                          name: testNameDraft,
-                        })
-                      }
-                    >
-                      Add
-                    </button>
-                  </form>
-                  {testNameHint && <p className="test-name-hint">{testNameHint}</p>}
-                  {testsError && <p className="error">{testsError}</p>}
-                </div>
-              )}
-              {/* specs/external-links/project-management-jira-linear-etc.
-                  feature.md "Add link at spec level": the ticket tracking this
-                  scenario. Editable on a published scenario too — like the test
-                  links, it is bookkeeping around the spec, not the spec. */}
-              {projectManagement && (
-                <div className="link-field">
-                  <span className="field-label">Ticket link</span>
-                  <ExternalLinkField
-                    draft={linkDraft}
-                    onChange={changeLinkDraft}
-                    error={linkError}
-                    tool={projectManagementTool}
-                  />
-                </div>
-              )}
-              {/* specs/external-links/qtest-test-cases.feature.md: the qTest
-                  test case covering this scenario. Editable on a published
-                  scenario too, like the ticket link. */}
-              {qtestLinks && (
-                <div className="link-field">
-                  <span className="field-label">qTest test case</span>
-                  <QtestLinkField draft={qtestDraft} onChange={changeQtestDraft} error={qtestError} />
-                </div>
-              )}
-              {/* specs/app/feature-flags.feature.md: the flags gating this
-                  scenario, saved with it. Editable on a published scenario
-                  too — like the ticket link, bookkeeping around the spec. */}
-              {featureFlags && (
-                <div className="feature-flags-field-wrap">
-                  <span className="field-label">Feature flags</span>
-                  <FeatureFlagsField
-                    flags={editing.scenario.flags ?? []}
-                    onChange={(flags) => {
-                      const { flags: _previous, ...rest } = editing.scenario;
-                      setEditing({ ...editing, scenario: flags.length > 0 ? { ...rest, flags } : rest });
-                    }}
-                  />
-                </div>
-              )}
-              {/* specs/app/custom-attributes.feature.md: the scenario's custom
-                  attributes, saved with it — editable on a published
-                  scenario too, like the flags. Shown once the data repo
-                  defines attributes for scenarios, or while it has some. */}
-              {(definitionsFor(attributeDefs, "scenario").length > 0 ||
-                (editing.scenario.attributes?.length ?? 0) > 0) && (
-                <div className="attributes-field-wrap">
-                  <span className="field-label">Attributes</span>
-                  <AttributesField
-                    attributes={editing.scenario.attributes ?? []}
-                    where="scenario"
-                    defs={attributeDefs}
-                    known={knownAttributes}
-                    onChange={(attributes) => {
-                      const { attributes: _previous, ...rest } = editing.scenario;
-                      setEditing({
-                        ...editing,
-                        scenario: attributes.length > 0 ? { ...rest, attributes } : rest,
-                      });
-                    }}
-                  />
-                </div>
-              )}
-              {/* specs/external-links/related-pull-requests.feature.md: the
-                  pull requests implementing this scenario. Saved to the
-                  document on every add and remove, never to the markdown —
-                  so it needs the scenario to be in the document, which the
-                  first autosave of a new one sees to. Editable on a
-                  published scenario too. */}
-              <div className="prs-field-wrap">
-                <span className="field-label">Pull requests</span>
-                <PullRequestField
-                  prs={editing.scenario.prs ?? []}
-                  disabled={editing.scenario.id === undefined}
-                  disabledHint="Pull requests can be linked once the scenario has been saved."
-                  onChange={(prs) => savePullRequests(scenarioTarget(editing.scenario), prs)}
-                />
-              </div>
-              {/* specs/external-links/aha-and-figma-links.feature.md: the
-                  Aha! records and Figma designs behind this scenario, each
-                  tool only while Settings switches it on. Saved to the
-                  document like the pull requests; editable on a published
-                  scenario too. */}
-              {RESOURCE_LINK_KINDS.filter((kind) => resourceLinksOn[kind]).map((kind) => (
-                <div className="prs-field-wrap" key={kind}>
-                  <span className="field-label">{RESOURCE_LINK_TOOLS[kind].name}</span>
-                  <ResourceLinkField
-                    kind={kind}
-                    links={editing.scenario[kind] ?? []}
-                    disabled={editing.scenario.id === undefined}
-                    disabledHint={`${RESOURCE_LINK_TOOLS[kind].name} links can be added once the scenario has been saved.`}
-                    onChange={(links) => saveResourceLinks(scenarioTarget(editing.scenario), kind, links)}
-                  />
-                </div>
-              ))}
-              {/* specs/editor/store-associated-files.feature.md: the files
-                  the scenario needs at run time — test data to upload into
-                  the system under test. Stored in the data repo and listed
-                  on the document, like the pull requests; editable on a
-                  published scenario too. */}
-              <div className="prs-field-wrap">
-                <span className="field-label">Files</span>
-                <ScenarioFilesField
-                  files={editing.scenario.files ?? []}
-                  disabled={editing.scenario.id === undefined}
-                  disabledHint="Files can be uploaded once the scenario has been saved."
-                  onUpload={(chosen, replacing) =>
-                    uploadScenarioFiles(
-                      scenarioTarget(editing.scenario),
-                      editing.scenario.files ?? [],
-                      chosen,
-                      replacing,
-                    )
-                  }
-                  onChange={(files) => saveScenarioFileList(scenarioTarget(editing.scenario), files)}
-                />
-              </div>
-            </div>
-          </div>
-        ) : selected && feature ? (
-          <>
-            <header className="editor-bar page-header">
-              {/* specs/ui/ui.feature.md "Main page": the trail ends in the
-                  feature name (the file's `# <name>` heading), never the file
-                  name. Clicking the name edits it — committed and pushed on the
-                  server; the file name never changes. */}
-              <Breadcrumbs
-                items={[repoCrumb, ...folderCrumbs(selected), ...pluginCrumbs(selected)]}
-                tail={
-                  locked ? (
-                    <span className="crumb current">{feature.name || titleFromFileName(selected)}</span>
-                  ) : renameDraft === null ? (
-                    <Tooltip label="Rename feature">
-                      <button
-                        type="button"
-                        className="crumb current"
-                        onClick={() =>
-                          setRenameDraft(feature.name || titleFromFileName(selected))
-                        }
-                      >
-                        {feature.name || titleFromFileName(selected)}
-                      </button>
-                    </Tooltip>
-                  ) : (
-                    <form
-                      className="rename-form"
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        void renameSelected();
-                      }}
-                    >
-                      <input
-                        className="rename-input"
-                        value={renameDraft}
-                        aria-label="Feature name"
-                        autoFocus
-                        spellCheck={false}
-                        onChange={(e) => setRenameDraft(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Escape") {
-                            renameDraftRef.current = null;
-                            setRenameDraft(null);
-                          }
-                        }}
-                        // Leaving the field saves, as in-place edits do; ESC
-                        // or Cancel is the way out without saving.
-                        onBlur={() => void renameSelected()}
-                      />
-                      {/* mousedown would blur the field first — save on
-                          blur — so the buttons keep the focus where it is
-                          and act on click alone. */}
-                      <button
-                        type="submit"
-                        className="link"
-                        disabled={renaming || !renameDraft.trim()}
-                        onMouseDown={(e) => e.preventDefault()}
-                      >
-                        {renaming ? "Renaming…" : "Save"}
-                      </button>
-                      <button
-                        type="button"
-                        className="link"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => {
-                          renameDraftRef.current = null;
-                          setRenameDraft(null);
-                        }}
-                      >
-                        Cancel
-                      </button>
-                    </form>
-                  )
-                }
-              />
-              <div className="editor-actions page-actions">
-                <SaveIndicator
-                  saving={saving}
-                  savedAt={savedAt}
-                  dirty={dirty || (!!descEdit && descEdit.text !== descSaved.current)}
-                />
-                {/* The read-only site has no ⋯ menu, so the feature's
-                    "Copy link" is a button of its own. */}
-                {locked && (
-                  <CopyLinkButton
-                    keys="mod+shift+c"
-                    copied={copied === featurePath(selected)}
-                    onCopy={() => void copyLink(featurePath(selected))}
-                  />
-                )}
-                {/* New scenario (specs/ui/ui.feature.md "Add A Scenario
-                    Button"): from the header, pinned above the list, so it is
-                    always in view — at the end of the feature; a card's ⋯
-                    adds one below that card. */}
-                {!locked && (
-                <>
-                <Tooltip label="New scenario" keys="c">
-                  <button
-                    type="button"
-                    className="ibtn"
-                    aria-label="New scenario"
-                    onClick={() => void newScenario()}
-                  >
-                    <Plus size={16} aria-hidden="true" />
-                  </button>
-                </Tooltip>
-                {/* The description editor (specs/editor/feature-editor
-                    .feature.md): switches the description pane below between
-                    rendered and editable. */}
-                <Tooltip
-                  label={
-                    descOpen
-                      ? "Done editing the description"
-                      : feature.description
-                        ? "Edit description"
-                        : "Add description"
-                  }
-                >
-                  <button
-                    type="button"
-                    className={`ibtn${descOpen ? " active" : ""}`}
-                    aria-label={descOpen ? "Done editing the description" : "Edit description"}
-                    aria-pressed={descOpen}
-                    onClick={() =>
-                      descOpen
-                        ? void closeDescriptionEditor()
-                        : openDescriptionEditor(selected, feature.description)
-                    }
-                  >
-                    <Pencil size={15} aria-hidden="true" />
-                  </button>
-                </Tooltip>
-                <span className="page-more">
-                  <Tooltip label="More actions">
-                    <button
-                      type="button"
-                      className="ibtn"
-                      aria-label="More actions"
-                      aria-haspopup="menu"
-                      aria-expanded={featureMenuOpen}
-                      onClick={() => setFeatureMenuOpen((o) => !o)}
-                    >
-                      <Ellipsis size={15} aria-hidden="true" />
-                    </button>
-                  </Tooltip>
-                  <Menu
-                    open={featureMenuOpen}
-                    onClose={() => setFeatureMenuOpen(false)}
-                    label="Feature actions"
-                    className="page-menu"
-                    containerSelector=".page-more"
-                    items={[
-                      {
-                        id: "rename",
-                        label: "Rename feature",
-                        icon: <Pencil size={13} />,
-                        onSelect: () =>
-                          setRenameDraft(feature.name || titleFromFileName(selected)),
-                      },
-                      {
-                        id: "rename-file",
-                        label: `Rename file “${fileStem(selected)}”`,
-                        icon: <FileText size={13} />,
-                        onSelect: () => void renameFile(selected),
-                      },
-                      {
-                        id: "move",
-                        label: "Move to folder…",
-                        icon: <FolderInput size={13} />,
-                        onSelect: () => void moveFeaturePrompt(),
-                      },
-                      ...(codeGen
-                        ? [
-                            {
-                              id: "session",
-                              label: hosted ? "Open Prompt in Claude Code" : "Start AI Session",
-                              icon: <StartSessionIcon size={13} />,
-                              // Nothing checked, picked or open: nothing to run over.
-                              disabled: sessionRunning || sessionCount === 0,
-                              onSelect: () => void startSession(),
-                            },
-                          ]
-                        : []),
-                      {
-                        id: "copy",
-                        label: copied === featurePath(selected) ? "Copied" : "Copy link",
-                        icon: <Link size={13} />,
-                        keys: "mod+shift+c",
-                        onSelect: () => void copyLink(featurePath(selected)),
-                      },
-                      // Publish All (crud-feature.md "publish each scenario
-                      // individually"): marks every scenario published —
-                      // here and on the publish rollup chip; individual
-                      // scenarios publish from their cards.
-                      {
-                        id: "publish-all",
-                        label: publishing === "all" ? "Publishing…" : "Publish all",
-                        icon: <CloudUpload size={13} />,
-                        keys: "mod+enter",
-                        disabled: publishing !== null,
-                        onSelect: () => void publish(),
-                      },
-                      // "Publish to Confluence…" only while Confluence is
-                      // switched on in Settings (confluence-wiki.feature.md).
-                      ...(confluenceEnabled
-                        ? [
-                            {
-                              id: "confluence",
-                              label: "Publish to Confluence…",
-                              icon: <BookOpen size={13} />,
-                              onSelect: () => setConfluencePublishOpen(true),
-                            },
-                          ]
-                        : []),
-                      ...(demo || hosted || !qtestLinks
-                        ? []
-                        : [
-                            {
-                              id: "qtest",
-                              label: "Publish qTest Test Cases…",
-                              icon: <ClipboardCheck size={13} />,
-                              onSelect: () => void openQtestPublish(feature),
-                            },
-                            // Both at once ("Publish the page and the test
-                            // cases from one dialog"): the page first, so the
-                            // test cases link their scenarios on it. The page
-                            // needs Confluence on, so this shows only then.
-                            ...(confluenceEnabled
-                              ? [
-                                  {
-                                    id: "wiki-qtest",
-                                    label: "Publish to Wiki & qTest…",
-                                    icon: <ClipboardCheck size={13} />,
-                                    onSelect: () => setWikiQtestPublishOpen(true),
-                                  },
-                                ]
-                              : []),
-                          ]),
-                      {
-                        id: "delete",
-                        label: "Delete feature",
-                        icon: <Trash2 size={13} />,
-                        danger: true,
-                        onSelect: () => {
-                          const listing = features.find((f) => f.fileName === selected);
-                          if (listing) void removeFeature(listing);
-                        },
-                      },
-                    ]}
-                  />
-                </span>
-                </>
-                )}
-              </div>
-            </header>
-            {/* Properties as chips (specs/ui/ui.feature.md "Design system"):
-                the publish rollup; the assignee (src/server/members.ts —
-                the data repo's project-settings.yaml, saved on the spot,
-                off unless Settings turns assignments on); the ticket
-                (specs/external-links/project-management-jira-linear-etc
-                .feature.md "Add link to feature"), edited in a popover. */}
-            {locked ? (
-              /* The read-only site: the same properties, as plain chips and
-                 links — nothing to assign, link or publish. */
-              <div className="props">
-                <span className="chip static">
-                  <StatusIcon status="published" size={14} />
-                  {feature.scenarios.filter((s) => s.status === "published").length} /{" "}
-                  {feature.scenarios.length} published
-                </span>
-                {authorshipLine(feature) && (
-                  <span className="chip static feature-authors">
-                    <UserRound size={14} aria-hidden="true" />
-                    {authorshipLine(feature)}
-                  </span>
-                )}
-                {(feature.links ?? []).map((l) => (
-                  <a key={l.url} className="chip" href={l.url} target="_blank" rel="noreferrer" title={l.url}>
-                    <Ticket size={14} aria-hidden="true" />
-                    {externalLinkLabel(l)}
-                    <ExternalLink size={12} aria-hidden="true" />
-                  </a>
-                ))}
-                {(feature.prs ?? []).map((pr) => (
-                  <a key={pr.url} className="chip" href={pr.url} target="_blank" rel="noreferrer" title={pr.url}>
-                    <GitPullRequest size={14} aria-hidden="true" />
-                    {pr.title || pr.url.replace(/^https:\/\/github\.com\//, "")}
-                    <ExternalLink size={12} aria-hidden="true" />
-                  </a>
-                ))}
-                {feature.confluence && (
-                  <a className="chip" href={feature.confluence.url} target="_blank" rel="noreferrer">
-                    <BookOpen size={14} aria-hidden="true" />
-                    Confluence
-                    <ExternalLink size={12} aria-hidden="true" />
-                  </a>
-                )}
-              </div>
-            ) : (
-            <div className="props">
-              {/* The publish rollup, and the way to Publish All (crud-feature
-                  .md "publish each scenario individually"): its menu marks
-                  every scenario published; the dot means there is something
-                  unpublished. Sync lives in the sidebar header, beside the
-                  data folder. */}
-              <span className="chip-anchor publish-anchor">
-                <button
-                  type="button"
-                  className="chip"
-                  aria-haspopup="menu"
-                  aria-expanded={publishMenuOpen}
-                  aria-label={`${feature.scenarios.filter((s) => s.status === "published").length} of ${feature.scenarios.length} published${publishing === null && (dirty || hasProposed) ? ", unpublished changes" : ""}`}
-                  onClick={() => setPublishMenuOpen((o) => !o)}
-                >
-                  <StatusIcon status="published" size={14} />
-                  {feature.scenarios.filter((s) => s.status === "published").length} /{" "}
-                  {feature.scenarios.length} published
-                  {publishing === null && (dirty || hasProposed) && (
-                    <span className="dot" role="img" aria-label="unpublished changes" />
-                  )}
-                  <ChevronDown size={12} aria-hidden="true" />
-                </button>
-                <Menu
-                  open={publishMenuOpen}
-                  onClose={() => setPublishMenuOpen(false)}
-                  label="Publish"
-                  className="chip-menu"
-                  containerSelector=".publish-anchor"
-                  items={[
-                    {
-                      id: "all",
-                      label: publishing === "all" ? "Publishing…" : "Publish all",
-                      icon: <CloudUpload size={13} />,
-                      keys: "mod+enter",
-                      disabled: publishing !== null,
-                      onSelect: () => void publish(),
-                    },
-                  ]}
-                />
-              </span>
-              {/* Who created the feature and last changed it
-                  (specs/app/specs-authorship.feature.md). */}
-              {authorshipLine(feature) && (
-                <span className="chip static feature-authors">
-                  <UserRound size={14} aria-hidden="true" />
-                  {authorshipLine(feature)}
-                </span>
-              )}
-              {assignments && (
-                <span className="chip-anchor assignee-anchor">
-                  <button
-                    type="button"
-                    className={`chip${feature.assigned ? "" : " muted"}`}
-                    aria-haspopup="menu"
-                    aria-expanded={assigneeMenuOpen}
-                    aria-label={`Assigned: ${feature.assigned ?? "nobody"}`}
-                    disabled={assignedSaving}
-                    onClick={() => setAssigneeMenuOpen((o) => !o)}
-                  >
-                    {feature.assigned ? (
-                      <span className="avatar chip-avatar" aria-hidden="true">
-                        {initialsOf(feature.assigned)}
-                      </span>
-                    ) : (
-                      <UserRound size={14} aria-hidden="true" />
-                    )}
-                    {feature.assigned ?? "Unassigned"}
-                  </button>
-                  <Menu
-                    open={assigneeMenuOpen}
-                    onClose={() => setAssigneeMenuOpen(false)}
-                    label="Assigned member"
-                    className="chip-menu"
-                    containerSelector=".assignee-anchor"
-                    items={[
-                      {
-                        id: "",
-                        label: "Unassigned",
-                        checked: !feature.assigned,
-                        onSelect: () => void saveAssigned(""),
-                      },
-                      ...assignableMembers().map((m) => ({
-                        id: m.name,
-                        label: m.name,
-                        checked: feature.assigned === m.name,
-                        icon: (
-                          <span className="avatar chip-avatar" aria-hidden="true">
-                            {initialsOf(m.name)}
-                          </span>
-                        ),
-                        onSelect: () => void saveAssigned(m.name),
-                      })),
-                    ]}
-                  />
-                </span>
-              )}
-              {projectManagement && (
-                <span className="chip-anchor ticket-anchor">
-                  {/* "Several tickets on a feature": the chip reads the one
-                      ticket, or counts them; the popover lists them and
-                      takes another, up to five. */}
-                  <button
-                    type="button"
-                    className={`chip${feature.links?.length ? "" : " muted"}`}
-                    aria-haspopup="dialog"
-                    aria-expanded={featureLinkOpen}
-                    onClick={() => {
-                      setFeatureTicketsError(null);
-                      setFeatureTicketsOpen((open) => !open);
-                    }}
-                  >
-                    <Ticket size={14} aria-hidden="true" />
-                    {ticketChipLabel(feature.links)}
-                  </button>
-                  {feature.links?.length === 1 && (
-                    <a
-                      className="chip-ext"
-                      href={feature.links[0]!.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      title={feature.links[0]!.url}
-                      aria-label={`Open ${externalLinkLabel(feature.links[0]!)}`}
-                    >
-                      <ExternalLink size={12} aria-hidden="true" />
-                    </a>
-                  )}
-                  <Popover
-                    open={featureLinkOpen}
-                    onClose={() => setFeatureTicketsOpen(false)}
-                    label="Tickets for this feature"
-                    className="chip-popover ticket-popover"
-                    containerSelector=".ticket-anchor"
-                  >
-                    <p className="hint">The {projectManagementTool} tickets that track this feature.</p>
-                    <TicketLinkField
-                      links={feature.links ?? []}
-                      tool={projectManagementTool}
-                      error={featureTicketsError}
-                      saving={featureTicketsSaving}
-                      autoFocus
-                      onChange={(links) => saveFeatureTickets(links)}
-                    />
-                    <div className="dialog-actions">
-                      <button
-                        type="button"
-                        className="btn btn-secondary"
-                        onClick={() => setFeatureTicketsOpen(false)}
-                      >
-                        Close
-                      </button>
-                    </div>
-                  </Popover>
-                </span>
-              )}
-              {/* specs/external-links/qtest-test-cases.feature.md: the qTest
-                  test case covering the feature as a whole. */}
-              {qtestLinks && (
-                <span className="chip-anchor qtest-anchor">
-                  <button
-                    type="button"
-                    className={`chip${feature.qtest ? "" : " muted"}`}
-                    aria-haspopup="dialog"
-                    aria-expanded={featureQtestOpen}
-                    onClick={() => {
-                      if (featureQtestOpen) {
-                        setFeatureQtestDraft(null);
-                      } else {
-                        setFeatureQtestError(null);
-                        setFeatureQtestDraft(linkDraftOf(feature.qtest));
-                      }
-                    }}
-                  >
-                    <ClipboardCheck size={14} aria-hidden="true" />
-                    {feature.qtest ? externalLinkLabel(feature.qtest) : "Link qTest"}
-                  </button>
-                  {feature.qtest && (
-                    <a
-                      className="chip-ext"
-                      href={feature.qtest.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      title={feature.qtest.url}
-                      aria-label={`Open ${externalLinkLabel(feature.qtest)}`}
-                    >
-                      <ExternalLink size={12} aria-hidden="true" />
-                    </a>
-                  )}
-                  <Popover
-                    open={featureQtestOpen}
-                    onClose={() => setFeatureQtestDraft(null)}
-                    label="qTest test case for this feature"
-                    className="chip-popover"
-                    containerSelector=".qtest-anchor"
-                  >
-                    {featureQtestDraft !== null && (
-                      <form
-                        onSubmit={(e) => {
-                          e.preventDefault();
-                          void saveFeatureQtest();
-                        }}
-                      >
-                        <p className="hint">
-                          The qTest test case that covers this feature. Clear the fields to
-                          remove the link.
-                        </p>
-                        <div className="link-field">
-                          <QtestLinkField
-                            draft={featureQtestDraft}
-                            onChange={(draft) => {
-                              setFeatureQtestError(null);
-                              setFeatureQtestDraft(draft);
-                            }}
-                            error={featureQtestError}
-                            autoFocus
-                          />
-                        </div>
-                        <div className="dialog-actions">
-                          <button
-                            type="button"
-                            className="btn btn-secondary"
-                            onClick={() => setFeatureQtestDraft(null)}
-                          >
-                            Cancel
-                          </button>
-                          <button type="submit" className="btn btn-primary" disabled={featureQtestSaving}>
-                            {featureQtestSaving
-                              ? "Saving…"
-                              : feature.qtest && isBlankLinkDraft(featureQtestDraft)
-                                ? "Remove link"
-                                : "Save"}
-                          </button>
-                        </div>
-                      </form>
-                    )}
-                  </Popover>
-                </span>
-              )}
-              {/* specs/external-links/confluence-wiki.feature.md: the page the
-                  feature was published to. Read-only — publishing sets it. */}
-              {feature.confluence && (
-                <span className="chip-anchor confluence-anchor">
-                  <a
-                    className="chip"
-                    href={feature.confluence.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    title={feature.confluence.url}
-                    aria-label="Open the Confluence page"
-                  >
-                    <BookOpen size={14} aria-hidden="true" />
-                    Confluence
-                    <ExternalLink size={12} aria-hidden="true" />
-                  </a>
-                </span>
-              )}
-              {/* specs/external-links/related-pull-requests.feature.md "Link
-                  a pull request to a feature": the chip counts the feature's
-                  pull requests; the popover lists them and takes another. */}
-              <span className="chip-anchor pr-anchor">
-                <button
-                  type="button"
-                  className={`chip${feature.prs?.length ? "" : " muted"}`}
-                  aria-haspopup="dialog"
-                  aria-expanded={featurePrsOpen}
-                  onClick={() => setFeaturePrsOpen((open) => !open)}
-                >
-                  <GitPullRequest size={14} aria-hidden="true" />
-                  {feature.prs?.length
-                    ? `${feature.prs.length} PR${feature.prs.length === 1 ? "" : "s"}`
-                    : "Link PR"}
-                </button>
-                <Popover
-                  open={featurePrsOpen}
-                  onClose={() => setFeaturePrsOpen(false)}
-                  label="Pull requests for this feature"
-                  className="chip-popover pr-popover"
-                  containerSelector=".pr-anchor"
-                >
-                  <p className="hint">The pull requests implementing this feature.</p>
-                  <PullRequestField
-                    prs={feature.prs ?? []}
-                    autoFocus
-                    onChange={(prs) => savePullRequests(null, prs)}
-                  />
-                  <div className="dialog-actions">
-                    <button type="button" className="btn btn-secondary" onClick={() => setFeaturePrsOpen(false)}>
-                      Close
-                    </button>
-                  </div>
-                </Popover>
-              </span>
-              {/* specs/app/feature-flags.feature.md: the flags gating the
-                  feature as a whole, a chip each, and a chip whose popover
-                  adds, toggles and removes them — saved on the spot. Only
-                  while Settings turns feature flags on. The edit chip comes
-                  first, so adding a flag never moves the popover's anchor. */}
-              {featureFlags && (
-                <span className="chip-anchor feature-flags-anchor">
-                  <button
-                    type="button"
-                    className={`chip${feature.flags?.length ? "" : " muted"}`}
-                    aria-haspopup="dialog"
-                    aria-expanded={featureFlagsOpen}
-                    onClick={() => setFeatureFlagsOpen((open) => !open)}
-                  >
-                    <Flag size={14} aria-hidden="true" />
-                    {feature.flags?.length ? "Edit flags" : "Add flag"}
-                  </button>
-                  <Popover
-                    open={featureFlagsOpen}
-                    onClose={() => setFeatureFlagsOpen(false)}
-                    label="Feature flags for this feature"
-                    className="chip-popover feature-flags-popover"
-                    containerSelector=".feature-flags-anchor"
-                  >
-                    <p className="hint">
-                      The feature flags gating this feature, written <code>[ff:name:on|off]</code> under its
-                      heading.
-                    </p>
-                    <FeatureFlagsField
-                      flags={feature.flags ?? []}
-                      autoFocus
-                      onChange={(flags) => saveFeatureFlags(flags)}
-                    />
-                    <div className="dialog-actions">
-                      <button type="button" className="btn btn-secondary" onClick={() => setFeatureFlagsOpen(false)}>
-                        Close
-                      </button>
-                    </div>
-                  </Popover>
-                </span>
-              )}
-              {featureFlags && <FeatureFlagChips flags={feature.flags} />}
-              {/* specs/app/custom-attributes.feature.md: the feature's own
-                  attributes, a chip each, whenever it carries any, and —
-                  once the data repo defines attributes for features — a
-                  chip whose popover adds, changes and removes them, saved
-                  on the spot. */}
-              {definitionsFor(attributeDefs, "feature").length > 0 && (
-                <span className="chip-anchor feature-attributes-anchor">
-                  <button
-                    type="button"
-                    className={`chip${feature.attributes?.length ? "" : " muted"}`}
-                    aria-haspopup="dialog"
-                    aria-expanded={featureAttributesOpen}
-                    onClick={() => setFeatureAttributesOpen((open) => !open)}
-                  >
-                    <Tag size={14} aria-hidden="true" />
-                    {feature.attributes?.length ? "Edit attributes" : "Add attribute"}
-                  </button>
-                  <Popover
-                    open={featureAttributesOpen}
-                    onClose={() => setFeatureAttributesOpen(false)}
-                    label="Attributes of this feature"
-                    className="chip-popover feature-flags-popover attributes-popover"
-                    containerSelector=".feature-attributes-anchor"
-                  >
-                    <p className="hint">
-                      The custom attributes of this feature, as Settings → Custom attributes defines them.
-                    </p>
-                    <AttributesField
-                      attributes={feature.attributes ?? []}
-                      where="feature"
-                      defs={attributeDefs}
-                      known={knownAttributes}
-                      autoFocus
-                      onChange={(attributes) => saveFeatureAttributes(attributes)}
-                    />
-                    <div className="dialog-actions">
-                      <button type="button" className="btn btn-secondary" onClick={() => setFeatureAttributesOpen(false)}>
-                        Close
-                      </button>
-                    </div>
-                  </Popover>
-                </span>
-              )}
-              <AttributeChips
-                attributes={feature.attributes}
-                where="feature"
-                defs={attributeDefs}
-                known={knownAttributes}
-              />
-              {/* specs/external-links/aha-and-figma-links.feature.md "Link
-                  Aha! and Figma to a feature": a chip per tool switched on
-                  in Settings, counting the feature's links; the popover
-                  lists them and takes another. */}
-              {RESOURCE_LINK_KINDS.filter((kind) => resourceLinksOn[kind]).map((kind) => {
-                const { name, noun } = RESOURCE_LINK_TOOLS[kind];
-                const Icon = RESOURCE_LINK_ICON[kind];
-                const links = feature[kind] ?? [];
-                return (
-                  <span className={`chip-anchor resource-anchor-${kind}`} key={kind}>
-                    <button
-                      type="button"
-                      className={`chip${links.length ? "" : " muted"}`}
-                      aria-haspopup="dialog"
-                      aria-expanded={featureResourceOpen === kind}
-                      onClick={() => setFeatureResourceOpen((open) => (open === kind ? null : kind))}
-                    >
-                      <Icon size={14} aria-hidden="true" />
-                      {resourceChipLabel(kind, links.length)}
-                    </button>
-                    <Popover
-                      open={featureResourceOpen === kind}
-                      onClose={() => setFeatureResourceOpen(null)}
-                      label={`${name} links for this feature`}
-                      className="chip-popover pr-popover"
-                      containerSelector={`.resource-anchor-${kind}`}
-                    >
-                      <p className="hint">
-                        The {name} {noun}s behind this feature.
-                      </p>
-                      <ResourceLinkField
-                        kind={kind}
-                        links={links}
-                        autoFocus
-                        onChange={(next) => saveResourceLinks(null, kind, next)}
-                      />
-                      <div className="dialog-actions">
-                        <button
-                          type="button"
-                          className="btn btn-secondary"
-                          onClick={() => setFeatureResourceOpen(null)}
-                        >
-                          Close
-                        </button>
-                      </div>
-                    </Popover>
-                  </span>
-                );
-              })}
-            </div>
-            )}
-            {descOpen && descEdit ? (
-              /* specs/editor/feature-editor.feature.md "Edit feature
-                 descrition": the description pane becomes the editor, sized
-                 like the rendered pane so the scenario list stays in view. */
-              <div
-                className={`feature-desc-editor${resizingDesc ? " resizing" : ""}`}
-                ref={descPaneRef}
-                style={
-                  descHeight === null ? undefined : ({ "--desc-h": `${descHeight}px` } as CSSProperties)
-                }
-              >
-                <MarkdownEditor
-                  value={descEdit.text}
-                  onChange={(text) => setDescEdit({ file: descEdit.file, text })}
-                  placeholder="Describe this feature — any markdown. Saved automatically."
-                  // Opens rendered — a description is read far more often
-                  // than rewritten. A blank one has nothing to render, so a
-                  // new feature's editor opens ready to type into instead.
-                  initialTab={descSaved.current ? "preview" : "write"}
-                />
-                <span className={syncProblem !== null ? "readme-hint sync-failing" : "readme-hint"}>
-                  Saved automatically every {autosaveSeconds} seconds; {pushHint(syncProblem)}{" "}
-                  Done shows it rendered.
-                </span>
-                {/* The editor's lower boundary is a grab strip: drag it to give
-                    the description more or less room, double-click to restore
-                    the default third of the window. Sized like the sidebar
-                    divider, and nudged by the arrow keys when focused. */}
-                <HeightResizer
-                  label="Resize the description editor"
-                  min={DESC_MIN}
-                  height={descHeight}
-                  target={descPaneRef}
-                  clamp={clampDescHeight}
-                  onHeight={setDescHeight}
-                  onCommit={(h) => storeEditorHeight(DESC_HEIGHT_KEY, h)}
-                  onReset={() => {
-                    setDescHeight(null);
-                    storeEditorHeight(DESC_HEIGHT_KEY, null);
-                  }}
-                  onResizing={setResizingDesc}
-                />
-              </div>
-            ) : (
-              feature.description && (
-                /* Clicking the rendered description opens the editor too —
-                   links inside it still open as links. */
-                <div
-                  className={`feature-desc md-preview${locked ? "" : " editable"}`}
-                  title={locked ? undefined : "Click to edit the description"}
-                  onClick={(e) => {
-                    if (locked || (e.target as HTMLElement).closest("a")) return;
-                    openDescriptionEditor(selected, feature.description);
-                  }}
-                >
-                  {renderMarkdown(feature.description)}
-                </div>
-              )
-            )}
-            {/* specs/ui/ui.feature.md "Scenario List": each card renders its
-                body as a Markdown preview, clamped to n lines (n set in
-                Settings). */}
-            <div
-              className="scenarios"
-              style={{ "--preview-lines": previewLines } as CSSProperties}
-            >
-              {feature.scenarios.map((s, i) => {
-                if (!scenarioMatches(s, feature, filter)) return null;
-                // A card is a drag source (specs/ui/navigation.feature.md
-                // "drag a scenario to another feature"): onto another
-                // feature in the sidebar it moves there; onto another card
-                // here it lands before or after it, as a drag in the
-                // sidebar outline does — or, dragged out of another
-                // feature's outline, moves in at that spot.
-                const isCard = (x: { file?: string; name: string; version: number } | null) =>
-                  x !== null && x.file === selected && x.name === s.name && x.version === s.version;
-                const droppable =
-                  scenarioDrag !== null &&
-                  !isCard(scenarioDrag) &&
-                  (scenarioDrag.file === selected || scenarioMovesInto(scenarioDrag, selected, deletePublished));
-                const dropEdge =
-                  droppable && isCard(scenarioDropAt)
-                    ? scenarioDropAt!.after
-                      ? " drop-after"
-                      : " drop-before"
-                    : "";
-                return (
-                <article
-                  key={i}
-                  ref={(el) => {
-                    scenarioRefs.current[i] = el;
-                  }}
-                  className={`scenario-card ${s.status}${i === selectedScenario ? " selected" : ""}${dropEdge}${
-                    isCard(scenarioDrag) ? " dragging" : ""
-                  }`}
-                  draggable={!locked}
-                  onDragStart={(e) => {
-                    e.dataTransfer.setData("text/plain", scenarioPath(selected, s));
-                    e.dataTransfer.effectAllowed = "move";
-                    setScenarioDrag({ file: selected, name: s.name, version: s.version, status: s.status });
-                  }}
-                  onDragEnd={endScenarioDrag}
-                  onDragOver={(e) => {
-                    if (!droppable) return;
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = "move";
-                    const box = e.currentTarget.getBoundingClientRect();
-                    const after = e.clientY > box.top + box.height / 2;
-                    if (!isCard(scenarioDropAt) || scenarioDropAt!.after !== after) {
-                      setScenarioDropAt({ file: selected, name: s.name, version: s.version, after });
-                    }
-                  }}
-                  onDrop={(e) => {
-                    if (!droppable) return;
-                    e.preventDefault();
-                    const box = e.currentTarget.getBoundingClientRect();
-                    const dragged = scenarioDrag!;
-                    const at = { name: s.name, version: s.version, after: e.clientY > box.top + box.height / 2 };
-                    endScenarioDrag();
-                    if (dragged.file === selected) void dropTreeScenario(selected, dragged, at, at.after);
-                    else void moveScenarioToFeature(dragged.file, dragged, selected, at);
-                  }}
-                  // A click anywhere on the card highlights it (the title link
-                  // does so itself); a double-click opens it in the editor
-                  // pane, like Enter. The card's controls keep their own
-                  // clicks.
-                  onClick={(e) => {
-                    if (isCardControl(e.target)) return;
-                    setSelectedScenario(i);
-                  }}
-                  onDoubleClick={(e) => {
-                    if (isCardControl(e.target)) return;
-                    setEditing({ index: i, scenario: { ...s } });
-                  }}
-                  // A right-click opens the card's ⋯ menu, on the card it
-                  // also highlights.
-                  onContextMenu={(e) => {
-                    if (locked || isCardControl(e.target)) return;
-                    e.preventDefault();
-                    setSelectedScenario(i);
-                    setCardMenu(i);
-                  }}
-                >
-                  <header>
-                    <span className="scenario-title">
-                      {/* Code gen selection (specs/agents/claude.feature.md): a
-                          session takes whole specs, checked in the sidebar,
-                          or single scenarios, checked here. Gone when the
-                          Settings switch is off. */}
-                      {codeGen && (
-                        <input
-                          type="checkbox"
-                          className="scenario-check"
-                          checked={scenarioSelected(selected, s)}
-                          onChange={() =>
-                            toggleScenarioSelected(selected, feature.scenarios, scenarioKey(s))
-                          }
-                          aria-label={`Select scenario ${s.name} for an AI session`}
-                          title="Include this scenario in an AI session"
-                        />
-                      )}
-                      {/* The title is the scenario's permalink
-                          (specs/ui/navigation.feature.md "share a link"). */}
-                      {/* Status as a glyph, not a word (specs/ui/ui.feature.md
-                          "Design system"): draft, proposed or published. */}
-                      {/* Its number — its place in the file (specs/ui/
-                          ui.feature.md "number scenarios"); a draft has none. */}
-                      {scenarioNumbers(feature.scenarios)[i] !== null && (
-                        <span className="scenario-number">
-                          S{scenarioNumbers(feature.scenarios)[i]}
-                        </span>
-                      )}
-                      <StatusIcon status={s.status} />
-                      <a
-                        href={scenarioPath(selected, s)}
-                        onClick={(e) => spaClick(e, () => setSelectedScenario(i))}
-                      >
-                        {s.name}
-                      </a>{" "}
-                      <span className="version">v{s.version}</span>
-                      {/* The scenario's ticket (specs/external-links/project-
-                          management-jira-linear-etc.feature.md "Add link at
-                          spec level"), opening in a new tab. */}
-                      {projectManagement && s.link && (
-                        <a
-                          className="ext-link"
-                          href={s.link.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          title={s.link.url}
-                        >
-                          {externalLinkLabel(s.link)}
-                        </a>
-                      )}
-                      {/* Its qTest test case (specs/external-links/qtest-test-
-                          cases.feature.md), opening in a new tab. */}
-                      {qtestLinks && s.qtest && (
-                        <a
-                          className="ext-link"
-                          href={s.qtest.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          title={s.qtest.url}
-                        >
-                          {externalLinkLabel(s.qtest)}
-                        </a>
-                      )}
-                      {/* The flags gating it (specs/app/feature-flags.feature.md). */}
-                      {featureFlags && <FeatureFlagChips flags={s.flags} />}
-                      {/* Its polarity (specs/ui/scenario-polarity.feature.md),
-                          a dot on the card: a click flips it; still while
-                          the editor is open, as Move is, so the pane's copy
-                          cannot go stale. */}
-                      {scenarioPolarity && (
-                        <PolarityPill
-                          compact
-                          negative={!!s.negative}
-                          disabled={editing !== null || locked}
-                          onToggle={() => void toggleScenarioPolarityAt(i)}
-                        />
-                      )}
-                    </span>
-                    {locked ? (
-                      /* The read-only site's card offers only its link
-                         (specs/app/public-specs-site.feature.md "copies a
-                         deep link"), on hover, focus or selection like the
-                         editing card's actions. */
-                      <span className="card-actions">
-                        <CopyLinkButton
-                          size={14}
-                          label={`Copy link to ${s.name}`}
-                          copied={copied === scenarioLink(selected, s)}
-                          onCopy={() => void copyLink(scenarioLink(selected, s))}
-                        />
-                      </span>
-                    ) : (
-                    <span className="card-actions">
-                      {/* Edit up front, the rest behind ⋯ — Publish or New
-                          version, Copy link (crud-feature.md
-                          "publish each scenario individually"). Shown while
-                          the card is hovered, focused or selected; a
-                          right-click opens the same menu. A published card's
-                          Edit opens the same pane: its test links
-                          (specs/traceability.feature.md) and its ticket link
-                          stay editable. */}
-                      <Tooltip label="Edit" keys="e">
-                        <button
-                          type="button"
-                          className="ibtn"
-                          aria-label={`Edit ${s.name}`}
-                          onClick={() => setEditing({ index: i, scenario: { ...s } })}
-                        >
-                          <Pencil size={14} aria-hidden="true" />
-                        </button>
-                      </Tooltip>
-                      <Tooltip label="More actions">
-                        <button
-                          type="button"
-                          className="ibtn"
-                          aria-label={`Menu for ${s.name}`}
-                          aria-haspopup="menu"
-                          aria-expanded={cardMenu === i}
-                          onClick={() => setCardMenu((m) => (m === i ? null : i))}
-                        >
-                          <Ellipsis size={14} aria-hidden="true" />
-                        </button>
-                      </Tooltip>
-                      <Menu
-                        open={cardMenu === i}
-                        onClose={() => setCardMenu(null)}
-                        label={`Menu for ${s.name}`}
-                        className="card-menu"
-                        containerSelector=".card-actions"
-                        items={[
-                          {
-                            id: "edit",
-                            label: "Edit",
-                            icon: <Pencil size={13} />,
-                            keys: "e",
-                            onSelect: () => setEditing({ index: i, scenario: { ...s } }),
-                          },
-                          // A new scenario right after this one (specs/ui/
-                          // ui.feature.md "Add A Scenario Button").
-                          {
-                            id: "new-below",
-                            label: "New scenario below",
-                            icon: <Plus size={13} />,
-                            disabled: editing !== null,
-                            onSelect: () => void newScenario(i + 1),
-                          },
-                          s.status !== "published"
-                            ? {
-                                id: "publish",
-                                label: publishing === scenarioKey(s) ? "Publishing…" : "Publish",
-                                icon: <StatusIcon status="published" size={13} />,
-                                disabled: publishing !== null,
-                                onSelect: () => void publish(scenarioTarget(s)),
-                              }
-                            : {
-                                id: "new-version",
-                                label: "New version",
-                                icon: <History size={13} />,
-                                onSelect: () => newVersion(i),
-                              },
-                          {
-                            id: "clone",
-                            label: "Clone",
-                            icon: <CopyPlus size={13} />,
-                            onSelect: () => void cloneTreeScenario(selected, s),
-                          },
-                          {
-                            id: "copy",
-                            label: copied === scenarioPath(selected, s) ? "Copied" : "Copy link",
-                            icon: <Link size={13} />,
-                            onSelect: () => void copyLink(scenarioPath(selected, s)),
-                          },
-                          // Move up / Move down (specs/ui/ui.feature.md
-                          // "number scenarios"): the order is the user's,
-                          // saved like any other change to the feature.
-                          {
-                            id: "move-up",
-                            label: "Move up",
-                            icon: <ArrowUp size={13} />,
-                            keys: "alt+arrowup",
-                            disabled: i === 0 || editing !== null,
-                            onSelect: () => void reorderScenario(i, -1),
-                          },
-                          {
-                            id: "move-down",
-                            label: "Move down",
-                            icon: <ArrowDown size={13} />,
-                            keys: "alt+arrowdown",
-                            disabled: i === feature.scenarios.length - 1 || editing !== null,
-                            onSelect: () => void reorderScenario(i, 1),
-                          },
-                        ]}
-                      />
-                    </span>
-                    )}
-                  </header>
-                  {/* Its custom attributes (specs/app/custom-attributes.feature.md),
-                      a row of chips under the title whenever it carries any. */}
-                  {s.attributes && s.attributes.length > 0 && (
-                    <div className="scenario-attributes">
-                      <AttributeChips
-                        attributes={s.attributes}
-                        where="scenario"
-                        defs={attributeDefs}
-                        known={knownAttributes}
-                      />
-                    </div>
-                  )}
-                  {s.body && (
-                    <div className="md-preview scenario-body">{renderMarkdown(s.body)}</div>
-                  )}
-                  {/* specs/traceability.feature.md: links to the automated
-                      tests, as a table at the end of the scenario. Optional —
-                      the Settings toggle hides it (default ON). */}
-                  {showTestLinks && testsTable(s.tests)}
-                  {/* specs/external-links/related-pull-requests.feature.md
-                      "The scenario card lists its pull requests". */}
-                  {s.prs && s.prs.length > 0 && (
-                    <div className="scenario-prs">
-                      <span className="scenario-prs-head">Pull requests</span>
-                      <PullRequestList prs={s.prs} />
-                    </div>
-                  )}
-                  {/* specs/external-links/aha-and-figma-links.feature.md "The
-                      scenario card lists its Aha! and Figma links". */}
-                  {RESOURCE_LINK_KINDS.filter((kind) => resourceLinksOn[kind] && s[kind]?.length).map(
-                    (kind) => (
-                      <div className={`scenario-prs scenario-${kind}`} key={kind}>
-                        <span className="scenario-prs-head">{RESOURCE_LINK_TOOLS[kind].name}</span>
-                        <ResourceLinkList kind={kind} links={s[kind]!} />
-                      </div>
-                    ),
-                  )}
-                  {/* specs/editor/store-associated-files.feature.md: the
-                      scenario's files, each a download. */}
-                  {s.files && s.files.length > 0 && (
-                    <div className="scenario-prs scenario-files">
-                      <span className="scenario-prs-head">Files</span>
-                      <ScenarioFileList files={s.files} />
-                    </div>
-                  )}
-                  {/* specs/app/specs-authorship.feature.md: who created the
-                      scenario and who last changed it. */}
-                  {authorshipLine(s) && <p className="scenario-authors">{authorshipLine(s)}</p>}
-                </article>
-                );
-              })}
-              {feature.scenarios.length > 0 &&
-                !feature.scenarios.some((s) => scenarioMatches(s, feature, filter)) && (
-                  <p className="empty">
-                    {filter.attribute
-                      ? `No ${filter.status ? `${filter.status} ` : ""}scenarios here carry ${attributeFilterLabel(filter.attribute, attributeDefs)}`
-                      : `No ${filter.status} scenarios here`}{" "}
-                    — the sidebar filter hides the rest.
-                  </p>
-                )}
-              {feature.scenarios.length === 0 && (
-                <p className="empty">
-                  {locked ? "No scenarios yet." : "No scenarios yet. Press c, or the + above, to add one."}
-                </p>
-              )}
-            </div>
-          </>
-        ) : (
-          /* A feature opened by deep link, still on its way. */
-          <PageSkeleton cards={3} />
-        )
-  );
+  // What the Specs tab's page components still call here
+  // (src/frontend/specs/host.ts SpecsActions).
+  const specsActions: SpecsActions = {
+    backToFeature,
+    scenarioLink,
+    scenarioNav,
+    stepScenario,
+    testsTable,
+    // The editor pane's.
+    addTest,
+    attributeDefs,
+    bodyFieldRef,
+    canAddAfter,
+    cancelTestLookup,
+    changeLinkDraft,
+    changeQtestDraft,
+    cloneTreeScenario,
+    commitTestEdit,
+    deleteScenario,
+    draftVersion,
+    editingDeletable,
+    editingPublished,
+    knownAttributes,
+    nameFieldRef,
+    newScenarioAfterCurrent,
+    newVersion,
+    proposeScenario,
+    publishScenario,
+    removeTest,
+    savePullRequests,
+    saveResourceLinks,
+    saveScenarioFileList,
+    savedEntry,
+    startTestEdit,
+    unpublishScenario,
+    uploadScenarioFiles,
+    // The feature page's.
+    assignableMembers,
+    closeDescriptionEditor,
+    codeGen,
+    confluenceEnabled,
+    demo,
+    descPaneRef,
+    descSaved,
+    dropTreeScenario,
+    endScenarioDrag,
+    hosted,
+    locked,
+    moveFeaturePrompt,
+    moveScenarioToFeature,
+    newScenario,
+    openDescriptionEditor,
+    openQtestPublish,
+    pluginCrumbs,
+    publish,
+    removeFeature,
+    renameDraftRef,
+    renameFile,
+    renameSelected,
+    reorderScenario,
+    saveAssigned,
+    saveFeatureAttributes,
+    saveFeatureFlags,
+    saveFeatureQtest,
+    saveFeatureTickets,
+    scenarioRefs,
+    sessionCount,
+    sessionRunning,
+    spaClick,
+    startSession,
+    toggleScenarioPolarityAt,
+    // The dialogs'.
+    agentModels,
+    agents,
+    ahaSites,
+    confluencePublished,
+    confluenceWikis,
+    dismissConflict,
+    jiraSites,
+    markSaved,
+    openObservability,
+    qtestParentUrl,
+    qtestPublished,
+    qtestSites,
+    resolveWith,
+  };
   provideSpecsHost({
     sidebar: specsSidebar,
-    pane: specsPane,
+    actions: specsActions,
   });
 
   return (
@@ -12709,226 +10763,10 @@ export function App() {
           }
         />
       )}
-      {/* crud-feature.md "Publish feature with merge conflict": a
-          dialog rather than a strip appended to the page, so the two sides
-          never push the resolutions out of view. The dialog is capped to the
-          window; each side scrolls inside its own pane and the three
-          resolutions stay pinned at the bottom (specs/ui/ui.feature.md "Merge
-          conflict dialog"). */}
-      {conflict && (
-        <div className="dialog-backdrop" {...backdropDismiss(() => resolving === null && dismissConflict())}>
-          <div
-            className="dialog conflict-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Merge conflict"
-            ref={conflictTrapRef}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3>Merge conflict</h3>
-            <p className="hint">
-              Compare the two sides, then accept one or publish an edit that combines them.
-              {conflict.message ? ` — ${conflict.message}` : ""}
-            </p>
-            <div className="conflict-panes">
-              <section className="conflict-pane">
-                <header>
-                  <h4>Yours</h4>
-                  <span className="hint">what you are publishing</span>
-                </header>
-                <pre>{conflict.ours}</pre>
-              </section>
-              <section className="conflict-pane">
-                <header>
-                  <h4>Theirs</h4>
-                  <span className="hint">what is on the remote</span>
-                </header>
-                {conflict.theirs ? (
-                  <pre>{conflict.theirs}</pre>
-                ) : (
-                  <pre className="conflict-missing">No such file on the remote.</pre>
-                )}
-              </section>
-            </div>
-            <section className="conflict-edit">
-              <header>
-                <h4>Manual edit</h4>
-                <span className="hint">
-                  Start from{" "}
-                  <button className="link" onClick={() => setConflictDraft(conflict.ours)}>
-                    yours
-                  </button>{" "}
-                  or{" "}
-                  <button className="link" onClick={() => setConflictDraft(conflict.theirs)}>
-                    theirs
-                  </button>
-                </span>
-              </header>
-              <textarea
-                className="conflict-draft"
-                value={conflictDraft}
-                onChange={(e) => setConflictDraft(e.target.value)}
-                spellCheck={spellCheckOn}
-              />
-            </section>
-            <div className="dialog-actions conflict-actions">
-              <button
-                className="btn btn-secondary"
-                onClick={dismissConflict}
-                disabled={resolving !== null}
-              >
-                Cancel
-              </button>
-              <button
-                className="btn btn-primary"
-                onClick={() => void resolveWith("ours", conflict.ours)}
-                disabled={resolving !== null}
-              >
-                {resolving === "ours" ? "Publishing…" : "Accept yours"}
-              </button>
-              <button
-                className="btn btn-primary"
-                onClick={() => void resolveWith("theirs", conflict.theirs)}
-                disabled={resolving !== null}
-              >
-                {resolving === "theirs" ? "Publishing…" : "Accept theirs"}
-              </button>
-              <button
-                className="btn btn-primary"
-                onClick={() => void resolveWith("draft", conflictDraft)}
-                disabled={resolving !== null}
-              >
-                {resolving === "draft" ? "Publishing…" : "Publish manual edit"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      {confluencePublishOpen && selected && feature && (
-        <ConfluencePublishDialog
-          file={selected}
-          featureName={feature.name}
-          linkedUrl={feature.confluence?.url}
-          initialParentUrl={feature.confluencePage?.parentUrl ?? ""}
-          wikis={confluenceWikis}
-          trapRef={confluenceTrapRef}
-          onClose={() => setConfluencePublishOpen(false)}
-          onOpenLogs={() => {
-            setConfluencePublishOpen(false);
-            openObservability("confluence");
-          }}
-          onPublished={(data) => {
-            confluencePublished(data);
-            setConfluencePublishOpen(false);
-          }}
-        />
-      )}
-      {confluenceFolder && (
-        <ConfluenceFolderPublishDialog
-          key={`${confluenceFolder.path}:${confluenceFolder.features === null ? "loading" : "ready"}`}
-          folderLabel={confluenceFolder.label}
-          features={confluenceFolder.features}
-          wikis={confluenceWikis}
-          trapRef={confluenceFolderTrapRef}
-          onClose={() => setConfluenceFolder(null)}
-          onOpenLogs={() => {
-            setConfluenceFolder(null);
-            openObservability("confluence");
-          }}
-          onPublished={(file, data) => {
-            // The open feature now links its page: show it as saved.
-            if (file !== selected) return;
-            setFeature(featureFromResponse(data, selected));
-            setDirty(false);
-            markSaved();
-          }}
-          onFinished={(results) => {
-            setConfluenceFolder(null);
-            const created = results.filter((r) => r.created).length;
-            const parts = [
-              ...(created > 0 ? [`published ${created}`] : []),
-              ...(results.length - created > 0 ? [`updated ${results.length - created}`] : []),
-            ];
-            const said = parts.join(", ");
-            toast.success(`${said.charAt(0).toUpperCase()}${said.slice(1)} in Confluence`);
-            const warnings = results.flatMap((r) => (r.warning ? [`${r.title}: ${r.warning}`] : []));
-            if (warnings.length > 0) toast.error(warnings.join(" "));
-          }}
-        />
-      )}
-      {qtestPublishOpen && selected && feature && (
-        <QtestPublishDialog
-          file={selected}
-          featureName={feature.name}
-          linkedUrl={feature.qtest?.url}
-          initialParentUrl={feature.qtestModule?.parentUrl ?? qtestParentUrl}
-          sites={qtestSites}
-          trapRef={qtestTrapRef}
-          onClose={() => setQtestPublishOpen(false)}
-          onOpenLogs={() => {
-            setQtestPublishOpen(false);
-            openObservability("qtest");
-          }}
-          onPublished={(data) => {
-            qtestPublished(data);
-            // A test case qTest refused keeps the dialog open on it, with its details.
-            if (!data.failure) setQtestPublishOpen(false);
-          }}
-        />
-      )}
-      {wikiQtestPublishOpen && selected && feature && (
-        <WikiQtestPublishDialog
-          file={selected}
-          featureName={feature.name}
-          linkedPageUrl={feature.confluence?.url}
-          linkedModuleUrl={feature.qtest?.url}
-          initialParentPageUrl={feature.confluencePage?.parentUrl ?? ""}
-          initialParentModuleUrl={feature.qtestModule?.parentUrl ?? qtestParentUrl}
-          wikis={confluenceWikis}
-          sites={qtestSites}
-          trapRef={wikiQtestTrapRef}
-          onClose={() => setWikiQtestPublishOpen(false)}
-          onOpenLogs={(service) => {
-            setWikiQtestPublishOpen(false);
-            openObservability(service);
-          }}
-          onPagePublished={confluencePublished}
-          onCasesPublished={(data) => {
-            qtestPublished(data);
-            if (!data.failure) setWikiQtestPublishOpen(false);
-          }}
-        />
-      )}
-      {ahaImportOpen !== null && (
-        <AhaImportDialog
-          folder={ahaImportOpen.folder}
-          sites={ahaSites}
-          trapRef={ahaTrapRef}
-          onClose={() => setAhaImportOpen(null)}
-          onImported={(data) => {
-            const { folder } = ahaImportOpen;
-            setAhaImportOpen(null);
-            // The import switched Aha! links on server-side, so the chips show.
-            if (data.ahaLinks) setResourceLinksOn((prev) => ({ ...prev, aha: true }));
-            // Reveal the new feature: a selected folder may be collapsed.
-            if (folder) {
-              setCollapsed((prev) => {
-                const next = new Set(prev);
-                next.delete(folder);
-                return next;
-              });
-            }
-            void (async () => {
-              await loadFeatures();
-              await openFeature(data.fileName, { push: true });
-            })();
-            const open = { label: "Open in Aha!", run: () => window.open(data.url, "_blank", "noreferrer") };
-            const what = data.scenarios > 0 ? ` with ${data.scenarios} scenario${data.scenarios === 1 ? "" : "s"}` : "";
-            toast.success(`Imported “${data.title}” from Aha!${what}`, { action: open });
-            if (data.warning) toast.error(data.warning);
-          }}
-        />
-      )}
+      {/* Each tab's own dialogs, whatever the pane shows (src/plugins/client/
+          tabs.ts Overlay): the Specs tab's merge conflict, publish and import
+          dialogs among them. */}
+      {barTabs.map((tab) => tab.Overlay && <tab.Overlay key={tab.id} app={tabApp} />)}
       {publishOpen && (
         <PublishSpecsDialog
           onClose={() => setPublishOpen(false)}
@@ -12965,60 +10803,6 @@ export function App() {
           trapRef={extractTrapRef}
           onClose={() => setExtractOpen(null)}
           onCreated={(result) => void afterExtract(result)}
-        />
-      )}
-      {openSpecImportOpen !== null && (
-        <OpenSpecImportDialog
-          folder={openSpecImportOpen.folder}
-          trapRef={openSpecTrapRef}
-          onClose={() => setOpenSpecImportOpen(null)}
-          onImported={(data) => {
-            const { folder } = openSpecImportOpen;
-            setOpenSpecImportOpen(null);
-            // Reveal the new features: a selected folder may be collapsed.
-            if (folder) {
-              setCollapsed((prev) => {
-                const next = new Set(prev);
-                next.delete(folder);
-                return next;
-              });
-            }
-            void (async () => {
-              await loadFeatures();
-              await openFeature(data.created[0]!.fileName, { push: true });
-            })();
-            if (data.failed.length > 0) toast.error(importSummary(data));
-            else toast.success(importSummary(data));
-          }}
-        />
-      )}
-      {importOpen !== null && (
-        <ImportFromJiraWikiDialog
-          folder={importOpen.folder}
-          mode={importOpen.mode}
-          jiraSites={jiraSites}
-          wikis={confluenceWikis}
-          agents={agents}
-          agentModels={agentModels}
-          trapRef={importTrapRef}
-          onClose={() => setImportOpen(null)}
-          onCreated={(data) => {
-            const { folder } = importOpen;
-            setImportOpen(null);
-            // Reveal the new feature: a selected folder may be collapsed.
-            if (folder) {
-              setCollapsed((prev) => {
-                const next = new Set(prev);
-                next.delete(folder);
-                return next;
-              });
-            }
-            void (async () => {
-              await loadFeatures();
-              await openFeature(data.fileName, { push: true });
-            })();
-            toast.success(`Imported “${data.title}” with ${data.scenarios} scenario${data.scenarios === 1 ? "" : "s"}`);
-          }}
         />
       )}
       {tokenSignInOpen && (

@@ -477,6 +477,23 @@ describe("The Specs tab's behaviour, kept through its move into the plugin", () 
     expect(paletteLabels()).not.toContain("Import from Aha!…");
   });
 
+  test("an import's dialog opens over the folder's README, where no feature has the pane", async () => {
+    await setUp(BOTH);
+    await open("/");
+    await until(() => sidebarText().includes("Quotes"), "the tree");
+    expect(readmeOpen()).toBe(true);
+    await press("/");
+    await until(() => paletteLabels().includes("Import from OpenSpec…"), "the import among the commands");
+    const item = [...host!.querySelectorAll<HTMLElement>(".palette-item")].find(
+      (el) => el.querySelector(".palette-label")?.textContent === "Import from OpenSpec…",
+    )!;
+    await act(async () => item.click());
+    await until(() => host!.querySelector(".openspec-dialog") !== null, "the import's dialog");
+    // The pane is still the README: the dialog is the tab's, not the pane's.
+    expect(readmeOpen()).toBe(true);
+    expect(featureOpen()).toBe(false);
+  });
+
   test("a link to a feature that is not there says so and opens home", async () => {
     await setUp(BOTH);
     await open("/features/gone");
