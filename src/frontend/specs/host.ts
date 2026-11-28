@@ -186,6 +186,8 @@ export interface SpecsHost {
   open(view: SpecsView, opts: OpenViewOptions): void;
   /** A data folder switch: land what the scenario and description editors hold, in the folder it was typed in. */
   land(): Promise<void>;
+  /** The reload tick: read the open feature again, unless something on its page is being edited. */
+  refresh(): Promise<void>;
   /** `c` from the tree: a new feature, in the folder selected. */
   createFeature(): void;
   /** `c` on an open feature: a new scenario. */
@@ -199,6 +201,7 @@ const NO_HOST: SpecsHost = {
   actions: null,
   open: () => {},
   land: async () => {},
+  refresh: async () => {},
   createFeature: () => {},
   createInView: null,
   shortcuts: [],

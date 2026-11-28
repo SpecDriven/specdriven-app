@@ -15,13 +15,15 @@ import { type ConfirmOptions, type PickOptions, type PromptOptions } from "../Mo
 import { type AppPage } from "../route";
 import { useSpecsDerived } from "./derived";
 import { useDescriptionEditor } from "./descriptionEditor";
+import { useEditorState } from "./editorState";
 import { useEditorEffects } from "./editorEffects";
 import { useFeatureCommands } from "./featureCommands";
 import { useFeatureFields } from "./featureFields";
 import { useFeatureOps } from "./featureOps";
-import { setDescEdit } from "./featurePageState";
+import { setDescEdit, useFeaturePageState } from "./featurePageState";
 import { type Listing } from "./listing";
 import { useOpenFeatureActions } from "./openActions";
+import { useOpenFeature } from "./openFeature";
 import { useFeaturePageKeys } from "./pageKeys";
 import { useSpecsPaletteActions } from "./paletteActions";
 import { usePublish } from "./publish";
@@ -63,6 +65,9 @@ export interface SpecsShell {
 }
 
 export function useSpecs(deps: SpecsShell) {
+  const { selected, dirty, editing } = useOpenFeature();
+  const { conflict } = useEditorState();
+  const { renameDraft } = useFeaturePageState();
   const {
     action,
     activeTab,
@@ -416,6 +421,34 @@ export function useSpecs(deps: SpecsShell) {
    * run once the selection empties, after the switch, so it lands here and
    * the editor is emptied so no later tick can.
    */
+  /**
+   * The reload tick (the plugin's `reload/tick`): the open feature as the
+   * folder now has it, without clobbering an in-progress edit or conflict
+   * resolution.
+   */
+  const refreshOpenFeature = async (): Promise<void> => {
+    const loads: Promise<unknown>[] = [];
+    // The description editor holding an edit that hasn't landed yet keeps
+    // its feature as is.
+    const descPending =
+      descEditRef.current !== null && descEditRef.current.text !== descSaved.current;
+    // Nor while the header's feature name is being edited in place
+    // (specs/ui/ui.feature.md "Main page"): re-opening the feature would
+    // close the field mid-typing and drop the new name.
+    if (selected && !dirty && !editing && !conflict && !descPending && renameDraft === null) {
+      loads.push(openFeature(selected));
+    }
+    // The public specs site re-reads the open page too (specs/app/
+    // public-specs-site.feature.md "A change pushed to the spec repo shows up
+    // on the site"), and a scenario's page there is the editor pane — which
+    // the rule above leaves alone so a refresh cannot clobber an edit. Nothing
+    // is edited on that site, so the pane re-opens on the scenario as the
+    // server now has it, once the feature changed.
+    if (locked && selected && editing && editing.index !== null && !editing.isNew) {
+      loads.push(refreshReadOnlyPane(selected, editing.scenario));
+    }
+    await Promise.all(loads);
+  };
   const landSpecsEditors = async () => {
     await editorRef.current.close();
     await scenarioSaveQueue.current.idle();
@@ -446,7 +479,6 @@ export function useSpecs(deps: SpecsShell) {
     deletePickedScenarios,
     deleteScenario,
     deleteTreeScenario,
-    descEditRef,
     descPaneRef,
     descSaved,
     describeSelection,
@@ -485,7 +517,7 @@ export function useSpecs(deps: SpecsShell) {
     publish,
     publishScenario,
     qtestPublished,
-    refreshReadOnlyPane,
+    refreshOpenFeature,
     removeFeature,
     removeFolder,
     removeTest,

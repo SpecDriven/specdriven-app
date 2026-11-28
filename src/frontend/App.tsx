@@ -1064,7 +1064,7 @@ export function App() {
   // The open feature — its file, what was read of it, the card highlighted
   // and the scenario in the editor — lives in a store the Specs tab reads
   // too (src/frontend/specs/openFeature.ts); set here under the same names.
-  const { featureLoading, selected, feature, dirty, editing } = useOpenFeature();
+  const { featureLoading, selected, feature, editing } = useOpenFeature();
   // What the editor pane and the feature page hold of their own — menus,
   // drafts, heights, a save or a publish under way — likewise
   // (src/frontend/specs/editorState.ts, featurePageState.ts).
@@ -1081,7 +1081,6 @@ export function App() {
     cardMenu,
     assigneeMenuOpen,
     publishMenuOpen,
-    renameDraft,
     featureTicketsOpen,
     featureQtestDraft,
     featurePrsOpen,
@@ -1713,25 +1712,6 @@ export function App() {
   // tab) refreshes on Sync too, not only on the next tick (issue #288).
   const refreshView = async (): Promise<void> => {
     const loads: Promise<unknown>[] = [loadFeatures()];
-    // The description editor holding an edit that hasn't landed yet keeps
-    // its feature as is, like the README below.
-    const descPending =
-      descEditRef.current !== null && descEditRef.current.text !== descSaved.current;
-    // Nor while the header's feature name is being edited in place
-    // (specs/ui/ui.feature.md "Main page"): re-opening the feature would
-    // close the field mid-typing and drop the new name.
-    if (selected && !dirty && !editing && !conflict && !descPending && renameDraft === null) {
-      loads.push(openFeature(selected));
-    }
-    // The public specs site re-reads the open page too (specs/app/
-    // public-specs-site.feature.md "A change pushed to the spec repo shows up
-    // on the site"), and a scenario's page there is the editor pane — which
-    // the rule above leaves alone so a refresh cannot clobber an edit. Nothing
-    // is edited on that site, so the pane re-opens on the scenario as the
-    // server now has it, once the feature changed.
-    if (locked && selected && editing && editing.index !== null && !editing.isNew) {
-      loads.push(refreshReadOnlyPane(selected, editing.scenario));
-    }
     // A pulled README shows up too — unless the home editor holds an edit
     // that hasn't landed yet.
     if (!selected && !pluginViewRef.current && readmeText.current === readmeSaved.current) {
@@ -1739,8 +1719,11 @@ export function App() {
     }
     // The plugins follow the same rule — each refreshes its own store (the
     // special folders their page lists), and what is open on screen only
-    // while its editor holds nothing unsaved.
-    client.emit("reload/tick", pluginViewRef.current);
+    // while its editor holds nothing unsaved: the Specs tab the open
+    // feature (src/frontend/specs/useSpecs.ts refreshOpenFeature). What a
+    // listener answers as a promise is waited for, so Sync's progress covers
+    // it; one that fails is logged and the rest go on.
+    loads.push(client.settle("reload/tick", pluginViewRef.current));
     await Promise.all(loads);
   };
   const refreshViewRef = useRef(refreshView);
@@ -4158,7 +4141,6 @@ export function App() {
     deletePickedScenarios,
     deleteScenario,
     deleteTreeScenario,
-    descEditRef,
     descPaneRef,
     descSaved,
     describeSelection,
@@ -4197,7 +4179,7 @@ export function App() {
     publish,
     publishScenario,
     qtestPublished,
-    refreshReadOnlyPane,
+    refreshOpenFeature,
     removeFeature,
     removeFolder,
     removeTest,
@@ -4262,6 +4244,7 @@ export function App() {
   // builtin/specs/client.tsx), published before they are read below.
   provideSpecsHost({
     land: landSpecsEditors,
+    refresh: refreshOpenFeature,
     createFeature: () => void createFeature(),
     // Imports into the selected spec folder (specs/external-links/aha-import
     // .feature.md, OpenSpec's likewise), while their switches are on.
