@@ -25,7 +25,8 @@ import { setDragging, setDropTarget, setFeatureDropAt, setFilter, setFilterMenuO
 import type { Dispatch, KeyboardEvent as ReactKeyboardEvent, MouseEvent, ReactNode, RefObject, SetStateAction } from "react";
 import type { AgentDescriptor } from "../../server/agentTypes";
 import type { AttributeDefinitions } from "../../server/customAttributes";
-import type { Listing, OpenOptions } from "../App";
+import type { Listing } from "./listing";
+import type { OpenOptions } from "./openFeature";
 
 /** What App hands the tree: the handlers that act on its state, and what it derives. */
 export interface SpecsSidebarProps {

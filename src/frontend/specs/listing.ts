@@ -10,7 +10,10 @@
 
 import { useSyncExternalStore } from "react";
 import type { FeatureListing } from "../../server/features";
+import type { GitHubRepo } from "../../server/issues";
+import type { ProjectMember } from "../../server/members";
 import type { ScenarioStatus } from "../../server/parser";
+import type { RepoReadOnly } from "../repoReadOnly";
 
 export interface SpecsListing {
   features: FeatureListing[];
@@ -30,6 +33,36 @@ export interface SpecsListing {
    * feature-order.txt. Written first on a move, like `folderOrders`.
    */
   featureOrders: Record<string, string[]>;
+}
+
+/** What /api/features returns: the flat feature list, the folder list, and
+    the project's settings (src/server/members.ts) — the members a feature
+    can be assigned to, and the code repo a session runs in (null: the data
+    repo). */
+export interface Listing {
+  features: FeatureListing[];
+  folders: string[];
+  /** Folder path → what its display-name.txt says (specs/ui/folders.feature.md "describe a folder"). */
+  folderDescriptions: Record<string, string>;
+  /** Folder path → its subfolders in order, from its folder-order.txt ("order folders"); `specs` for the top level. */
+  folderOrders: Record<string, string[]>;
+  /** Folder path → its features' file names in order, from its feature-order.txt ("order features"). */
+  featureOrders: Record<string, string[]>;
+  members: ProjectMember[];
+  codeRepo: string | null;
+  /** Every code repo the project names, the default first (specs/app/project-settings.feature.md). */
+  codeRepos: string[];
+  /** Whether the repo writes authorship into its feature files
+      (specs/app/specs-authorship.feature.md, `authors-in-markdown`). */
+  authorsInMarkdown: boolean;
+  /** The GitHub repo the code repo pushes to — whose issues the Issues tab shows. */
+  issuesRepo: GitHubRepo | null;
+  /** The data repo's custom-attributes.txt (specs/app/custom-attributes.feature.md); empty when it has none. */
+  customAttributes: string;
+  /** Why saved changes are not reaching the remote (git-operations.md); null while they are. */
+  syncProblem: string | null;
+  /** Why the folder is read only (src/frontend/repoReadOnly.ts); null while it may be edited. */
+  readOnlyRepo: RepoReadOnly | null;
 }
 
 const EMPTY: SpecsListing = {

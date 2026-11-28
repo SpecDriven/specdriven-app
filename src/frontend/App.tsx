@@ -7,22 +7,12 @@ import type {
 } from "react";
 import {
   scenarioNumbers,
-  serializeFeature,
   slugify,
   titleFromFileName,
-  unclosedFence,
 } from "../server/parser";
 import type {
-  ExternalLink as TicketLink,
-  Feature,
-  FeatureFlag,
-  PullRequestLink,
-  ResourceLink,
   Scenario,
-  ScenarioFile,
   ScenarioPick,
-  ScenarioTarget,
-  SpecAttribute,
 } from "../server/parser";
 import { RESOURCE_LINK_KINDS, RESOURCE_LINK_TOOLS } from "../server/resourceLinks";
 import type { ResourceLinkKind } from "../server/resourceLinks";
@@ -174,13 +164,7 @@ import {
 } from "./treeFilter";
 import { CustomAttributesEditor } from "./CustomAttributesEditor";
 import { knownNames, parseAttributeDefinitions } from "../server/customAttributes";
-import {
-  externalLinkLabel,
-  linkDraftOf,
-  resolveLinkDraft,
-  resolveQtestDraft,
-} from "./externallinks";
-import type { LinkDraft } from "./externallinks";
+import { linkDraftOf } from "./externallinks";
 import {
   appPagePath,
   featurePath,
@@ -193,39 +177,19 @@ import {
   resolveScenario,
   scenarioPath,
   splitRepoPath,
-  SPECS_FOLDER,
 } from "./route";
 import type { AppPage } from "./route";
 import {
-  addTestLink,
-  canSetTestLink,
-  removeTestLink,
-  testDraftOf,
-  testLinkHint,
-  testLinkProblem,
   testLinkTarget,
-  testLinkUrl,
   openTestInIdea,
   type TestDraft,
-  resolvePendingTests,
-  testLinkLabel,
-  updateTestLink,
 } from "./testlinks";
 import {
   buildTree,
-  featuresBeneath,
-  findFolder,
-  featureNamesMoved,
   folderLabel,
-  folderNamesMoved,
-  initialCaseDisplayName,
-  folderMoveOptions,
   revealed,
   folderOptions,
-  folderRenamed,
-  scenarioDrop,
   scenarioNeighbors,
-  scenarioPlace,
   scenarioRows,
   treeScenarioKey,
   scenarioSequence,
@@ -263,17 +227,14 @@ import { SignedCommits } from "./SignedCommits";
 import { ConfluenceTokens, fetchConfluenceTokens, type ConfluenceWiki } from "./ConfluenceToken";
 import { JiraTokens, fetchJiraTokens, type JiraSite } from "./JiraToken";
 import { AgentModelList, agentModelsOf, agentsWithoutSection, type AgentModels } from "./AgentModels";
-import { type ConfluencePublishResult } from "./ConfluencePublishDialog";
 import { type FolderFeature } from "./ConfluenceFolderPublishDialog";
 import { QtestTokens, fetchQtestTokens, type QtestSite } from "./QtestToken";
-import { type QtestPublishResult } from "./QtestPublishDialog";
 import { AhaTokens, fetchAhaTokens, type AhaSite } from "./AhaToken";
 import { ExtractSpecsDialog, type ExtractCreated } from "./ExtractSpecsDialog";
 import { ExtractionProgress, PublishSpecsDialog, useExtraction } from "./ExtractionProgress";
 import { LinkTestsDialog } from "./LinkTestsDialog";
 import { EXTRACT_SPECS_EVENT } from "../server/intentNames";
 import { HostedStartNav, hostedCloneHint, type HostedAccount } from "./HostedStartNav";
-import type { ScenarioRef } from "./route";
 import { copyText, copyWhenReady } from "./clipboard";
 import {
   CLAUDE_CODE_WEB_URL,
@@ -298,7 +259,6 @@ import {
   placeScenario,
   savedScenarioName,
   scenarioSignature,
-  scenarioTarget,
   withPolarity,
   withScenario,
   withScenarioMoved,
@@ -312,41 +272,29 @@ import {
 import {
   resetEditorState,
   setConflict,
-  setConflictDraft,
   setLinkDraft,
   setLinkError,
-  setPublishing,
   setQtestDraft,
   setQtestError,
   setResolving,
-  setSavedAt,
   setSaving,
   setTestDraft,
   setTestEdit,
-  setTestEditDraft,
   setTestNameDraft,
   setTestNameHint,
   setTestsError,
-  setUnpublishing,
   useEditorState,
 } from "./specs/editorState";
 import {
   resetFeaturePageState,
-  setAssignedSaving,
-  setCardMenu,
   setDescEdit,
   setFeatureAttributesOpen,
   setFeatureFlagsOpen,
   setFeaturePrsOpen,
   setFeatureQtestDraft,
-  setFeatureQtestError,
-  setFeatureQtestSaving,
   setFeatureResourceOpen,
-  setFeatureTicketsError,
   setFeatureTicketsOpen,
-  setFeatureTicketsSaving,
   setRenameDraft,
-  setRenaming,
   useFeaturePageState,
 } from "./specs/featurePageState";
 import {
@@ -363,6 +311,14 @@ import {
   setWikiQtestPublishOpen,
   useSpecsDialogs,
 } from "./specs/dialogs";
+import { useDescriptionEditor } from "./specs/descriptionEditor";
+import { useTreeScenarios } from "./specs/treeScenarios";
+import { useScenarioOps } from "./specs/scenarioOps";
+import { useTestLinks } from "./specs/testLinks";
+import { useFeatureFields } from "./specs/featureFields";
+import { useScenarioSave } from "./specs/scenarioSave";
+import { usePublish } from "./specs/publish";
+import { useFeatureOps } from "./specs/featureOps";
 import { provideSpecsHost, type SpecsActions } from "./specs/host";
 import {
   DEFAULT_PROJECT_MANAGEMENT_TOOL,
@@ -403,29 +359,22 @@ import {
   setSelected,
   setSelectedScenario,
   useOpenFeature,
+  type OpenOptions,
 } from "./specs/openFeature";
 import { SpecsSidebar, type SpecsSidebarProps } from "./specs/SpecsSidebar";
 import {
   resetTreeState,
   setCollapsed,
-  setDragging,
-  setDropTarget,
   setOutlined,
-  setScenarioDrag,
-  setScenarioDropAt,
-  setScenarioDropInto,
   setSelectedFolder,
-  setTreeMenu,
-  setTreePicks,
   useTreeState,
 } from "./specs/treeState";
 import {
   resetListing,
-  setFeatureOrders,
   setFeatures,
-  setFolderOrders,
   setListing,
   useSpecsListing,
+  type Listing,
 } from "./specs/listing";
 
 /** Signed-in GitHub account as reported by /api/state (never the token). */
@@ -748,70 +697,6 @@ export function storeEditorHidden(hidden: boolean) {
   } catch {
     // Storage unavailable: the choice just does not survive a reload.
   }
-}
-
-export interface OpenOptions {
-  /** Push a history entry for the opened feature (deliberate navigation). */
-  push?: boolean;
-  /**
-   * Deep-link target (specs/ui/navigation.feature.md): select this scenario, or
-   * clear the selection when null. Undefined keeps the same-file selection
-   * preservation used by sync/cron refreshes.
-   */
-  scenario?: ScenarioRef | null;
-  /**
-   * Open the scenario's own page — the editor pane — on top of selecting its
-   * card (specs/ui/navigation.feature.md "open a scenario link"). Deep links
-   * do; in-app navigation that merely lands on a card does not.
-   */
-  pane?: boolean;
-  /**
-   * Why the pull behind the link that asked for this feature failed, if it
-   * did — a miss then says the feature may not have arrived, not that the
-   * link is stale (src/frontend/linkSync.ts).
-   */
-  pullProblem?: string | null;
-  /**
-   * The words a search hit matched on (specs/search.feature.md): the pane
-   * opened for the hit marks them in the scenario's body.
-   */
-  terms?: string[];
-  /**
-   * Open with the feature description editor on (specs/editor/feature-editor
-   * .feature.md "Edit feature descrition"): a just-created feature is empty,
-   * and describing it is the first thing to do.
-   */
-  editDescription?: boolean;
-}
-
-/** What /api/features returns: the flat feature list, the folder list, and
-    the project's settings (src/server/members.ts) — the members a feature
-    can be assigned to, and the code repo a session runs in (null: the data
-    repo). */
-export interface Listing {
-  features: FeatureListing[];
-  folders: string[];
-  /** Folder path → what its display-name.txt says (specs/ui/folders.feature.md "describe a folder"). */
-  folderDescriptions: Record<string, string>;
-  /** Folder path → its subfolders in order, from its folder-order.txt ("order folders"); `specs` for the top level. */
-  folderOrders: Record<string, string[]>;
-  /** Folder path → its features' file names in order, from its feature-order.txt ("order features"). */
-  featureOrders: Record<string, string[]>;
-  members: ProjectMember[];
-  codeRepo: string | null;
-  /** Every code repo the project names, the default first (specs/app/project-settings.feature.md). */
-  codeRepos: string[];
-  /** Whether the repo writes authorship into its feature files
-      (specs/app/specs-authorship.feature.md, `authors-in-markdown`). */
-  authorsInMarkdown: boolean;
-  /** The GitHub repo the code repo pushes to — whose issues the Issues tab shows. */
-  issuesRepo: GitHubRepo | null;
-  /** The data repo's custom-attributes.txt (specs/app/custom-attributes.feature.md); empty when it has none. */
-  customAttributes: string;
-  /** Why saved changes are not reaching the remote (git-operations.md); null while they are. */
-  syncProblem: string | null;
-  /** Why the folder is read only (src/frontend/repoReadOnly.ts); null while it may be edited. */
-  readOnlyRepo: RepoReadOnly | null;
 }
 
 /**
@@ -3915,645 +3800,61 @@ export function App() {
     toast.success("Pomodoro started");
   };
 
-  // Folders (specs/ui/folders.feature.md): plain directories in the data repo.
-  // With a folder selected, the new folder is created inside it.
-  const createFolder = () => createFolderIn(selectedFolder);
-  /** `parent` is a repo-relative folder path, or null for the top level. */
-  const createFolderIn = async (parent: string | null) => {
-    const input = await prompt({
-      title: parent ? `New folder in "${parent}"` : "New folder",
-      hint: parent ? undefined : "Use / for nesting.",
-      confirmLabel: "Create folder",
-    });
-    if (!input) return;
-    const path = cleanSegments(input);
-    const res = await fetch("/api/folders", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: parent ? `${parent}/${path}` : path }),
-    });
-    const data = await res.json();
-    if (res.ok) {
-      // Reveal and select the new folder, so a follow-up "+ New folder"
-      // nests inside it and a drag has a visible target.
-      if (parent) setCollapsed((prev) => {
-        const next = new Set(prev);
-        next.delete(parent);
-        return next;
-      });
-      setSelectedFolder(data.path);
-      // The new folder starts with its name in initial case as its display
-      // name; a failed save leaves it showing its plain name.
-      const display = initialCaseDisplayName(String(data.path).split("/").pop() ?? "");
-      if (display) {
-        await fetch(`/api/folders/${encodeURIComponent(data.path)}/description`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ description: display }),
-        }).catch(() => undefined);
-      }
-      await loadFeatures();
-    } else {
-      toast.error(data.error ?? "Could not create the folder");
-    }
-  };
-
-  // Delete from a folder's ⋯ menu (specs/ui/folders.feature.md "delete a
-  // folder" / "delete a folder with features in it"): an empty folder goes
-  // at once, with Undo; one with features asks again, naming how many, and
-  // then goes with them — a `git rm -r` on the server, committed and pushed.
-  const removeFolder = async (path: string) => {
-    const node = findFolder(buildTree(folders, features, folderDescriptions, folderOrders, featureOrders), path);
-    const count = node ? featuresBeneath(node) : 0;
-    const ok = await confirm({
-      title: "Delete folder",
-      body:
-        count === 0
-          ? `Delete the empty folder "${path}"?`
-          : `Delete "${path}" and the ${count} feature${count === 1 ? "" : "s"} in it? They are removed from the repository, committed and pushed.`,
-      confirmLabel: count === 0 ? "Delete folder" : `Delete folder and ${count} feature${count === 1 ? "" : "s"}`,
-    });
-    if (!ok) return;
-    // An editor open on a feature beneath the folder has nothing left to save
-    // into — the same seal as deleting that feature from its own menu.
-    const retiring = selected !== null && selected.startsWith(`${path}/`);
-    if (retiring) {
-      featureEditorsRetiring.current = true;
-      await scenarioSaveQueue.current.idle();
-      await descSaveQueue.current.idle();
-      editorRef.current.seal();
-    }
-    try {
-      const res = await fetch(`/api/folders/${encodeURIComponent(path)}${count > 0 ? "?force=true" : ""}`, {
-        method: "DELETE",
-      });
-      const data = await res.json();
-      if (res.ok) {
-        if (retiring) {
-          setEditing(null);
-          setSelected(null);
-          setFeature(null);
-          setSelectedScenario(null);
-        }
-        // A selection under the deleted folder points nowhere — drop it.
-        setSelectedFolder((f) => (f === path || f?.startsWith(`${path}/`) ? null : f));
-        await loadFeatures();
-        if (count === 0) {
-          toast.success(`Deleted folder "${path}".`, {
-            action: { label: "Undo", run: () => void restoreFolder(path) },
-          });
-        } else {
-          toast.success(`Deleted folder "${path}" and ${count} feature${count === 1 ? "" : "s"} — ${data.message}.`);
-        }
-      } else {
-        toast.error(data.error ?? "Could not delete the folder");
-      }
-    } finally {
-      if (retiring) unsealFeatureEditors();
-    }
-  };
-
-  // Rename from a folder's ⋯ menu (specs/ui/folders.feature.md "rename a
-  // folder"): the last segment changes, the server git-mvs the directory, and
-  // everything keyed by a path beneath it — the open feature, the selected
-  // folder, the collapsed set — follows to the new path.
-  const renameFolder = async (path: string) => {
-    const current = path.split("/").pop()!;
-    const name = await prompt({
-      title: "Rename folder",
-      hint: "The folder keeps its place in the tree; names are slugified like file names.",
-      initial: current,
-      confirmLabel: "Rename",
-    });
-    if (!name || cleanLine(name) === current) return;
-    // The editors over a feature in the folder flush, then seal, before the
-    // git mv — the same pair renameFile uses, so no save names the old path.
-    const retiring = selected !== null && selected.startsWith(`${path}/`);
-    if (retiring) {
-      await editorRef.current.flush();
-      editorRef.current.seal();
-    }
-    try {
-      const res = await fetch(`/api/folders/${encodeURIComponent(path)}/rename`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: cleanLine(name) }),
-      });
-      const data = (await res.json()) as { path?: string; message?: string; error?: string };
-      if (!res.ok) {
-        toast.error(data.error ?? "Rename failed");
-        return;
-      }
-      const to = data.path!;
-      if (to === path) return;
-      await followFolder(path, to, retiring);
-      toast.success(`Renamed folder to ${to.split("/").pop()} — ${data.message}.`);
-    } finally {
-      if (retiring) unsealFeatureEditors();
-    }
-  };
-
-  // After a folder rename or move, everything keyed by a path beneath it —
-  // the selected folder, the collapsed set, the open feature — follows to
-  // the new path.
-  const followFolder = async (path: string, to: string, retiring: boolean) => {
-    setSelectedFolder((f) => (f === null ? f : folderRenamed(f, path, to)));
-    setCollapsed((prev) => new Set([...prev].map((p) => folderRenamed(p, path, to))));
-    setOutlined((prev) => new Set([...prev].map((p) => folderRenamed(p, path, to))));
-    await loadFeatures();
-    if (selected !== null && retiring) await openFeature(folderRenamed(selected, path, to));
-  };
-
-  // Move to folder… from a folder's ⋯ menu or the palette
-  // (specs/ui/folders.feature.md "move a folder"): pick a new parent — the
-  // top level included — and the server git-mvs the directory there, keeping
-  // its name. The open feature follows the way it does on a rename; Undo
-  // moves the folder back to where it came from.
-  const moveFolder = async (path: string, parent: string) => {
-    const from = path.slice(0, path.lastIndexOf("/"));
-    const retiring = selected !== null && selected.startsWith(`${path}/`);
-    if (retiring) {
-      await editorRef.current.flush();
-      editorRef.current.seal();
-    }
-    try {
-      const res = await fetch(`/api/folders/${encodeURIComponent(path)}/move`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ parent }),
-      });
-      const data = (await res.json()) as { path?: string; message?: string; error?: string };
-      if (!res.ok) {
-        toast.error(data.error ?? "Move failed");
-        return;
-      }
-      const to = data.path!;
-      if (to === path) return;
-      await followFolder(path, to, retiring);
-      const where = parent === "" || parent === SPECS_FOLDER ? "the top level" : parent.split("/").pop();
-      toast.success(`Moved folder to ${where} — ${data.message}.`, {
-        action: { label: "Undo", run: () => void moveFolder(to, from) },
-      });
-    } catch (e) {
-      toast.error(e instanceof TypeError ? "Could not move the folder — is the server running?" : (e as Error).message);
-    } finally {
-      if (retiring) unsealFeatureEditors();
-    }
-  };
-  const moveFolderPrompt = async (path: string) => {
-    setTreeMenu(null);
-    const options = folderMoveOptions(
-      buildTree(folders, features, folderDescriptions, folderOrders, featureOrders),
-      path,
-    );
-    const to = await pick({
-      title: `Move folder “${path.split("/").pop()}”`,
-      hint: "To the top level or another folder — a git mv, committed and pushed.",
-      placeholder: "Find a folder…",
-      options,
-      empty: options.length === 0 ? "There is no other folder to move it to." : "No folder matches.",
-    });
-    if (to === null) return;
-    await moveFolder(path, to);
-  };
-
-  // Display name from a folder's ⋯ menu (specs/ui/folders.feature.md "edit a
-  // folder's display name"): the label the sidebar shows in place of the
-  // folder name, kept in the folder's display-name.txt. The folder — and every
-  // path beneath it — stays put; a blank name clears the label.
-  const editFolderDisplayName = async (path: string) => {
-    const current = folderDescriptions[path] ?? "";
-    const name = await prompt({
-      title: "Edit display name",
-      hint: "Shown in the tree in place of the folder name. Leave blank to show the folder name.",
-      initial: current,
-      placeholder: path.split("/").pop(),
-      confirmLabel: "Save",
-      allowEmpty: true,
-    });
-    if (name === null || cleanLine(name) === current) return;
-    const res = await fetch(`/api/folders/${encodeURIComponent(path)}/description`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ description: cleanLine(name) }),
-    });
-    const data = (await res.json()) as { description?: string | null; message?: string; error?: string };
-    if (!res.ok) {
-      toast.error(data.error ?? "Could not save the display name");
-      return;
-    }
-    await loadFeatures();
-    toast.success(
-      data.description
-        ? `Folder display name set to "${data.description}" — ${data.message}.`
-        : `Cleared the folder's display name — ${data.message}.`,
-    );
-  };
-
-  /**
-   * Move the subfolder at `from` among `parent`'s subfolders to `to`
-   * (specs/ui/folders.feature.md "order folders") — one place for Move up /
-   * Move down, anywhere for a drop on a sibling's row — and save the order:
-   * the parent's folder-order.txt, committed and pushed. The tree shows the
-   * new order while the save is out, and falls back if it fails.
-   */
-  const moveFolderTo = async (parent: string, from: number, to: number) => {
-    const siblings = findFolder(buildTree(folders, features, folderDescriptions, folderOrders, featureOrders), parent)?.folders;
-    if (!siblings) return;
-    const names = folderNamesMoved(siblings, from, to);
-    if (!names) return;
-    const before = folderOrders;
-    setFolderOrders({ ...before, [parent]: names });
-    setTreeMenu(null);
-    try {
-      const res = await fetch(`/api/folders/${encodeURIComponent(parent)}/order`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ folders: names }),
-      });
-      const data = (await res.json()) as { folders?: string[]; error?: string };
-      if (!res.ok) throw new Error(data.error ?? "Could not move the folder");
-      await loadFeatures();
-    } catch (e) {
-      setFolderOrders(before);
-      toast.error(
-        e instanceof TypeError ? "Could not move the folder — is the server running?" : (e as Error).message,
-      );
-    }
-  };
-
-  /** Move a folder one place up or down among its siblings, from its menu or the palette. */
-  const reorderFolder = (path: string, delta: -1 | 1) => {
-    const parent = path.split("/").slice(0, -1).join("/");
-    const siblings = findFolder(buildTree(folders, features, folderDescriptions, folderOrders, featureOrders), parent)?.folders;
-    if (!siblings) return;
-    const i = siblings.findIndex((f) => f.path === path);
-    if (i < 0) return;
-    void moveFolderTo(parent, i, i + delta);
-  };
-
-  /**
-   * Move the feature at `from` among `parent`'s features to `to` (specs/ui/
-   * folders.feature.md "order features") — one place for Move up / Move
-   * down, anywhere for a drop on a sibling's row — and save the order: the
-   * folder's feature-order.txt, committed and pushed. The tree shows the new
-   * order while the save is out, and falls back if it fails.
-   */
-  const moveFeatureTo = async (parent: string, from: number, to: number) => {
-    const siblings = findFolder(
-      buildTree(folders, features, folderDescriptions, folderOrders, featureOrders),
-      parent,
-    )?.features;
-    if (!siblings) return;
-    const names = featureNamesMoved(siblings, from, to);
-    if (!names) return;
-    const before = featureOrders;
-    setFeatureOrders({ ...before, [parent]: names });
-    setTreeMenu(null);
-    try {
-      const res = await fetch(`/api/folders/${encodeURIComponent(parent)}/feature-order`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ features: names }),
-      });
-      const data = (await res.json()) as { features?: string[]; error?: string };
-      if (!res.ok) throw new Error(data.error ?? "Could not move the feature");
-      await loadFeatures();
-    } catch (e) {
-      setFeatureOrders(before);
-      toast.error(
-        e instanceof TypeError ? "Could not move the feature — is the server running?" : (e as Error).message,
-      );
-    }
-  };
-
-  /** Move a feature one place up or down among its siblings, from the palette. */
-  const reorderFeature = (fileName: string, delta: -1 | 1) => {
-    const parent = fileName.slice(0, fileName.lastIndexOf("/"));
-    const siblings = findFolder(
-      buildTree(folders, features, folderDescriptions, folderOrders, featureOrders),
-      parent,
-    )?.features;
-    if (!siblings) return;
-    const i = siblings.findIndex((f) => f.fileName === fileName);
-    if (i < 0) return;
-    void moveFeatureTo(parent, i, i + delta);
-  };
-
-  /** Undo of a folder delete: only empty folders go, so re-creating restores it. */
-  const restoreFolder = async (path: string) => {
-    const res = await fetch("/api/folders", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path }),
-    });
-    if (res.ok) await loadFeatures();
-    else toast.error(`Could not restore "${path}".`);
-  };
-
-  // Drag-move (specs/ui/folders.feature.md): the server does a `git mv` into
-  // the target folder, committed and pushed. A selected feature stays
-  // selected under its new path — the canonical-url effect follows along.
-  // What the scenario / description editors hold lands on the current path
-  // first, then they seal, so the openFeature close after git-mv cannot PUT
-  // the retired path and recreate the old file.
-  const moveTo = async (fileName: string, folder: string) => {
-    setDragging(null);
-    setDropTarget(null);
-    const from = fileName.includes("/") ? fileName.slice(0, fileName.lastIndexOf("/")) : "";
-    // A drop on the folder it is already in moves nothing ("already there"):
-    // no need to close the editors over it.
-    const retiring = selected === fileName && folder !== from;
-    if (retiring) {
-      await editorRef.current.flush();
-      editorRef.current.seal();
-    }
-    try {
-      const res = await fetch(`/api/features/${encodeURIComponent(fileName)}/move`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ folder }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        await loadFeatures();
-        if (data.fileName !== fileName) {
-          if (selected === fileName) await openFeature(data.fileName);
-          // Undo moves it straight back to where it came from.
-          toast.success(`Moved to ${folder || "the top level"} — ${data.message}.`, {
-            action: { label: "Undo", run: () => void moveTo(data.fileName, from) },
-          });
-        }
-      } else {
-        toast.error(data.error ?? "Move failed");
-      }
-    } finally {
-      // Moved, refused, unchanged or never answered: the seal is over either
-      // way, or the next scenario opened here would silently never save.
-      if (retiring) unsealFeatureEditors();
-    }
-  };
-
-  // specs/ui/ui.feature.md "Main page": the Edit link next to the feature name
-  // lets the user edit the feature name — the file's `# <name>` heading. The
-  // server rewrites the heading, commits and pushes; the file name (and so the
-  // feature's url) stays the same.
-  const renameSelected = async () => {
-    const draft = renameDraftRef.current;
-    if (!selected || draft === null || renamingRef.current) return;
-    const target = cleanLine(draft);
-    const currentName = feature ? feature.name || titleFromFileName(selected) : "";
-    if (!target || target === currentName) {
-      setRenameDraft(null);
-      return;
-    }
-    renamingRef.current = true;
-    setRenaming(true);
-    try {
-      if (await renameFeature(selected, target)) setRenameDraft(null);
-    } finally {
-      renamingRef.current = false;
-      setRenaming(false);
-    }
-  };
-
-  /** Rewrite `fileName`'s `# <name>` heading to `name` — committed and pushed
-      by the server; the file (and its url) stays put. True once saved. */
-  const renameFeature = async (fileName: string, name: string) => {
-    try {
-      const res = await fetch(`/api/features/${encodeURIComponent(fileName)}/rename`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        toast.error(data.error ?? "Rename failed");
-        return false;
-      }
-      await loadFeatures();
-      // Still the open feature? A blur-save can be out while the user
-      // already opened another one — that one stays.
-      if (selectedRef.current === fileName) await openFeature(fileName);
-      toast.success(`Renamed to "${data.name}" — ${data.message}.`);
-      return true;
-    } catch {
-      toast.error("Rename failed — is the server running?");
-      return false;
-    }
-  };
-
-  // Edit display name from a feature's ⋯ menu in the sidebar
-  // (specs/ui/ui.feature.md "Feature entry menu"): the feature name — the
-  // file's `# <name>` heading the tree shows — as the page's Edit link does.
-  // The file name and url stay the same.
-  const editFeatureDisplayName = async (f: FeatureListing) => {
-    const current = f.name || titleFromFileName(f.fileName);
-    const name = await prompt({
-      title: "Edit display name",
-      hint: "The feature name shown in the tree and on its page. The file name stays the same.",
-      initial: current,
-      confirmLabel: "Save",
-    });
-    if (name === null || !cleanLine(name) || cleanLine(name) === current) return;
-    await renameFeature(f.fileName, cleanLine(name));
-  };
-
-  /** The file name shown in the menu: only the part left of the dot —
-      the `.feature.md` extension is hidden (specs/ui/ui.feature.md "Feature
-      entry menu"). */
-  const fileStem = (fileName: string) => fileName.split("/").pop()!.split(".")[0]!;
-  /** A folder's entry in `treeMenu` — a NUL keeps it apart from file names. */
-  const folderMenuKey = (path: string) => `folder\u0000${path}`;
-
-  // File → Rename (specs/ui/ui.feature.md "Feature entry menu"): renames the
-  // underlying file. The extension stays; a selected feature follows its
-  // new file name (and so a new url — old links go stale).
-  const renameFile = async (fileName: string) => {
-    const stem = await prompt({
-      title: "Rename file",
-      hint: "The .feature.md extension is kept.",
-      initial: fileStem(fileName),
-      confirmLabel: "Rename",
-    });
-    if (!stem || cleanLine(stem) === fileStem(fileName)) return;
-    // The server slugs the stem, so the name can still come back unchanged;
-    // the finally below lifts the seal then too.
-    const retiring = selected === fileName;
-    if (retiring) {
-      await editorRef.current.flush();
-      editorRef.current.seal();
-    }
-    try {
-      const res = await fetch(`/api/features/${encodeURIComponent(fileName)}/rename-file`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ stem: cleanLine(stem) }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        await loadFeatures();
-        if (data.fileName !== fileName) {
-          if (selected === fileName) await openFeature(data.fileName);
-          toast.success(`Renamed file to ${fileStem(data.fileName)} — ${data.message}.`);
-        }
-      } else {
-        toast.error(data.error ?? "Rename failed");
-      }
-    } finally {
-      if (retiring) unsealFeatureEditors();
-    }
-  };
-
-  // A feature's page is published (specs/external-links/confluence-wiki.feature.md
-  // "Publish a feature to Confluence"): the feature now links it, shown as
-  // saved, and the toast offers "Open page". Shared by the Confluence
-  // dialog and the Wiki & qTest one.
-  const confluencePublished = (data: ConfluencePublishResult) => {
-    if (!selected) return;
-    setFeature(featureFromResponse(data, selected));
-    setDirty(false);
-    markSaved();
-    const open = { label: "Open page", run: () => window.open(data.url, "_blank", "noreferrer") };
-    toast.success(`${data.created ? "Published" : "Updated"} “${data.title}” in Confluence`, { action: open });
-    if (data.warning) toast.error(data.warning);
-  };
-
-  // A feature's test cases are written (specs/external-links/qtest-test-cases.feature.md
-  // "Create qTest test cases from a feature"): the feature and its scenarios
-  // link them, the parent module is remembered for next time, and the toast
-  // says how many were created and offers "Open module". Shared by the qTest
-  // dialog and the Wiki & qTest one; each decides whether to stay open.
-  const qtestPublished = (data: QtestPublishResult) => {
-    if (!selected) return;
-    setFeature(featureFromResponse(data, selected));
-    setDirty(false);
-    markSaved();
-    setQtestParentUrl(data.parentUrl);
-    const open = { label: "Open module", run: () => window.open(data.module.url, "_blank", "noreferrer") };
-    const what = [
-      data.created > 0 ? `created ${data.created}` : "",
-      data.updated > 0 ? `updated ${data.updated}` : "",
-      // Test cases of scenarios no longer in the feature (or out of scope), removed from the module.
-      (data.deleted ?? 0) > 0 ? `deleted ${data.deleted}` : "",
-      // The requirements of the feature's Jira issues they cover, those found and linked.
-      (() => {
-        const pids = (data.requirements ?? []).filter((r) => r.linked + r.alreadyLinked > 0).map((r) => r.pid);
-        return pids.length > 0 ? `linked to ${pids.join(", ")}` : "";
-      })(),
-    ]
-      .filter(Boolean)
-      .join(", ");
-    // A run refused at its first test case wrote nothing to report.
-    if (what || !data.failure) toast.success(`qTest: ${what || "nothing to write"} for “${data.title}”`, { action: open });
-    if (data.warning) toast.error(data.warning);
-  };
-
-  // "Publish qTest Test Cases…" (specs/external-links/qtest-test-cases.feature.md
-  // "A feature with no Confluence page asks first"): each test case links its
-  // scenario on the feature's Confluence page, so without one it would only
-  // name the spec file — asked before the dialog opens.
-  const openQtestPublish = async (f: Feature) => {
-    if (!f.confluence) {
-      const ok = await confirm({
-        title: "No Confluence page",
-        body: `“${f.name}” has not been published to Confluence, so its test cases cannot link their scenarios there — they will name the spec file instead. Create the qTest test cases anyway?`,
-        confirmLabel: "Create anyway",
-        danger: false,
-      });
-      if (!ok) return;
-    }
-    setQtestPublishOpen(true);
-  };
-
-  // Delete (specs/ui/ui.feature.md "Feature entry menu"): removes the feature
-  // file after a confirmation — a `git rm`, committed and pushed on the server.
-  const removeFeature = async (f: FeatureListing) => {
-    const ok = await confirm({
-      title: "Delete feature",
-      body: `Delete "${f.name}" (${f.fileName})?`,
-      confirmLabel: "Delete feature",
-    });
-    if (!ok) return;
-    // Seal without a parting save: writing the file back would undo the
-    // delete, the way an open page seals before its DELETE. Saves already
-    // away finish first, or they would recreate the file after git rm.
-    const retiring = selected === f.fileName;
-    if (retiring) {
-      featureEditorsRetiring.current = true;
-      await scenarioSaveQueue.current.idle();
-      await descSaveQueue.current.idle();
-      editorRef.current.seal();
-    }
-    try {
-      const res = await fetch(`/api/features/${encodeURIComponent(f.fileName)}`, {
-        method: "DELETE",
-      });
-      const data = await res.json();
-      if (res.ok) {
-        if (selected === f.fileName) {
-          // An editor open on the deleted feature has nothing left to save into.
-          setEditing(null);
-          setSelected(null);
-          setFeature(null);
-          setSelectedScenario(null);
-        }
-        await loadFeatures();
-        toast.success(`Deleted "${f.name}" — ${data.message}.`);
-      } else {
-        toast.error(data.error ?? "Delete failed");
-      }
-    } finally {
-      if (retiring) unsealFeatureEditors();
-    }
-  };
-
-  // Publish buttons (specs/ui/ui.feature.md "Main page"): same style and
-  // behavior as Sync — disabled with a progress label while running, no
-  // "Published" status line at the bottom of the page. Without a target every
-  // scenario is published (the upper-left "Publish All"); with one, only that
-  // scenario (crud-feature.md "publish each scenario individually").
-  // `over` carries content the state hasn't caught up with yet: the dialog's
-  // Publish saves its scenario into the feature and publishes in one motion.
-  // The target carries the scenario's document id, so one going out under a
-  // new name or version is published as itself, not as a second scenario.
-  const publish = async (scenario?: ScenarioTarget, over?: Feature, file = selected) => {
-    const content = over ?? feature;
-    if (!file || !content) return;
-    setPublishing(scenario ? scenarioKey(scenario) : "all");
-    try {
-      const res = await fetch(`/api/features/${encodeURIComponent(file)}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: serializeFeature(content), scenario }),
-      });
-      const data = await res.json();
-      // The dialog's Publish can wait behind an autosave tick, long enough
-      // for the user to open another feature. Its answer then belongs to a
-      // feature no longer on screen: reopening it would pull the user back,
-      // and its conflict dialog would resolve against the wrong page.
-      const stillHere = selectedRef.current === file;
-      if (res.status === 409 && data.status === "conflict") {
-        if (stillHere) {
-          setConflict({ ours: data.ours, theirs: data.theirs, message: data.message, scenario });
-          setConflictDraft(data.ours);
-          toast.info("Merge conflict — choose a resolution below.");
-        } else {
-          toast.error(`Merge conflict publishing to ${file} — open it and publish again to resolve.`);
-        }
-      } else if (res.ok) {
-        if (stillHere) await openFeature(file);
-        else await loadFeatures();
-      } else {
-        toast.error(data.error ?? "Publish failed");
-      }
-    } catch {
-      toast.error("Publish failed — is the server running?");
-    } finally {
-      setPublishing(null);
-    }
-  };
-
+  const {
+    createFolder,
+    createFolderIn,
+    editFeatureDisplayName,
+    editFolderDisplayName,
+    fileStem,
+    folderMenuKey,
+    moveFeatureTo,
+    moveFolder,
+    moveFolderPrompt,
+    moveFolderTo,
+    moveTo,
+    removeFolder,
+    renameFile,
+    renameFolder,
+    renameSelected,
+    reorderFeature,
+    reorderFolder,
+  } = useFeatureOps({
+    confirm,
+    descSaveQueue,
+    editorRef,
+    featureEditorsRetiring,
+    loadFeatures,
+    openFeature,
+    pick,
+    prompt,
+    renameDraftRef,
+    renamingRef,
+    scenarioSaveQueue,
+    selectedRef,
+    // Declared further down: called through, not passed.
+    unsealFeatureEditors: () => unsealFeatureEditors(),
+  });
+  const {
+    confluencePublished,
+    openQtestPublish,
+    publish,
+    qtestPublished,
+    removeFeature,
+  } = usePublish({
+    confirm,
+    descSaveQueue,
+    editorRef,
+    featureEditorsRetiring,
+    loadFeatures,
+    // Declared further down: called through, not passed.
+    markSaved: () => markSaved(),
+    openFeature,
+    scenarioSaveQueue,
+    selectedRef,
+    setQtestParentUrl,
+    // Declared further down: called through, not passed.
+    unsealFeatureEditors: () => unsealFeatureEditors(),
+  });
   // Sync button (specs/ui/ui.feature.md "Main page"): immediate data reload —
   // the server runs one reload tick (pull + push saved), then the view
   // refreshes the way the cron mirror does — open pages and plugin tabs
@@ -4647,328 +3948,28 @@ export function App() {
   const scenarioLink = (fileName: string, s: Pick<Scenario, "name" | "version">) =>
     readOnly ? latestScenarioPath(fileName, s) : scenarioPath(fileName, s);
 
-  // crud-feature.md ("Scenario is automatically saved locally and
-  // pushed to GitHub"): a landed save updates the header's Saved indicator.
-  const markSaved = () => {
-    setSaving(false);
-    setSavedAt(Date.now());
-  };
-
-  /**
-   * The version a scenario gets is derived, never typed
-   * (specs/ui/ui.feature.md): one past the highest version already carrying
-   * that name, or 1 when the name is new. Editing an existing entry keeps the
-   * version it was given.
-   */
-  const nextVersionFor = (name: string, ignoreIndex?: number) =>
-    nextVersionIn(feature, name, ignoreIndex);
-
-  /** The version the open dialog will save under; shown read-only in the dialog.
-      A new scenario autosave has already placed in the feature keeps deriving
-      its version, with its own entry left out — or it would bump past itself
-      on every tick. */
-  const draftVersion = !editing
-    ? 1
-    : editing.isNew || editing.index === null
-      ? nextVersionFor(editing.scenario.name, editing.index ?? undefined)
-      : editing.scenario.version;
-
-  /**
-   * Write the editor's scenario into the feature and save the feature locally
-   * (marked [proposed], so no data is lost); the server's reload cron commits
-   * and pushes it. `close` false is the autosave path
-   * (specs/editor/editor-autosave.feature.md): the pane stays open and follows
-   * its scenario into the saved feature. Resolves to whether the save landed
-   * and where it left the scenario; null when there is nothing to save.
-   */
-  const saveScenario = (
-    tests: string[],
-    close: boolean,
-    // Propose (specs/editor/spec-editor.feature.md) is the explicit action
-    // that advances the editor's draft; every other save keeps the status.
-    status?: Scenario["status"],
-  ): Promise<{ ok: boolean; placed: Placement }> | null => {
-    if (featureEditorsSealed.current) return null;
-    if (!editing || !feature || !selected) return null;
-    const draft = { ...editing.scenario, status: status ?? editing.scenario.status, tests };
-    const derived = editing.isNew === true;
-    // Where this scenario sits in the feature: the entry the editor opened
-    // on, or the one a previous save placed — never appended twice. While a
-    // tick is still away that is wherever the tick lands it, not what this
-    // render knows: its index and (for a new scenario) its missing document
-    // id predate that save, so placing by them would append the scenario a
-    // second time, or write over the neighbour a rename re-sorted into its
-    // old slot.
-    const ahead = autosaveInFlight.current;
-    const known: Placement = { feature, index: editing.index, id: draft.id, insertAt: editing.insertAt };
-    const place = (at: Placement) => placeScenario(draft, at, derived);
-    if (!ahead) setFeature(place(known).next);
-    if (close) setEditing(null);
-    const session = editorSession.current;
-    const file = selected;
-    setSaving(true);
-    // Through the queue so a folder switch can wait for this PUT, and so
-    // a save meeting a tick already away goes out after it, from where it
-    // landed.
-    return scenarioSaveQueue.current.run(async () => {
-      const base = ahead ? await ahead : known;
-      const { s, next } = place(base);
-      if (ahead && selectedRef.current === file) setFeature(next);
-      const res = await fetch(`/api/features/${encodeURIComponent(file)}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        // The scenario goes out with its document id, so a retyped title or a
-        // re-derived version renames the saved entry instead of leaving a draft
-        // behind under its old name.
-        body: JSON.stringify({
-          content: serializeFeature(next),
-          save: true,
-          scenario: scenarioTarget(s),
-        }),
-      });
-      const data = await res.json();
-      // The user may have moved on while the save was away — navigating from
-      // the sidebar leaves the editor pane with this last save
-      // (specs/editor/spec-editor.feature.md "Spec editor pane") — and then
-      // its result belongs to nothing on screen.
-      const stillHere = selectedRef.current === file;
-      if (res.ok) {
-        const saved = featureFromResponse(data, file);
-        if (stillHere) {
-          setFeature(saved);
-          setDirty(false);
-        } else {
-          // Its feature is no longer open, so the tree reads it from the
-          // listing: the save lands there instead.
-          setFeatures((prev) => withOpenScenarios(prev, file, saved));
-        }
-        // The feature comes back in canonical order, so a renamed scenario has
-        // moved: a still-open editor has to find its scenario again, and an
-        // explicit save that closed the editor lands on its card — by its
-        // identity, else by its document id (landedScenario). Not finding it
-        // (the entry was dropped underneath us) leaves the editor new, so
-        // the next save re-adds the work rather than overwriting a neighbour.
-        // The entry's document id comes back with it: a new scenario adopts it
-        // here, and every later save names the entry by it.
-        const moved = landedScenario(saved.scenarios, s, s.id);
-        const id = moved === null ? undefined : saved.scenarios[moved]!.id;
-        if (!close && session === editorSession.current) {
-          setEditing((prev) =>
-            prev === null
-              ? null
-              : {
-                  ...prev,
-                  index: moved,
-                  scenario: id === undefined ? prev.scenario : { ...prev.scenario, id },
-                },
-          );
-        }
-        if (close && stillHere) setSelectedScenario(moved);
-        // A published scenario's editor can only have changed its links — test
-        // links (specs/traceability.feature.md) and its ticket link — so there
-        // is nothing left to publish.
-        if (stillHere) markSaved();
-        else setSaving(false);
-        return { ok: true, placed: { feature: saved, index: moved, id } };
-      }
-      setSaving(false);
-      if (stillHere) {
-        setDirty(true);
-        toast.error(data.error ?? "Save failed");
-      }
-      // Nothing landed: the scenario is still where this save found it.
-      return { ok: false, placed: base };
-    });
-  };
-  const commitScenario = async (
-    tests: string[],
-    close: boolean,
-    status?: Scenario["status"],
-  ): Promise<boolean> => (await saveScenario(tests, close, status))?.ok ?? false;
-
-  /**
-   * A url still sitting in the add field or an open ✎ row rides along with
-   * Propose and Publish — it must never be silently dropped — and one that
-   * can't join the list blocks the save instead
-   * (specs/traceability.feature.md). The ticket-link fields gate the save the
-   * same way: a half-filled link is not written half-done, it blocks with a
-   * message
-   * (specs/external-links/project-management-jira-linear-etc.feature.md). Null
-   * means blocked, with the reason already on screen.
-   */
-  const pendingTests = (): string[] | null => {
-    if (!editing) return null;
-    const link = resolveLinkDraft(linkDraft);
-    if (link.error) {
-      setLinkError(link.error);
-      return null;
-    }
-    // The qTest test case fields gate it the same way
-    // (specs/external-links/qtest-test-cases.feature.md).
-    const qtest = resolveQtestDraft(qtestDraft);
-    if (qtest.error) {
-      setQtestError(qtest.error);
-      return null;
-    }
-    const pending = resolvePendingTests(
-      editing.scenario.tests,
-      testEdit === null ? null : { index: testEdit, ...testEditDraft },
-      { url: testDraft, name: testNameDraft },
-    );
-    if (pending.error) {
-      setTestsError(pending.error);
-      return null;
-    }
-    return pending.tests;
-  };
-
-  /**
-   * Propose (specs/editor/spec-editor.feature.md): the explicit action that
-   * moves the dialog's scenario into the `.feature.md` as [proposed]. Saves
-   * and closes.
-   */
-  const proposeScenario = async () => {
-    if (!editing) return;
-    const tests = pendingTests();
-    if (tests === null) return;
-    const name = savedScenarioName(editing.scenario);
-    const version = draftVersion;
-    if (await commitScenario(tests, true, "proposed")) {
-      toast.success(`Proposed "${name}" v${version} — publish it from its card, or press Publish All.`);
-    }
-  };
-
-  /**
-   * Publish straight from the dialog (specs/editor/spec-editor.feature.md):
-   * the dialog's scenario goes into the feature and that one scenario is
-   * published — marked [published], committed and pushed, exactly like a
-   * card's Publish. The target carries the draft's document id, so a title
-   * retyped since autosave filed it publishes that draft — renamed — rather
-   * than a second scenario beside it. A merge conflict opens the usual
-   * resolution dialog.
-   *
-   * Same placement as `saveScenario`: while a tick is still away, this render's
-   * index and (for a new scenario) its missing document id predate that save.
-   * Placing from them would append a second scenario — or write over the
-   * neighbour a rename re-sorted into the old slot — and then publish that.
-   * Through the queue so the publish PUT goes out after the tick, from where
-   * it landed, and so a folder switch can wait for it.
-   */
-  const publishScenario = async () => {
-    // A move, rename-file or delete has sealed this feature's path: a PUT
-    // would mint the retired file again (tests/featurePathRetire.test.tsx).
-    if (featureEditorsSealed.current) return;
-    if (!editing || !feature || !selected) return;
-    const tests = pendingTests();
-    if (tests === null) return;
-    const draft = { ...editing.scenario, tests };
-    const derived = editing.isNew === true;
-    const ahead = autosaveInFlight.current;
-    const known: Placement = { feature, index: editing.index, id: draft.id, insertAt: editing.insertAt };
-    const place = (at: Placement) => placeScenario(draft, at, derived);
-    const shown = place(known);
-    if (!ahead) {
-      setFeature(shown.next);
-      setSelectedScenario(cardOfScenario(shown.next.scenarios, shown.s));
-    }
-    setEditing(null);
-    // Busy from the click, not from when the queue reaches the PUT: the wait
-    // behind a tick would otherwise show nothing and leave Publish enabled.
-    setPublishing(scenarioKey(shown.s));
-    const file = selected;
-    await scenarioSaveQueue.current.run(async () => {
-      const base = ahead ? await ahead : known;
-      // Sealed while it waited: the path is retired, so nothing goes out.
-      if (featureEditorsSealed.current) {
-        setPublishing(null);
-        return;
-      }
-      const { s, next } = place(base);
-      if (ahead && selectedRef.current === file) {
-        setFeature(next);
-        setSelectedScenario(cardOfScenario(next.scenarios, s));
-      }
-      await publish(scenarioTarget(s), next, file);
-    });
-  };
-
-  /**
-   * One autosave tick (specs/editor/editor-autosave.feature.md "Autosave
-   * Triggered at Defined Interval"): save what the editor holds, unless it
-   * holds nothing new. A url still being typed into the test-link fields stays
-   * out — those join the scenario when the user adds them, or when the pane
-   * closes.
-   */
-  const autosaveScenario = async () => {
-    if (featureEditorsSealed.current || featureEditorsRetiring.current) return;
-    if (!editing || !feature || !selected) return;
-    if (autosaveInFlight.current) return; // the previous tick is still saving
-    if (deletingScenario.current) return; // a delete is being confirmed or sent
-    // The name is still being typed: saving now would put a half-typed name
-    // on the draft (specs/editor/editor-autosave.feature.md "Autosave Waits
-    // While the Name Is Being Typed"). The tick after focus moves on saves it.
-    if (namingInProgress(nameFieldRef.current, document.activeElement)) return;
-    // A scenario with no name has nothing to be saved under; the Save button
-    // is disabled for the same reason.
-    if (!editing.scenario.name.trim()) return;
-    // A code fence is still being typed: the body ends inside it, so every
-    // scenario heading after it would read as fenced content and the server
-    // refuses the save rather than drop those scenarios
-    // (specs/editor/editor-autosave.feature.md "Autosave Waits While a Code
-    // Fence Is Open"). The tick after the fence closes saves it.
-    if (unclosedFence(editing.scenario.body) !== null) return;
-    const signature = scenarioSignature(editing.scenario, draftVersion);
-    if (signature === autosaved.current) return;
-    const session = editorSession.current;
-    const before: Placement = {
-      feature,
-      index: editing.index,
-      id: editing.scenario.id,
-      insertAt: editing.insertAt,
-    };
-    const run = saveScenario(editing.scenario.tests, false);
-    if (!run) return;
-    // A save that meets this tick still away (the pane's parting save,
-    // Propose) waits for it and places itself where it landed.
-    const placed = run.then(
-      (r) => r.placed,
-      () => before,
-    );
-    autosaveInFlight.current = placed;
-    try {
-      // Only a landed save may mark the content saved — a failed one is
-      // retried by the next tick, and reported on the banner meanwhile. A
-      // save that lands after the dialog closed belongs to nothing.
-      const { ok } = await run;
-      if (ok && session === editorSession.current) autosaved.current = signature;
-    } finally {
-      if (autosaveInFlight.current === placed) autosaveInFlight.current = null;
-    }
-  };
-
-  // The tick runs off a plain interval, so it fires on the defined cadence
-  // however long the user keeps typing — a timer restarted per keystroke
-  // would never come round while an edit is in flow.
-  const autosaveTick = useRef(autosaveScenario);
-  useEffect(() => {
-    autosaveTick.current = autosaveScenario;
+  const {
+    draftVersion,
+    markSaved,
+    nextVersionFor,
+    proposeScenario,
+    publishScenario,
+    saveScenario,
+  } = useScenarioSave({
+    autosaveInFlight,
+    autosaveSeconds,
+    autosaved,
+    deletingScenario,
+    editingOpen,
+    editorSession,
+    featureEditorsRetiring,
+    featureEditorsSealed,
+    nameFieldRef,
+    publish,
+    saveOnOpen,
+    scenarioSaveQueue,
+    selectedRef,
   });
-  // A scenario added with `+` is in the feature from the moment its pane
-  // opens, even if nothing is ever typed into its body: nothing counts as
-  // saved yet, and one tick goes out right away. Should that tick stand down
-  // (the name field holding the caret, say), the next one — or leaving the
-  // pane — still saves it.
-  useEffect(() => {
-    if (!saveOnOpen.current || !editing) return;
-    saveOnOpen.current = false;
-    autosaved.current = null;
-    void autosaveTick.current();
-  }, [editing]);
-  useEffect(() => {
-    if (!editingOpen) return;
-    const id = setInterval(() => void autosaveTick.current(), autosaveSeconds * 1000);
-    return () => clearInterval(id);
-  }, [editingOpen, autosaveSeconds]);
 
   /**
    * One autosave tick of the home README editor (app-startup.md
@@ -5048,99 +4049,20 @@ export function App() {
     storeSidebarTab(tab);
   };
 
-  /**
-   * Feature description editor (specs/editor/feature-editor.feature.md "Edit
-   * feature descrition"). Opening seeds it with the description on the
-   * feature, which counts as saved; nothing is written until it changes.
-   */
-  const openDescriptionEditor = (file: string, text: string) => {
-    descSaved.current = text;
-    setDescEdit({ file, text });
-  };
-
-  /**
-   * One autosave tick of the description editor: save the feature with the
-   * description it holds, unless that is what the server already has. Same
-   * rules as the README editor — ticks never overlap, only a landed save
-   * counts, a failed one is reported and retried by the next tick. The save
-   * goes through the ordinary feature save, so the scenarios ride along
-   * unchanged and the reload cron commits and pushes it.
-   */
-  const autosaveDescription = async () => {
-    if (featureEditorsSealed.current) return;
-    // `selected` and `feature` come from the closure, not from refs, and that
-    // is what makes leaving a feature safe: React runs an effect's cleanup
-    // before the effect bodies of the same commit, and the assignment that
-    // refreshes `descTick` below has no dep array — so the cleanup tick still
-    // holds the render in which this feature was the selected one. Reading
-    // refs here would see the file the user moved *to* and drop the edit.
-    const edit = descEditRef.current;
-    if (!edit || !feature || edit.file !== selected) return;
-    if (edit.text === descSaved.current) return;
-    const next: Feature = { ...feature, description: edit.text.trim() };
-    const content = serializeFeature(next);
-    await descSaveQueue.current.run(async () => {
-      // A tick queued ahead of this one may already have landed these words.
-      if (edit.text === descSaved.current) return;
-      setSaving(true);
-      try {
-        const res = await fetch(`/api/features/${encodeURIComponent(edit.file)}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content, save: true }),
-        });
-        const data = (await res.json().catch(() => ({}))) as {
-          content?: string;
-          parsed?: Feature;
-          error?: string;
-        };
-        if (res.ok && typeof data.content === "string") {
-          // The editor may have closed, or moved to another feature, while the
-          // save was away: then its result belongs to nothing on screen.
-          if (descEditRef.current?.file === edit.file) descSaved.current = edit.text;
-          if (selectedRef.current === edit.file) {
-            setFeature(
-              featureFromResponse({ content: data.content, parsed: data.parsed }, edit.file),
-            );
-            markSaved();
-          }
-        } else {
-          toast.error(`Description not saved: ${data.error ?? res.statusText} — will retry.`);
-        }
-      } catch (e) {
-        toast.error(`Description not saved: ${(e as Error).message} — will retry.`);
-      } finally {
-        setSaving(false);
-      }
-    });
-  };
-  const descTick = useRef(autosaveDescription);
-  useEffect(() => {
-    descTick.current = autosaveDescription;
+  const {
+    closeDescriptionEditor,
+    descTick,
+    openDescriptionEditor,
+  } = useDescriptionEditor({
+    autosaveSeconds,
+    descEditRef,
+    descSaveQueue,
+    descSaved,
+    featureEditorsRetiring,
+    featureEditorsSealed,
+    markSaved,
+    selectedRef,
   });
-  // Ticks run while the selected feature's description editor is on. Leaving
-  // it — Done, or navigating to another feature or home — saves what was typed
-  // since the last tick, then drops an editor left behind by navigation.
-  const descOpen = descEdit !== null && descEdit.file === selected;
-  useEffect(() => {
-    if (!descOpen) return;
-    const id = setInterval(() => {
-      if (featureEditorsRetiring.current || featureEditorsSealed.current) return;
-      void descTick.current();
-    }, autosaveSeconds * 1000);
-    return () => {
-      clearInterval(id);
-      if (!featureEditorsSealed.current) void descTick.current();
-      if (descEditRef.current && descEditRef.current.file !== selectedRef.current) setDescEdit(null);
-    };
-  }, [descOpen, autosaveSeconds]);
-
-  /** Done: land what the editor holds and show the description rendered. */
-  const closeDescriptionEditor = async () => {
-    await descTick.current();
-    setDescEdit(null);
-  };
-
   // Avatar initials: from the git name when set, else the OS user name
   // (specs/user-info-settings.feature.md).
   const initials = (user?.name || user?.username || "?")
@@ -5740,968 +4662,73 @@ export function App() {
     if (!(await patchSettings({ gitAccess: access }))) setGitAccess(prev);
   };
 
-  // The dialog's "Automated tests" list editor (specs/traceability.feature.md);
-  // the rules for what may go in a row live in ./testlinks.
-  const setTests = (tests: string[]) => {
-    if (!editing) return;
-    setEditing({ ...editing, scenario: { ...editing.scenario, tests } });
-  };
-
-  // The dialog's "Ticket link" fields (specs/external-links/project-
-  // management-jira-linear-etc.feature.md): typed into a draft; the moment
-  // the fields make a whole link — or are all cleared — the scenario follows,
-  // so autosave and closing carry the link like any other edit. A half-filled
-  // draft stays in the fields until an explicit save, which it blocks.
-  const changeLinkDraft = (draft: LinkDraft) => {
-    setLinkDraft(draft);
-    if (!editing) return;
-    const resolved = resolveLinkDraft(draft);
-    if (resolved.error) return;
-    const { link: _previous, ...rest } = editing.scenario;
-    setEditing({ ...editing, scenario: resolved.link ? { ...rest, link: resolved.link } : rest });
-  };
-
-  // The dialog's "qTest test case" fields
-  // (specs/external-links/qtest-test-cases.feature.md), following the
-  // scenario the same way as the ticket link's.
-  const changeQtestDraft = (draft: LinkDraft) => {
-    setQtestDraft(draft);
-    if (!editing) return;
-    const resolved = resolveQtestDraft(draft);
-    if (resolved.error) return;
-    const { qtest: _previous, ...rest } = editing.scenario;
-    setEditing({ ...editing, scenario: resolved.link ? { ...rest, qtest: resolved.link } : rest });
-  };
-
-  /**
-   * Save the feature's own ticket link (specs/external-links/project-
-   * management-jira-linear-etc.feature.md "Add link to feature"): the feature
-   * is saved like any scenario edit — locally, marked [proposed] where
-   * applicable, pushed by the reload cron — with the link set or cleared.
-   */
-  /**
-   * The feature's own flags (specs/app/feature-flags.feature.md), saved on
-   * the spot from the header's popover — written into the `.feature.md` like
-   * the ticket link.
-   */
-  const saveFeatureFlags = async (flags: FeatureFlag[]) => {
-    if (!feature || !selected) return;
-    const { flags: _previous, ...rest } = feature;
-    const next: Feature = flags.length > 0 ? { ...rest, flags } : rest;
-    setFeature(next);
-    try {
-      const res = await fetch(`/api/features/${encodeURIComponent(selected)}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: serializeFeature(next), save: true }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setFeature(featureFromResponse(data, selected));
-        setDirty(false);
-        markSaved();
-      } else {
-        setFeature(feature);
-        toast.error(data.error ?? "Could not save the feature flags");
-      }
-    } catch {
-      setFeature(feature);
-      toast.error("Could not save the feature flags — is the server running?");
-    }
-  };
-
-  /**
-   * The feature's own custom attributes (specs/app/custom-attributes.feature.md),
-   * saved on the spot from the header's popover like the flags.
-   */
-  const saveFeatureAttributes = async (attributes: SpecAttribute[]) => {
-    if (!feature || !selected) return;
-    const { attributes: _previous, ...rest } = feature;
-    const next: Feature = attributes.length > 0 ? { ...rest, attributes } : rest;
-    setFeature(next);
-    try {
-      const res = await fetch(`/api/features/${encodeURIComponent(selected)}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: serializeFeature(next), save: true }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setFeature(featureFromResponse(data, selected));
-        setDirty(false);
-        markSaved();
-      } else {
-        setFeature(feature);
-        toast.error(data.error ?? "Could not save the attributes");
-      }
-    } catch {
-      setFeature(feature);
-      toast.error("Could not save the attributes — is the server running?");
-    }
-  };
-
-  /**
-   * Set the feature's tickets (specs/external-links/project-management-jira-
-   * linear-etc.feature.md "Several tickets on a feature"): the whole list to
-   * the tickets route, which saves it from the server's own view of the
-   * feature — the markdown changes with it when links are published, so it
-   * is a save, not a document-only write like the pull requests'.
-   */
-  const saveFeatureTickets = async (links: TicketLink[]) => {
-    if (!feature || !selected) return;
-    const before = feature.links ?? [];
-    const added = links.find((l) => !before.includes(l));
-    const removed = before.find((l) => !links.includes(l));
-    setFeatureTicketsSaving(true);
-    setFeatureTicketsError(null);
-    try {
-      const res = await fetch(`/api/features/${encodeURIComponent(selected)}/tickets`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ links }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setFeature(featureFromResponse(data, selected));
-        setDirty(false);
-        toast.success(
-          added
-            ? `Linked ${externalLinkLabel(added)} — ${data.message}.`
-            : removed
-              ? `Removed ${externalLinkLabel(removed)} — ${data.message}.`
-              : `Tickets saved — ${data.message}.`,
-        );
-        markSaved();
-      } else {
-        setFeatureTicketsError(data.error ?? "Could not save the tickets");
-      }
-    } catch {
-      setFeatureTicketsError("Could not save the tickets — is the server running?");
-    } finally {
-      setFeatureTicketsSaving(false);
-    }
-  };
-
-  /**
-   * Save the feature's own qTest test case link
-   * (specs/external-links/qtest-test-cases.feature.md), the way
-   * saveFeatureLink saves its ticket.
-   */
-  const saveFeatureQtest = async () => {
-    if (!feature || !selected || featureQtestDraft === null) return;
-    const resolved = resolveQtestDraft(featureQtestDraft);
-    if (resolved.error) {
-      setFeatureQtestError(resolved.error);
-      return;
-    }
-    const { qtest: _previous, ...rest } = feature;
-    const next: Feature = resolved.link ? { ...rest, qtest: resolved.link } : rest;
-    setFeatureQtestSaving(true);
-    try {
-      const res = await fetch(`/api/features/${encodeURIComponent(selected)}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: serializeFeature(next), save: true }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setFeature(featureFromResponse(data, selected));
-        setDirty(false);
-        setFeatureQtestDraft(null);
-        toast.success(
-          resolved.link
-            ? `Linked ${externalLinkLabel(resolved.link)} — ${data.message}.`
-            : `Test case link removed — ${data.message}.`,
-        );
-        markSaved();
-      } else {
-        setFeatureQtestError(data.error ?? "Could not save the test case link");
-      }
-    } catch {
-      setFeatureQtestError("Could not save the test case link — is the server running?");
-    } finally {
-      setFeatureQtestSaving(false);
-    }
-  };
-
-  /**
-   * Save the pull requests linked to the feature (`target` null) or to one
-   * scenario (specs/external-links/related-pull-requests.feature.md): a
-   * document-only write through its own route — the links never ride in
-   * the markdown a save sends — answered with the editor's view, which the
-   * page and an open editor pane follow. Nothing to autosave: every add and
-   * remove is saved on the spot.
-   */
-  const savePullRequests = async (target: ScenarioTarget | null, prs: PullRequestLink[]) => {
-    if (!selected) return;
-    const file = selected;
-    try {
-      const res = await fetch(`/api/features/${encodeURIComponent(file)}/pull-requests`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scenario: target, prs }),
-      });
-      const data = await res.json();
-      if (selectedRef.current !== file) return;
-      if (res.ok) {
-        setFeature(featureFromResponse(data, file));
-        if (target) {
-          setEditing((prev) =>
-            prev === null || prev.scenario.id !== target.id
-              ? prev
-              : { ...prev, scenario: { ...prev.scenario, prs } },
-          );
-        }
-        markSaved();
-      } else {
-        toast.error(data.error ?? "Could not save the pull requests");
-      }
-    } catch {
-      toast.error("Could not save the pull requests — is the server running?");
-    }
-  };
-
-  /**
-   * Save the Aha! or Figma links of the feature (`target` null) or of one
-   * scenario (specs/external-links/aha-and-figma-links.feature.md): a
-   * document-only write through its own route, like the pull requests'.
-   */
-  const saveResourceLinks = async (
-    target: ScenarioTarget | null,
-    kind: ResourceLinkKind,
-    links: ResourceLink[],
-  ) => {
-    if (!selected) return;
-    const file = selected;
-    const { name } = RESOURCE_LINK_TOOLS[kind];
-    try {
-      const res = await fetch(`/api/features/${encodeURIComponent(file)}/links/${kind}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scenario: target, links }),
-      });
-      const data = await res.json();
-      if (selectedRef.current !== file) return;
-      if (res.ok) {
-        setFeature(featureFromResponse(data, file));
-        if (target) {
-          setEditing((prev) =>
-            prev === null || prev.scenario.id !== target.id
-              ? prev
-              : { ...prev, scenario: { ...prev.scenario, [kind]: links } },
-          );
-        }
-        markSaved();
-      } else {
-        toast.error(data.error ?? `Could not save the ${name} links`);
-      }
-    } catch {
-      toast.error(`Could not save the ${name} links — is the server running?`);
-    }
-  };
-
-  /**
-   * Follow a files route's answer (specs/editor/store-associated-files
-   * .feature.md): the page and an open editor pane take the scenario's new
-   * list. True when it was saved.
-   */
-  const followScenarioFiles = async (
-    res: Response,
-    file: string,
-    target: ScenarioTarget,
-    failure: string,
-  ): Promise<boolean> => {
-    const data = await res.json();
-    if (selectedRef.current !== file) return res.ok;
-    if (!res.ok) {
-      toast.error(data.error ?? failure);
-      return false;
-    }
-    const next = featureFromResponse(data, file);
-    setFeature(next);
-    const saved = next.scenarios.find((s) =>
-      target.id !== undefined ? s.id === target.id : s.name === target.name && s.version === target.version,
-    );
-    setEditing((prev) =>
-      prev === null || prev.scenario.id !== target.id
-        ? prev
-        : { ...prev, scenario: { ...prev.scenario, files: saved?.files ?? [] } },
-    );
-    markSaved();
-    return true;
-  };
-
-  /**
-   * Upload files chosen for a scenario, one request each: the bytes are
-   * stored in the data repo and the scenario lists them by name. A chosen
-   * file named like one already listed replaces its contents — after a
-   * confirm, unless the Replace button is what chose it (`replacing`).
-   */
-  const uploadScenarioFiles = async (
-    target: ScenarioTarget | null,
-    listed: ScenarioFile[],
-    chosen: File[],
-    replacing?: string,
-  ) => {
-    if (!selected || !target) return;
-    const file = selected;
-    if (replacing === undefined) {
-      const clashes = chosen.filter((c) => listed.some((f) => f.name === c.name)).map((c) => c.name);
-      if (clashes.length > 0) {
-        const ok = await confirm({
-          title: clashes.length === 1 ? `Replace "${clashes[0]}"?` : `Replace ${clashes.length} files?`,
-          body: `This scenario already has ${clashes.map((n) => `"${n}"`).join(", ")}. The upload replaces the contents.`,
-          confirmLabel: "Replace",
-        });
-        if (!ok) return;
-      }
-    }
-    for (const one of chosen) {
-      const form = new FormData();
-      form.append("file", one);
-      form.append("scenario", JSON.stringify(target));
-      if (replacing !== undefined) form.append("name", replacing);
-      try {
-        const res = await fetch(`/api/features/${encodeURIComponent(file)}/scenario-files`, {
-          method: "POST",
-          body: form,
-        });
-        const ok = await followScenarioFiles(res, file, target, `Could not upload ${one.name}`);
-        if (!ok) return;
-      } catch {
-        toast.error(`Could not upload ${one.name} — is the server running?`);
-        return;
-      }
-    }
-  };
-
-  /** Save a scenario's file list after a rename or a removal. */
-  const saveScenarioFileList = async (target: ScenarioTarget | null, files: ScenarioFile[]) => {
-    if (!selected || !target) return;
-    const file = selected;
-    try {
-      const res = await fetch(`/api/features/${encodeURIComponent(file)}/scenario-files`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scenario: target, files }),
-      });
-      await followScenarioFiles(res, file, target, "Could not save the files");
-    } catch {
-      toast.error("Could not save the files — is the server running?");
-    }
-  };
-
-  /**
-   * The project members the "Assigned" dropdown offers: the data repo's
-   * project-settings.yaml (src/server/members.ts), plus whoever the feature
-   * is assigned to when that name is no longer on the list — a member who
-   * left the project must still show, or opening the feature would silently
-   * look unassigned.
-   */
-  const assignableMembers = (): ProjectMember[] => {
-    const assigned = feature?.assigned;
-    if (!assigned || members.some((m) => m.name === assigned)) return members;
-    return [...members, { name: assigned }];
-  };
-
-  /**
-   * Assign the feature to a project member, or to nobody (the empty choice).
-   * Saved like the feature's ticket link: locally, right away, pushed by the
-   * reload cron — the name lands in the file's `**Assigned:**` line.
-   */
-  const saveAssigned = async (name: string) => {
-    if (!feature || !selected) return;
-    const assigned = name.trim();
-    if ((feature.assigned ?? "") === assigned) return;
-    const { assigned: _previous, ...rest } = feature;
-    const next: Feature = assigned ? { ...rest, assigned } : rest;
-    setAssignedSaving(true);
-    try {
-      const res = await fetch(`/api/features/${encodeURIComponent(selected)}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: serializeFeature(next), save: true }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setFeature(featureFromResponse(data, selected));
-        setDirty(false);
-        toast.success(
-          assigned ? `Assigned to ${assigned} — ${data.message}.` : `Assignment cleared — ${data.message}.`,
-          { action: { label: "Undo", run: () => void saveAssigned(_previous ?? "") } },
-        );
-        markSaved();
-      } else {
-        toast.error(data.error ?? "Could not save the assignment");
-      }
-    } catch {
-      toast.error("Could not save the assignment — is the server running?");
-    } finally {
-      setAssignedSaving(false);
-    }
-  };
-
-  /**
-   * Fill a Name field from the code on GitHub (specs/external-links/
-   * test-traceability.feature.md "the test name is read from the code on
-   * GitHub"): the latest lookup wins, and every way of finding nothing —
-   * a private repository, a language the server doesn't read, no test near
-   * the line — becomes a hint under the field while the link stays.
-   */
-  const lookupTestName = (url: string, apply: (name: string) => void) => {
-    const id = ++testLookup.current;
-    setTestNameHint("Reading the test name from GitHub…");
-    void (async () => {
-      let name: string | null = null;
-      let reason = "Could not read the test name — is the server running?";
-      try {
-        const res = await fetch(`/api/test-name?url=${encodeURIComponent(url)}`);
-        const data = (await res.json()) as { name?: string | null; reason?: string; error?: string };
-        name = data.name ?? null;
-        reason = data.reason ?? data.error ?? reason;
-      } catch {
-        // keep the generic reason
-      }
-      if (id !== testLookup.current) return;
-      if (name) {
-        apply(name);
-        setTestNameHint(null);
-      } else {
-        setTestNameHint(reason);
-      }
-    })();
-  };
-
-  // A url with a #L anchor typed into the add field is looked up a moment
-  // after typing stops; a name already typed by hand is left alone.
-  useEffect(() => {
-    if (!editing) return;
-    const url = testDraft.trim();
-    if (!url || testLinkProblem(editing.scenario.tests, null, { url, name: "" }) !== null) {
-      // Nothing to look up: a hint from an earlier url no longer applies,
-      // and a GitHub url still missing its #L anchor says so right away.
-      testLookup.current++;
-      setTestNameHint(testLinkHint(url));
-      return;
-    }
-    const timer = setTimeout(
-      () => lookupTestName(url, (name) => setTestNameDraft((current) => (current.trim() ? current : name))),
-      400,
-    );
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [testDraft]);
-
-  // The same for an ✎ row whose url was changed: the name it opened with
-  // belongs to the old url, so it is replaced; one typed since is kept.
-  useEffect(() => {
-    if (!editing || testEdit === null) return;
-    const url = testEditDraft.url.trim();
-    if (url === testEditOpened.current.url) return;
-    if (testLinkProblem(editing.scenario.tests, testEdit, { url, name: "" }) !== null) {
-      testLookup.current++;
-      setTestNameHint(testLinkHint(url));
-      return;
-    }
-    const timer = setTimeout(
-      () =>
-        lookupTestName(url, (name) =>
-          setTestEditDraft((current) => {
-            const typed = current.name.trim() && current.name !== testEditOpened.current.name;
-            return typed ? current : { ...current, name };
-          }),
-        ),
-      400,
-    );
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [testEditDraft.url, testEdit]);
-
-  /** Forget a lookup still in flight, so it cannot land in the next row's fields. */
-  const cancelTestLookup = () => {
-    testLookup.current++;
-    setTestNameHint(null);
-  };
-
-  const addTest = () => {
-    const draft = { url: testDraft, name: testNameDraft };
-    if (!editing || !canSetTestLink(editing.scenario.tests, null, draft)) return;
-    setTests(addTestLink(editing.scenario.tests, draft));
-    setTestDraft("");
-    setTestNameDraft("");
-    cancelTestLookup();
-  };
-
-  /** Open a row for in-place editing, seeded with the url and name it holds. */
-  const startTestEdit = (index: number) => {
-    if (!editing) return;
-    const draft = testDraftOf(editing.scenario.tests[index] ?? "");
-    testEditOpened.current = draft;
-    setTestEdit(index);
-    setTestEditDraft(draft);
-    cancelTestLookup();
-  };
-
-  const commitTestEdit = () => {
-    if (!editing || testEdit === null) return;
-    if (!canSetTestLink(editing.scenario.tests, testEdit, testEditDraft)) return;
-    setTests(updateTestLink(editing.scenario.tests, testEdit, testEditDraft));
-    setTestEdit(null);
-    cancelTestLookup();
-  };
-
-  const removeTest = (index: number) => {
-    if (!editing) return;
-    setTests(removeTestLink(editing.scenario.tests, index));
-    // The rows below shift up one, so an open ✎ row would now point elsewhere.
-    setTestEdit(null);
-  };
-
-  /** The clickable test-links table at the end of a scenario
-      (specs/traceability.feature.md). */
-  const testsTable = (tests: string[]) =>
-    tests.length > 0 && (
-      <table className="scenario-tests">
-        <thead>
-          <tr>
-            <th>Automated tests</th>
-          </tr>
-        </thead>
-        <tbody>
-          {tests.map((t) => (
-            <tr key={t}>
-              <td>
-                <a
-                  href={testLinkUrl(t)}
-                  target="_blank"
-                  rel="noreferrer"
-                  title={testLinkUrl(t)}
-                  data-test-link=""
-                >
-                  {testLinkLabel(t)}
-                </a>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    );
-
-  /**
-   * The confirmation a scenario delete asks for. A published scenario gets
-   * the Danger Zone wording and a Confirm button
-   * (specs/editor/spec-editor.feature.md "Delete Published Spec") — it is
-   * published, immutable content, deletable only because Settings says so.
-   */
-  const confirmScenarioDelete = ({ name, version, status }: ScenarioRow) =>
-    confirm(
-      status === "published"
-        ? {
-            title: "Danger Zone!",
-            body: `Confirm that you want to delete a Published spec — "${name}" v${version}.`,
-            confirmLabel: "Confirm",
-          }
-        : {
-            title: "Delete scenario",
-            body:
-              status === "draft"
-                ? `Delete the draft "${name}" v${version}?`
-                : `Delete "${name}" v${version}?`,
-            confirmLabel: "Delete scenario",
-          },
-    );
-
-  /**
-   * Delete the dialog's scenario (specs/ui/ui.feature.md "Scenario editor"),
-   * after a confirmation. Three removals, by what the scenario is: a
-   * [proposed] one is saved out of the feature like any other edit; a draft —
-   * which the `.feature.md` never held, so leaving it out of a save would
-   * remove nothing — is deleted from the Automerge document through its own
-   * route; and a [published] one (offered only while Settings allows it —
-   * specs/editor/spec-editor.feature.md "Delete Published Spec") goes through
-   * its own route too, which commits and pushes the removal right away.
-   */
-  const deleteScenario = async () => {
-    if (!editing || editing.index === null || !feature || !selected) return;
-    const idx = editing.index;
-    // The entry as last saved, not the dialog's unsaved edits: that is what
-    // the delete removes, and its name and version identify it to the server.
-    const saved = feature.scenarios[idx];
-    if (!saved) return;
-    const { name, version } = saved;
-    // From here on autosave stands down: a tick landing while the
-    // confirmation is up could re-sort the feature under `idx`.
-    deletingScenario.current = true;
-    const ok = await confirmScenarioDelete(saved);
-    if (!ok) {
-      deletingScenario.current = false;
-      return;
-    }
-    setEditing(null);
-    await removeScenario(idx, saved, `Deleted scenario "${name}" v${version}.`);
-  };
-
-  /**
-   * Back to proposed (specs/editor/spec-editor.feature.md "Unpublish a Spec"):
-   * the published status chip's one action, offered only while Settings allows
-   * deleting or moving published specs — the route checks the same switch,
-   * and commits and pushes the demotion. The pane stays on the scenario, now
-   * [proposed] and editable again; Publish takes it back.
-   */
-  const unpublishScenario = async () => {
-    if (!editing || editing.index === null || !feature || !selected) return;
-    const saved = feature.scenarios[editing.index];
-    if (!saved || saved.status !== "published") return;
-    const { name, version } = saved;
-    const file = selected;
-    const session = editorSession.current;
-    setUnpublishing(true);
-    try {
-      const res = await fetch(`/api/features/${encodeURIComponent(file)}/unpublish`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scenario: { name, version } }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        toast.error(data.error ?? "Unpublish failed");
-        return;
-      }
-      // Like a delete's answer: the feature's editor view, which goes to the
-      // listing instead when another feature was opened meanwhile.
-      const left = featureFromResponse(data, file);
-      if (selectedRef.current === file) {
-        setFeature(left);
-        setDirty(false);
-      } else {
-        setFeatures((prev) => withOpenScenarios(prev, file, left));
-      }
-      if (session === editorSession.current) {
-        setEditing((e) =>
-          e && e.scenario.name === name && e.scenario.version === version
-            ? { ...e, scenario: { ...e.scenario, status: "proposed" } }
-            : e,
-        );
-      }
-      toast.success(`Moved "${name}" v${version} back to proposed.`);
-      markSaved();
-    } catch {
-      toast.error("Unpublish failed");
-    } finally {
-      setUnpublishing(false);
-    }
-  };
-
-  /**
-   * Take a scenario back out of the open feature, by what it is: a [proposed]
-   * one is saved out of the feature like any other edit; a draft — which the
-   * `.feature.md` never held — is deleted from the Automerge document through
-   * its own route; a [published] one through the delete-published route,
-   * which commits and pushes right away. The first two are local, picked up
-   * by the reload cron. `saved` is the entry as last saved, at `idx` in the
-   * feature.
-   */
-  const removeScenario = async (idx: number, saved: Scenario, done: string) => {
-    if (!feature || !selected) return;
-    const next: Feature = {
-      ...feature,
-      scenarios: feature.scenarios.filter((_, i) => i !== idx),
-    };
-    setFeature(next);
-    // The keyboard highlight can't stay on the removed card; later cards
-    // shift up one index.
-    setSelectedScenario((prev) =>
-      prev === null || prev === idx ? null : prev > idx ? prev - 1 : prev,
-    );
-    const file = selected;
-    const url = `/api/features/${encodeURIComponent(file)}`;
-    // Drafts and published scenarios go through their own routes — a draft
-    // because the file never held it, a published one because both
-    // immutability gates refuse a save without it
-    // (specs/editor/spec-editor.feature.md "Delete Published Spec").
-    const res =
-      saved.status === "draft" || saved.status === "published"
-        ? await fetch(`${url}/${saved.status === "draft" ? "delete-draft" : "delete-published"}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ scenario: { name: saved.name, version: saved.version } }),
-          })
-        : await fetch(url, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ content: serializeFeature(next), save: true }),
-          });
-    const data = await res.json();
-    // Another feature may have been opened while the delete was away — a
-    // published one commits and pushes first — and then the answer is not
-    // the feature on screen: it goes to the listing the tree reads it from.
-    const stillHere = selectedRef.current === file;
-    if (res.ok) {
-      // Both routes answer with the editor's view of the feature — the file
-      // content with the remaining drafts folded back in.
-      const left = featureFromResponse(data, file);
-      if (stillHere) {
-        setFeature(left);
-        setDirty(false);
-      } else {
-        setFeatures((prev) => withOpenScenarios(prev, file, left));
-      }
-      toast.success(done);
-      markSaved();
-    } else {
-      if (stillHere) setDirty(true);
-      toast.error(data.error ?? "Delete failed");
-    }
-  };
-
-  /**
-   * Leave the editor pane (specs/editor/spec-editor.feature.md "Spec editor
-   * pane"): `<`, ESC and every navigation away from the feature leave the
-   * scenario in its autosaved state — leaving discards nothing and reverts
-   * nothing; Delete is the way to take a draft back out. One last save
-   * catches what was typed since the previous tick — the test-link fields
-   * included — so the state left behind is the pane's latest. Started before the editor state clears so it saves
-   * under this editor session; while a tick is still in flight the parting
-   * save follows it, placed where it lands. Returns the save when one went out.
-   */
-  const closeEditor = (): Promise<{ ok: boolean; placed: Placement }> | null => {
-    let saving: Promise<{ ok: boolean; placed: Placement }> | null = null;
-    if (
-      !featureEditorsSealed.current &&
-      editing &&
-      editing.scenario.name.trim() && // no name, nothing to be saved under
-      !deletingScenario.current
-    ) {
-      // A url still sitting in the add field or in an open ✎ row joins the
-      // scenario on the way out, as if Add (or the row's Save) had been
-      // pressed — it is never silently dropped (specs/traceability.feature.md).
-      // A published scenario has no explicit save left to fold it in, so
-      // leaving is the last chance. One that can't join the list has nowhere
-      // to be reported once the pane is gone, so it is left behind rather
-      // than holding the pane open.
-      const tests = resolvePendingTests(
-        editing.scenario.tests,
-        testEdit === null ? null : { index: testEdit, ...testEditDraft },
-        { url: testDraft, name: testNameDraft },
-      ).tests;
-      if (scenarioSignature({ ...editing.scenario, tests }, draftVersion) !== autosaved.current) {
-        saving = saveScenario(tests, false);
-      }
-    }
-    setEditing(null);
-    return saving;
-  };
-
-  /**
-   * Whether the open pane can be followed by a new scenario: its scenario
-   * has a place in the feature, or at least a name to be saved under. A
-   * brand-new unnamed scenario has neither, so nothing could come after it.
-   */
-  const canAddAfter =
-    editing !== null && (editing.index !== null || editing.scenario.name.trim() !== "");
-
-  /**
-   * New scenario after the open one (specs/editor/spec-editor.feature.md
-   * "Spec editor pane"): the pane's `+` and `c`. The pane saves on the way
-   * out, as ESC and the arrows do, and the new draft opens right after where
-   * that save landed the scenario — so S3's successor is S4, whatever a
-   * rename re-sorted meanwhile.
-   */
-  const newScenarioAfterCurrent = async () => {
-    if (!editing || !feature || !selected || !canAddAfter || publishing !== null) return;
-    const file = selected;
-    const current = { name: editing.scenario.name, version: draftVersion };
-    const id = editing.scenario.id;
-    const fallback =
-      editing.index !== null ? editing.index + 1 : (editing.insertAt ?? feature.scenarios.length);
-    const name = await prompt({
-      title: "New scenario",
-      placeholder: "Scenario name",
-      confirmLabel: "Create",
-    });
-    if (!name || !cleanLine(name)) return;
-    // The prompt was modal, but autosave may have ticked meanwhile: close
-    // the pane as it stands now, and wait for every save ahead of the new
-    // scenario to land before placing it.
-    const ahead = autosaveInFlight.current;
-    const saving = editorRef.current.close();
-    const placed = saving === null ? null : ((await saving)?.placed ?? null);
-    await ahead;
-    await scenarioSaveQueue.current.idle();
-    if (selectedRef.current !== file || featureEditorsSealed.current) return;
-    const scenarios = placed?.feature.scenarios ?? feature.scenarios;
-    saveOnOpen.current = true;
-    setEditing(newScenarioDraft(name, insertAfterScenario(scenarios, current, id, fallback)));
-  };
-
-  /**
-   * `<` and ESC (specs/editor/spec-editor.feature.md "Spec editor pane"):
-   * back to the feature, landing on the scenario's card — highlighted and
-   * scrolled into view. The card is found by identity in the feature as the
-   * last save is writing it (the same placement commitScenario makes), or as
-   * it stands when nothing needed saving; a new scenario that was never
-   * saved has no card, so nothing is highlighted.
-   */
-  const backToFeature = () => {
-    if (!editing || !feature) {
-      closeEditor();
-      return;
-    }
-    const s = { ...editing.scenario, version: draftVersion };
-    const at = editing.index;
-    const saved = closeEditor() !== null;
-    // A new scenario lands where the pane was told to put it (a new
-    // version, "New scenario below", the pane's `+`), not at the end.
-    const landed = saved ? withScenario(feature, at, s, editing.insertAt) : feature;
-    setSelectedScenario(cardOfScenario(landed.scenarios, s));
-  };
-
-  // Before a move, rename-file or delete: what the scenario and description
-  // editors hold lands on the current path, then `seal` refuses every later
-  // write to it — the order switchRepo uses, through the same queues.
-  const flushFeatureEditors = async () => {
-    if (featureEditorsSealed.current) return;
-    featureEditorsRetiring.current = true;
-    await closeEditor();
-    await scenarioSaveQueue.current.idle();
-    await descTick.current();
-    await descSaveQueue.current.idle();
-  };
-  const sealFeatureEditors = () => {
-    featureEditorsSealed.current = true;
-    featureEditorsRetiring.current = true;
-    editorSession.current += 1;
-    setEditing(null);
-    setDescEdit(null);
-  };
-  const unsealFeatureEditors = () => {
-    featureEditorsSealed.current = false;
-    featureEditorsRetiring.current = false;
-  };
-  // ESC and the navigation paths run whichever close/back is current, from
-  // listeners and callbacks bound in earlier renders.
-  useEffect(() => {
-    editorRef.current = {
-      close: closeEditor,
-      back: backToFeature,
-      flush: flushFeatureEditors,
-      seal: sealFeatureEditors,
-    };
+  const {
+    assignableMembers,
+    changeLinkDraft,
+    changeQtestDraft,
+    saveAssigned,
+    saveFeatureAttributes,
+    saveFeatureFlags,
+    saveFeatureQtest,
+    saveFeatureTickets,
+    savePullRequests,
+    saveResourceLinks,
+    saveScenarioFileList,
+    setTests,
+    uploadScenarioFiles,
+  } = useFeatureFields({
+    confirm,
+    markSaved,
+    members,
+    selectedRef,
   });
 
-  /**
-   * Move the scenario at `i` one place up or down (specs/ui/ui.feature.md
-   * "number scenarios") and save the feature in its new order — a save like
-   * any other, through the queue so it goes out after a tick already away.
-   * The highlight follows the scenario. Not while the editor pane is open:
-   * its index into the feature would go stale under it.
-   */
-  const reorderScenario = (i: number, delta: -1 | 1) => moveScenarioTo(i, i + delta);
+  const {
+    addTest,
+    cancelTestLookup,
+    commitTestEdit,
+    removeTest,
+    startTestEdit,
+    testsTable,
+  } = useTestLinks({
+    setTests,
+    testEditOpened,
+    testLookup,
+  });
 
-  /**
-   * Move the open feature's scenario at `i` to `to` — one place for Move up
-   * / Move down, anywhere for a drop in the sidebar outline — and save it.
-   */
-  const moveScenarioTo = async (i: number, to: number) => {
-    if (!feature || !selected || editing !== null || featureEditorsSealed.current) return;
-    if (to < 0 || to >= feature.scenarios.length || to === i) return;
-    const before = feature;
-    const next = withScenarioMoved(feature, i, to);
-    const file = selected;
-    setFeature(next);
-    setSelectedScenario(to);
-    setCardMenu(null);
-    await scenarioSaveQueue.current.run(async () => {
-      try {
-        const res = await fetch(`/api/features/${encodeURIComponent(file)}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content: serializeFeature(next), save: true }),
-        });
-        const data = await res.json();
-        if (selectedRef.current !== file) return;
-        if (res.ok) {
-          setFeature(featureFromResponse(data, file));
-          setDirty(false);
-          markSaved();
-        } else {
-          setFeature(before);
-          setSelectedScenario(i);
-          toast.error(data.error ?? "Could not move the scenario");
-        }
-      } catch {
-        if (selectedRef.current !== file) return;
-        setFeature(before);
-        setSelectedScenario(i);
-        toast.error("Could not move the scenario — is the server running?");
-      }
-    });
-  };
-
-  /**
-   * Flip the polarity of the scenario at `i` from its card
-   * (specs/ui/scenario-polarity.feature.md): bookkeeping around the spec,
-   * so a published scenario takes it too. Saved like a move — the whole
-   * feature, optimistically, rolled back if the save fails.
-   */
-  const toggleScenarioPolarityAt = async (i: number) => {
-    if (!feature || !selected || editing !== null || featureEditorsSealed.current) return;
-    const current = feature.scenarios[i];
-    if (!current) return;
-    const before = feature;
-    const next = withScenarioPolarity(feature, i, !current.negative);
-    const file = selected;
-    setFeature(next);
-    await scenarioSaveQueue.current.run(async () => {
-      try {
-        const res = await fetch(`/api/features/${encodeURIComponent(file)}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content: serializeFeature(next), save: true }),
-        });
-        const data = await res.json();
-        if (selectedRef.current !== file) return;
-        if (res.ok) {
-          setFeature(featureFromResponse(data, file));
-          setDirty(false);
-          markSaved();
-        } else {
-          setFeature(before);
-          toast.error(data.error ?? "Could not change the scenario's polarity");
-        }
-      } catch {
-        if (selectedRef.current !== file) return;
-        setFeature(before);
-        toast.error("Could not change the scenario's polarity — is the server running?");
-      }
-    });
-  };
-
-  /** Draft the next version of a published scenario as a new, editable scenario. */
-  const newVersion = (i: number) => {
-    if (!feature) return;
-    const src = feature.scenarios[i]!;
-    setEditing({
-      index: null,
-      // isNew marks it as new, so the version is derived on save.
-      isNew: true,
-      // Right after the version it continues, where the reader looks for it.
-      insertAt: i + 1,
-      // Draft like any other new scenario, so autosave can't propose the next
-      // version of a published scenario on the user's behalf — and without
-      // the source's document id: this is a new scenario, not that one renamed.
-      // Its files stay the source's (specs/editor/store-associated-files
-      // .feature.md): the new version starts with none.
-      scenario: {
-        ...src,
-        id: undefined,
-        files: undefined,
-        version: nextVersionFor(src.name),
-        status: "draft",
-      },
-    });
-  };
-
+  const {
+    backToFeature,
+    canAddAfter,
+    closeEditor,
+    confirmScenarioDelete,
+    deleteScenario,
+    moveScenarioTo,
+    newScenarioAfterCurrent,
+    newVersion,
+    reorderScenario,
+    toggleScenarioPolarityAt,
+    unpublishScenario,
+    unsealFeatureEditors,
+  } = useScenarioOps({
+    autosaveInFlight,
+    autosaved,
+    confirm,
+    deletingScenario,
+    descSaveQueue,
+    descTick,
+    draftVersion,
+    editorRef,
+    editorSession,
+    featureEditorsRetiring,
+    featureEditorsSealed,
+    markSaved,
+    nextVersionFor,
+    prompt,
+    saveOnOpen,
+    saveScenario,
+    scenarioSaveQueue,
+    selectedRef,
+  });
   const toggleFolder = (path: string) =>
     setCollapsed((prev) => {
       const next = new Set(prev);
@@ -6722,451 +4749,43 @@ export function App() {
       return next;
     });
 
-  /**
-   * A scenario in the sidebar tree (specs/ui/navigation.feature.md "Scenario
-   * navigation"): opens that scenario's page, from the feature page or
-   * straight from another scenario's pane — the whole point, switching
-   * scenarios without going back to the feature view. The same path a deep
-   * link takes, so an open pane autosaves on the way out
-   * (specs/editor/spec-editor.feature.md "Spec editor pane").
-   */
-  const openScenarioRow = (file: string, s: ScenarioRow) => {
-    setSelectedFolder(null);
-    void openFeature(file, {
-      push: true,
-      scenario: { slug: slugify(s.name), version: s.version },
-      pane: true,
-    });
-  };
+  // The scenario as last saved into the feature: what a delete removes, and
+  // what the Draft checkbox is locked against — neither follows the dialog's
+  // unsaved edits.
+  const savedEntry =
+    editing !== null && editing.index !== null ? (feature?.scenarios[editing.index] ?? null) : null;
 
-  /**
-   * Delete from a scenario's menu in the sidebar tree
-   * (specs/ui/navigation.feature.md "Scenario navigation"): the
-   * same removal the editor pane's Delete makes, by what the scenario is,
-   * for any feature in the tree — not only the open one. A pane open on that
-   * very scenario takes the pane's own Delete. A pane open on another
-   * scenario of the same feature is left first, autosaving like any
-   * navigation away, since the removal re-indexes the feature under it.
-   */
-  const deleteTreeScenario = async (file: string, s: ScenarioRow) => {
-    const same = (x: { name: string; version: number }) =>
-      x.name === s.name && x.version === s.version;
-    if (file === selected && savedEntry !== null && same(savedEntry)) {
-      await deleteScenario();
-      return;
-    }
-    if (!(await confirmScenarioDelete(s))) return;
-    if (file === selected && editing) {
-      const ahead = autosaveInFlight.current;
-      await closeEditor();
-      await ahead;
-    }
-    const url = `/api/features/${encodeURIComponent(file)}`;
-    let res: Response;
-    if (s.status === "draft" || s.status === "published") {
-      res = await fetch(`${url}/${s.status === "draft" ? "delete-draft" : "delete-published"}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scenario: { name: s.name, version: s.version } }),
-      });
-    } else {
-      // A [proposed] scenario is saved out of the feature, from the server's
-      // copy: the feature may not be the open one.
-      const got = await fetch(url);
-      if (!got.ok) {
-        toast.error("Delete failed");
-        return;
-      }
-      const current = featureFromResponse(await got.json(), file);
-      const next: Feature = { ...current, scenarios: current.scenarios.filter((x) => !same(x)) };
-      res = await fetch(url, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: serializeFeature(next), save: true }),
-      });
-    }
-    const data = await res.json();
-    if (!res.ok) {
-      toast.error(data.error ?? "Delete failed");
-      return;
-    }
-    // Every route answers with the editor's view of the feature.
-    if (selectedRef.current === file) {
-      setFeature(featureFromResponse(data, file));
-      setSelectedScenario(null);
-      markSaved();
-    }
-    await loadFeatures();
-    toast.success(`Deleted scenario "${s.name}" v${s.version}.`);
-  };
-
-  /**
-   * The rows picked in the sidebar tree (specs/ui/navigation.feature.md
-   * "delete several scenarios at once"), in tree order, each with its
-   * feature. Picks can outlive their rows — a scenario deleted or renamed
-   * elsewhere — so only rows still listed come back.
-   */
-  const pickedTreeScenarios = (): { file: string; row: ScenarioRow }[] => {
-    if (treePicks.size === 0) return [];
-    const out: { file: string; row: ScenarioRow }[] = [];
-    for (const f of features) {
-      for (const row of scenarioRows(f, selected, feature)) {
-        if (treePicks.has(treeScenarioKey(f.fileName, row))) out.push({ file: f.fileName, row });
-      }
-    }
-    return out;
-  };
-
-  /** The open scenario's tree key, when its page is open. */
-  const openTreeKey = (): string | null =>
-    selected && paneScenario ? treeScenarioKey(selected, paneScenario) : null;
-
-  /**
-   * ⌘/Ctrl-click (toggle) or Shift-click (range) on a scenario row of the
-   * tree. The first pick takes the open scenario along, as a desktop list's
-   * first ⌘-click keeps the row already highlighted; a range runs from the
-   * anchor — the last row toggled, else the open one — over the rows as the
-   * tree shows them, across features too. `add` keeps the picks a range
-   * would otherwise replace (⌘⇧-click).
-   */
-  const pickTreeScenario = (key: string, mode: "toggle" | "range", add = false) => {
-    const open = openTreeKey();
-    if (mode === "toggle") {
-      setTreePicks((prev) => {
-        const next = new Set(prev);
-        if (next.size === 0 && open !== null && open !== key) next.add(open);
-        if (next.has(key)) next.delete(key);
-        else next.add(key);
-        return next;
-      });
-      treePickAnchor.current = key;
-      return;
-    }
-    const keys = [...(treeRef.current?.querySelectorAll<HTMLElement>("[data-scenario]") ?? [])].map(
-      (el) => el.dataset.scenario!,
-    );
-    let from = keys.indexOf(treePickAnchor.current ?? open ?? key);
-    const to = keys.indexOf(key);
-    if (to === -1) return;
-    if (from === -1) from = to;
-    if (treePickAnchor.current === null) treePickAnchor.current = keys[from]!;
-    const span = keys.slice(Math.min(from, to), Math.max(from, to) + 1);
-    setTreePicks((prev) => new Set([...(add ? prev : []), ...span]));
-  };
-
-  const clearTreePicks = () => {
-    setTreePicks((prev) => (prev.size === 0 ? prev : new Set()));
-    treePickAnchor.current = null;
-  };
-
-  /**
-   * Delete every scenario picked in the tree (specs/ui/navigation.feature.md
-   * "delete several scenarios at once") after one confirmation — each the
-   * way its own Delete removes it, one request per feature. Published ones
-   * go only while Settings allows it; with the switch off they stay, and the
-   * confirmation says so. One pick is just that row's own Delete.
-   */
-  const deletePickedScenarios = async () => {
-    // A ⋯ menu left open on a row about to go would stay open with no row
-    // to close it from, holding every shortcut — Esc included — quiet.
-    setTreeMenu(null);
-    const picked = pickedTreeScenarios();
-    if (picked.length === 0) {
-      clearTreePicks();
-      return;
-    }
-    if (picked.length === 1) {
-      clearTreePicks();
-      await deleteTreeScenario(picked[0]!.file, picked[0]!.row);
-      return;
-    }
-    const going = picked.filter((p) => p.row.status !== "published" || deletePublished);
-    const kept = picked.length - going.length;
-    if (going.length === 0) {
-      toast.error("Published scenarios can't be deleted — deleting them is switched off in Settings.");
-      return;
-    }
-    const published = going.filter((p) => p.row.status === "published").length;
-    const files = new Map<string, ScenarioRow[]>();
-    for (const p of going) files.set(p.file, [...(files.get(p.file) ?? []), p.row]);
-    const n = going.length;
-    const what = `${n} scenario${n === 1 ? "" : "s"}`;
-    const from = files.size > 1 ? ` from ${files.size} features` : "";
-    const body = [
-      published > 0
-        ? `Confirm that you want to delete ${what}${from} — ${published} of them published.`
-        : `Delete ${what}${from}?`,
-      kept > 0
-        ? `${kept} published scenario${kept === 1 ? " stays" : "s stay"} — deleting published specs is switched off in Settings.`
-        : "",
-    ]
-      .filter(Boolean)
-      .join(" ");
-    const ok = await confirm(
-      published > 0
-        ? { title: "Danger Zone!", body, confirmLabel: "Confirm" }
-        : { title: `Delete ${what}`, body, confirmLabel: `Delete ${what}` },
-    );
-    if (!ok) return;
-    // An editor pane open on one of these features is left first, autosaving
-    // like any navigation away: the removal re-indexes the feature under it.
-    if (selected !== null && files.has(selected) && editing) {
-      const ahead = autosaveInFlight.current;
-      await closeEditor();
-      await ahead;
-    }
-    await scenarioSaveQueue.current.idle();
-    let deleted = 0;
-    for (const [file, rows] of files) {
-      let res: Response;
-      try {
-        res = await fetch(`/api/features/${encodeURIComponent(file)}/delete-scenarios`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ scenarios: rows.map(({ name, version }) => ({ name, version })) }),
-        });
-      } catch {
-        toast.error("Delete failed — is the server running?");
-        break;
-      }
-      const data = await res.json();
-      if (!res.ok) {
-        toast.error(data.error ?? "Delete failed");
-        continue;
-      }
-      deleted += rows.length;
-      if (selectedRef.current === file) {
-        setFeature(featureFromResponse(data, file));
-        setSelectedScenario(null);
-        markSaved();
-      }
-    }
-    clearTreePicks();
-    await loadFeatures();
-    if (deleted > 0) toast.success(`Deleted ${deleted} scenario${deleted === 1 ? "" : "s"}.`);
-  };
-
-  /**
-   * Move to… from a scenario's menu in the sidebar tree
-   * (specs/ui/navigation.feature.md "move a scenario to another feature"):
-   * pick another feature, and the server adds the scenario there and takes it
-   * out of this one — whatever it is, as its Delete would. An editor pane open
-   * on either feature is left first, autosaving like any navigation away: its
-   * next save would otherwise write the feature back without the move. A pane
-   * that was on the moved scenario follows it to its new feature.
-   */
-  const moveTreeScenario = async (file: string, s: ScenarioRow) => {
-    const options = features
-      .filter((f) => f.fileName !== file)
-      .map((f) => ({
-        value: f.fileName,
-        label: f.name || titleFromFileName(f.fileName),
-        hint: f.fileName.replace(/^specs\//, ""),
-      }))
-      .sort((a, b) => a.label.localeCompare(b.label));
-    const to = await pick({
-      title: `Move “${s.name}” v${s.version}`,
-      hint:
-        s.status === "published"
-          ? "To another feature — published, so the move is committed and pushed right away."
-          : "To another feature.",
-      placeholder: "Find a feature…",
-      options,
-      empty: options.length === 0 ? "There is no other feature to move it to." : "No feature matches.",
-    });
-    if (to === null) return;
-    await moveScenarioToFeature(file, s, to);
-  };
-
-  /**
-   * Move a scenario out of `file` into the feature `to` — from Move to…, or
-   * dropped there (specs/ui/navigation.feature.md "drag a scenario to another
-   * feature"): last in it, or next to the scenario `at` names. The toast's
-   * Undo moves it back to where it was.
-   */
-  const moveScenarioToFeature = async (
-    file: string,
-    s: { name: string; version: number },
-    to: string,
-    at?: { name: string; version: number; after: boolean },
-  ) => {
-    const following =
-      file === selected &&
-      paneScenario !== null &&
-      paneScenario.name === s.name &&
-      paneScenario.version === s.version;
-    // Its place before the move, for Undo: the open feature knows its drafts
-    // too, the listing only what the file holds.
-    const listed = features.find((f) => f.fileName === file);
-    const back = scenarioPlace(
-      file === selected && feature ? feature.scenarios : (listed?.scenarios ?? []),
-      s,
-    );
-    if ((file === selected || to === selected) && editing) {
-      const ahead = autosaveInFlight.current;
-      await closeEditor();
-      await ahead;
-    }
-    await scenarioSaveQueue.current.idle();
-    let res: Response;
-    try {
-      res = await fetch(`/api/features/${encodeURIComponent(file)}/move-scenario`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scenario: { name: s.name, version: s.version }, to, at }),
-      });
-    } catch {
-      toast.error("Move failed — is the server running?");
-      return;
-    }
-    const data = await res.json();
-    if (!res.ok) {
-      toast.error(data.error ?? "Move failed");
-      return;
-    }
-    if (following) {
-      await openFeature(to, {
-        push: true,
-        scenario: { slug: slugify(s.name), version: s.version },
-        pane: true,
-      });
-    } else if (selectedRef.current === file) {
-      setFeature(featureFromResponse(data, file));
-      setSelectedScenario(null);
-      markSaved();
-    } else if (selectedRef.current === to) {
-      await openFeature(to);
-    }
-    await loadFeatures();
-    const target = features.find((f) => f.fileName === to);
-    // Undo runs whenever it is clicked, so through the latest render's move:
-    // this one's selection and editor pane may be long gone by then.
-    toast.success(`Moved "${s.name}" v${s.version} to ${target?.name || titleFromFileName(to)}.`, {
-      action: { label: "Undo", run: () => void latestMoveScenario.current(to, s, file, back ?? undefined) },
-    });
-  };
-  const latestMoveScenario = useRef(moveScenarioToFeature);
-  latestMoveScenario.current = moveScenarioToFeature;
-
-  /**
-   * Clone from a scenario's menu — its card's on the feature page or its
-   * row's in the sidebar tree (specs/ui/navigation.feature.md "clone a
-   * scenario"): the server puts a draft copy right after it, and the copy
-   * opens in the editor pane, ready to be renamed and changed. An editor
-   * pane open on the feature is left first, autosaving like any navigation
-   * away, so its save goes out before the copy is made rather than after.
-   */
-  const cloneTreeScenario = async (file: string, s: ScenarioRow) => {
-    if (file === selected && editing) {
-      const ahead = autosaveInFlight.current;
-      await closeEditor();
-      await ahead;
-    }
-    await scenarioSaveQueue.current.idle();
-    let res: Response;
-    try {
-      res = await fetch(`/api/features/${encodeURIComponent(file)}/clone-scenario`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scenario: { name: s.name, version: s.version } }),
-      });
-    } catch {
-      toast.error("Clone failed — is the server running?");
-      return;
-    }
-    const data = await res.json();
-    if (!res.ok) {
-      toast.error(data.error ?? "Clone failed");
-      return;
-    }
-    const copy = data.clone as { name: string; version: number };
-    await openFeature(file, {
-      push: true,
-      scenario: { slug: slugify(copy.name), version: copy.version },
-      pane: true,
-    });
-    await loadFeatures();
-    toast.success(`Cloned "${s.name}" v${s.version} as "${copy.name}".`);
-  };
-
-  /**
-   * A scenario dropped on another row of its feature's outline
-   * (specs/ui/navigation.feature.md "reorder scenarios by dragging them in
-   * the tree"): it lands before or after that row and the feature is saved
-   * in its new order, as Move up / Move down save it. The open feature with
-   * no editor pane moves in place. Any other feature moves in the server's
-   * copy, the way the tree's Delete edits it; an editor pane open on that
-   * feature is left first, autosaving like any navigation away, and opens
-   * again on the scenario it showed — its index would go stale under it.
-   */
-  const dropTreeScenario = async (
-    file: string,
-    dragged: { name: string; version: number },
-    target: { name: string; version: number },
-    after: boolean,
-  ) => {
-    if (file === selected && feature && editing === null) {
-      const move = scenarioDrop(feature.scenarios, dragged, target, after);
-      if (move) await moveScenarioTo(move.from, move.to);
-      return;
-    }
-    if (file === selected && featureEditorsSealed.current) return;
-    const reopen = file === selected ? paneScenario : null;
-    if (file === selected && editing) {
-      const ahead = autosaveInFlight.current;
-      await closeEditor();
-      await ahead;
-    }
-    await scenarioSaveQueue.current.idle();
-    const url = `/api/features/${encodeURIComponent(file)}`;
-    const reopenPane = () =>
-      reopen && selectedRef.current === file
-        ? openFeature(file, {
-            scenario: { slug: slugify(reopen.name), version: reopen.version },
-            pane: true,
-          })
-        : undefined;
-    try {
-      const got = await fetch(url);
-      if (!got.ok) throw new Error("Could not move the scenario");
-      const current = featureFromResponse(await got.json(), file);
-      const move = scenarioDrop(current.scenarios, dragged, target, after);
-      if (!move) {
-        await reopenPane();
-        return;
-      }
-      const next = withScenarioMoved(current, move.from, move.to);
-      // The outline shows the new order while the save is out.
-      setFeatures((prev) => withOpenScenarios(prev, file, next));
-      const res = await fetch(url, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: serializeFeature(next), save: true }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Could not move the scenario");
-      if (reopen) await reopenPane();
-      else if (selectedRef.current === file) {
-        setFeature(featureFromResponse(data, file));
-        markSaved();
-      }
-    } catch (e) {
-      toast.error(
-        e instanceof TypeError
-          ? "Could not move the scenario — is the server running?"
-          : (e as Error).message,
-      );
-      await reopenPane();
-    }
-    await loadFeatures();
-  };
-
-  /** A scenario drag is over: dropped, or let go anywhere else. */
-  const endScenarioDrag = () => {
-    setScenarioDrag(null);
-    setScenarioDropAt(null);
-    setScenarioDropInto(null);
-  };
+  const {
+    clearTreePicks,
+    cloneTreeScenario,
+    deletePickedScenarios,
+    deleteTreeScenario,
+    dropTreeScenario,
+    endScenarioDrag,
+    moveScenarioToFeature,
+    moveTreeScenario,
+    openScenarioRow,
+    pickTreeScenario,
+    pickedTreeScenarios,
+  } = useTreeScenarios({
+    autosaveInFlight,
+    closeEditor,
+    confirm,
+    confirmScenarioDelete,
+    deleteScenario,
+    featureEditorsSealed,
+    loadFeatures,
+    markSaved,
+    moveScenarioTo,
+    openFeature,
+    paneScenario,
+    pick,
+    savedEntry,
+    scenarioSaveQueue,
+    selectedRef,
+    treePickAnchor,
+    treeRef,
+  });
 
   /**
    * Folders then features, indented per depth (specs/ui/folders.feature.md).
@@ -8404,11 +6023,6 @@ export function App() {
   }
 
   const editingPublished = editing?.scenario.status === "published";
-  // The scenario as last saved into the feature: what a delete removes, and
-  // what the Draft checkbox is locked against — neither follows the dialog's
-  // unsaved edits.
-  const savedEntry =
-    editing !== null && editing.index !== null ? (feature?.scenarios[editing.index] ?? null) : null;
   // Delete applies to [proposed] scenarios and to drafts
   // (specs/ui/ui.feature.md "Scenario editor") — not to a scenario that isn't
   // part of the feature yet (index === null; a new one autosave has already
