@@ -187,7 +187,7 @@ describe("Specs is a built-in plugin", () => {
     expect(rows.filter((p) => p.enabled).map((p) => p.id)).toEqual(["notebook"]);
   });
 
-  test("switched on, Specs is a tab where the list puts it, and its tree is the sidebar when picked", async () => {
+  test("switched on after the notebook, Specs is still the first tab, and its tree is the sidebar when picked", async () => {
     await setUp({ "notebook/2026-11-20-chose-the-queue.md": ENTRY });
     await open("/");
     await until(() => sidebarText().includes("Chose the queue"), "the notebook's list in the sidebar");
@@ -196,9 +196,7 @@ describe("Specs is a built-in plugin", () => {
     expect((await putState({ plugins: { enabled: ["notebook", "specs"] } })).status).toBe(200);
     await open("/");
     await until(() => sideTabs().length === 2, "the tab bar");
-    expect(sideTabs()).toEqual(["Notebook", "Specs"]);
-    // The notebook is first, so it is the tab shown; Specs' tree follows a click.
-    expect(specsPanel()).toBe(false);
+    expect(sideTabs()).toEqual(["Specs", "Notebook"]);
     await act(async () => host!.querySelector<HTMLElement>("#side-tab-specs")!.click());
     expect(specsPanel()).toBe(true);
     expect(host!.querySelector("#side-tab-specs")!.getAttribute("aria-selected")).toBe("true");

@@ -7,8 +7,10 @@
 // folder with no list yet shows Specs alone.
 //
 // Specs is a plugin on that list like the others ("Specs is a built-in
-// plugin"). Lists stored before it was one never name it, and it was always
-// on, first: such a list is read with Specs put first, and the first write
+// plugin"), except that while it is on its tab is always first: every list
+// is read and written with Specs moved to the front (specsFirst). Lists
+// stored before it was one never name it, and it was always on, first: such
+// a list is read with Specs put first, and the first write
 // puts it into every stored list and marks the file (`plugins.format`), so
 // from then on a list without Specs means Specs is switched off.
 //
@@ -92,9 +94,18 @@ function namesSpecs(state: State): boolean {
   return section(state).format === PROFILE_FORMAT;
 }
 
-/** A stored list as it reads: one from before Specs was a plugin had it on, first. */
+/** A stored list as it reads: one from before Specs was a plugin had it on; Specs, when on, is first. */
 function withSpecs(state: State, list: string[]): string[] {
-  return namesSpecs(state) ? list : dedupe([SPECS_PLUGIN, ...list]);
+  return specsFirst(namesSpecs(state) ? list : [SPECS_PLUGIN, ...list]);
+}
+
+/**
+ * A list with Specs, when it is on, moved to the front — its tab is always
+ * the first ("Specs is a built-in plugin"); the others keep their order.
+ */
+export function specsFirst(enabled: readonly string[]): string[] {
+  const list = dedupe([...enabled]);
+  return list.includes(SPECS_PLUGIN) ? [SPECS_PLUGIN, ...list.filter((id) => id !== SPECS_PLUGIN)] : list;
 }
 
 /**
@@ -256,7 +267,7 @@ export function writeProfile(
 ): void {
   migrateProfile(state, manifests);
   const repo = profileRepo(state);
-  const list = dedupe([...enabled]);
+  const list = specsFirst(enabled);
   // What is written names Specs itself: a list without it has it off.
   if (!repo) {
     state[PROFILE_KEY] = { ...section(state), enabled: list, format: PROFILE_FORMAT };
@@ -298,8 +309,7 @@ export function seedFromData(
   const repo = profileRepo(state);
   if (!repo || dataChecked(state)) return null;
   const add = manifests.filter((m) => withData.includes(m.id) && !enabled.includes(m.id)).map((m) => m.id);
-  let next = [...enabled, ...add];
-  if (add.includes(SPECS_PLUGIN)) next = [SPECS_PLUGIN, ...next.filter((id) => id !== SPECS_PLUGIN)];
+  let next = specsFirst([...enabled, ...add]);
   const others = next.some((id) => id !== SPECS_PLUGIN && withData.includes(id));
   if (!withData.includes(SPECS_PLUGIN) && others) next = next.filter((id) => id !== SPECS_PLUGIN);
   writeProfile(state, next, manifests);
@@ -308,7 +318,7 @@ export function seedFromData(
     ...section(state),
     repos: { ...lists, [repo]: { ...(lists[repo] as object), checked: true } },
   };
-  return dedupe(next);
+  return specsFirst(next);
 }
 
 /** The ids a folder has switched on by itself before (`repos[<folder>].autoEnabled`). */
@@ -337,7 +347,7 @@ export function autoEnablePlugins(
     .filter((m) => m.autoEnable && !enabled.includes(m.id) && !done.includes(m.id))
     .map((m) => m.id);
   if (add.length === 0) return null;
-  const next = [...enabled, ...add];
+  const next = specsFirst([...enabled, ...add]);
   writeProfile(state, next, manifests);
   const lists = repoLists(state);
   state[PROFILE_KEY] = {
@@ -382,10 +392,10 @@ export function legacyFields(
   return fields;
 }
 
-/** A list with an id added at the end (on) or taken out (off). */
+/** A list with an id added at the end (on) or taken out (off) — Specs, on, goes first. */
 export function withPlugin(enabled: readonly string[], id: string, on: boolean): string[] {
   const rest = enabled.filter((x) => x !== id);
-  return on ? [...rest, id] : rest;
+  return specsFirst(on ? [...rest, id] : rest);
 }
 
 /** Whether two lists name the same plugins in the same order. */

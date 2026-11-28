@@ -15,6 +15,7 @@ import {
   legacyFields,
   migrateProfile,
   readProfile,
+  specsFirst,
   withPlugin,
   writeProfile,
 } from "../src/plugins/profile";
@@ -141,6 +142,18 @@ test("a settings file from before plugins is read as the matching profile", () =
   expect(withPlugin(["notebook", "tests"], "notebook", false)).toEqual(["tests"]);
 });
 
+test("Specs, while it is on, is always first in the list", () => {
+  expect(specsFirst(["notebook", "specs", "tests"])).toEqual(["specs", "notebook", "tests"]);
+  expect(specsFirst(["notebook", "tests"])).toEqual(["notebook", "tests"]);
+  // Switched on after others, it still goes first.
+  expect(withPlugin(["notebook", "tests"], "specs", true)).toEqual(["specs", "notebook", "tests"]);
+  // A stored list that puts it later reads, and is written, with it first.
+  const file: Record<string, unknown> = { dataRepo: "/x", plugins: { format: 2, repos: { "/x": { enabled: ["tests", "specs"] } } } };
+  expect(readProfile(file, builtinManifests).enabled).toEqual(["specs", "tests"]);
+  writeProfile(file, ["notebook", "specs"], builtinManifests);
+  expect(file.plugins).toEqual({ format: 2, repos: { "/x": { enabled: ["specs", "notebook"] } } });
+});
+
 test("the profile's order is the tab order, and an id nothing provides is reported", async () => {
   await syncPlugins({ plugins: { format: 2, enabled: ["tests", "acme-jira", "notebook"] } });
   expect(pluginStates().map((p) => [p.id, p.enabled, p.active, p.installed])).toEqual([
@@ -169,11 +182,11 @@ test("the profile's order is the tab order, and an id nothing provides is report
     await syncPlugins({ plugins: { format: 2, enabled: ["notebook", "tests"] } });
     await syncClientPlugins(pluginStates());
     expect(tabs.list().map((t) => t.id)).toEqual(["notebook", "tests"]);
-    // Specs is a tab among them, where the list puts it — and gone when the
-    // list leaves it out ("Specs is a built-in plugin").
+    // Specs is a tab among them, always the first while it is on — and gone
+    // when the list leaves it out ("Specs is a built-in plugin").
     await syncPlugins({ plugins: { format: 2, enabled: ["notebook", "specs", "tests"] } });
     await syncClientPlugins(pluginStates());
-    expect(tabs.list().map((t) => t.id)).toEqual(["notebook", "specs", "tests"]);
+    expect(tabs.list().map((t) => t.id)).toEqual(["specs", "notebook", "tests"]);
     // The tab registered is the plugin's own, under the plugin's id — what
     // the profile lists is what App looks the tab up by.
     expect(tabs.get(SPECS_TAB)).toBe(specsTab as TabPlugin);

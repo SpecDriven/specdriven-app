@@ -15,6 +15,7 @@ import { useState } from "react";
 import { ChevronDown, ChevronUp, Settings } from "lucide-react";
 import type { PluginStatus } from "../plugins/client/loader";
 import type { MarketplaceRef } from "../plugins/marketplace";
+import { SPECS_PLUGIN } from "../plugins/profile";
 import { AppPageLayout, PageSection } from "./AppPage";
 import type { ConfirmOptions, PromptOptions } from "./ModalPrompts";
 import { PluginMarketplace, switchPluginVersion } from "./PluginMarketplace";
@@ -74,6 +75,9 @@ export function PluginsPage(props: PluginsPageProps) {
     }
   };
   const on = plugins.filter((p) => p.enabled);
+  // Specs, when on, is always first ("Specs is a built-in plugin"): it has
+  // no arrows, and nothing moves above it.
+  const top = on[0]?.id === SPECS_PLUGIN ? 1 : 0;
   const off = plugins.filter((p) => !p.enabled);
 
   const sections = [
@@ -151,14 +155,14 @@ export function PluginsPage(props: PluginsPageProps) {
             </span>
           )}
         </span>
-        {rank !== null && installed && (
+        {rank !== null && installed && plugin.id !== SPECS_PLUGIN && (
           <span className="plugin-row-order">
             <button
               type="button"
               className="plugin-row-move"
               aria-label={`Move ${name} up`}
               title="Move up"
-              disabled={rank === 0}
+              disabled={rank <= top}
               onClick={() => void props.move(plugin.id, -1)}
             >
               <ChevronUp size={14} aria-hidden="true" />
@@ -242,7 +246,7 @@ export function PluginsPage(props: PluginsPageProps) {
         <PageSection
           id="plugins-off"
           title="Switched off"
-          hint="Switch one on and its tab goes last in the sidebar."
+          hint="Switch one on and its tab goes last in the sidebar — Specs, first."
           className="settings-plugins"
         >
           {off.map((p) => row(p, null))}

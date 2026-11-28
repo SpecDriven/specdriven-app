@@ -103,6 +103,7 @@ import { ImagesPage } from "./ImagesPage";
 import { WhatsNewPage, hasUnseenNotes, markNotesSeen } from "./WhatsNewPage";
 import { UpdatesPage } from "./UpdatesPage";
 import type { MarketplaceRef } from "../plugins/marketplace";
+import { specsFirst } from "../plugins/profile";
 import type { PromptOptions } from "./ModalPrompts";
 import { StartSessionDialog, aiTabState, hostedSessionPick } from "./StartSessionDialog";
 import { pomodoro, titlePrefix, usePomodoro } from "./pomodoro";
@@ -3920,7 +3921,9 @@ export function App() {
   // patchSettings: a tab appears, goes or moves, and an open view of a
   // plugin now off leaves the pane. The data in the repo is left alone.
   const enabledPluginIds = () => plugins.filter((p) => p.enabled).map((p) => p.id);
-  const setProfile = async (enabled: string[]) => {
+  const setProfile = async (asked: string[]) => {
+    // Specs, when on, is always first, as the server stores it.
+    const enabled = specsFirst(asked);
     const previous = plugins;
     // Optimistic, like every switch: the rows re-order at once, and snap
     // back if the server refuses.

@@ -274,9 +274,10 @@ test("Specs is listed first as a built-in plugin, and switching it off holds acr
   await applyStartupState();
   expect(await enabledIds()).toEqual(["notebook"]);
 
-  // On again, after the notebook: the order is the list's.
+  // On again, after the notebook: Specs still goes first, and is stored so.
   await put({ plugins: { enabled: ["notebook", "specs"] } });
-  expect(await enabledIds()).toEqual(["notebook", "specs"]);
+  expect(await enabledIds()).toEqual(["specs", "notebook"]);
+  expect((await settingsFile()).plugins).toMatchObject({ repos: { [a]: { enabled: ["specs", "notebook"] } } });
 });
 
 test("a list from before Specs was a plugin reads with Specs first", () => {
