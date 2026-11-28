@@ -24,3 +24,6 @@ export function createPromiseQueue(): {
     },
   };
 }
+
+/** A queue as createPromiseQueue makes it. */
+export type PromiseQueue = ReturnType<typeof createPromiseQueue>;

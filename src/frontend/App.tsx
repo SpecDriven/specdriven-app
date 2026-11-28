@@ -403,6 +403,7 @@ import {
   setSelected,
   setSelectedScenario,
   useOpenFeature,
+  type OpenOptions,
 } from "./specs/openFeature";
 import { SpecsSidebar, type SpecsSidebarProps } from "./specs/SpecsSidebar";
 import {
@@ -426,6 +427,7 @@ import {
   setFolderOrders,
   setListing,
   useSpecsListing,
+  type Listing,
 } from "./specs/listing";
 
 /** Signed-in GitHub account as reported by /api/state (never the token). */
@@ -748,70 +750,6 @@ export function storeEditorHidden(hidden: boolean) {
   } catch {
     // Storage unavailable: the choice just does not survive a reload.
   }
-}
-
-export interface OpenOptions {
-  /** Push a history entry for the opened feature (deliberate navigation). */
-  push?: boolean;
-  /**
-   * Deep-link target (specs/ui/navigation.feature.md): select this scenario, or
-   * clear the selection when null. Undefined keeps the same-file selection
-   * preservation used by sync/cron refreshes.
-   */
-  scenario?: ScenarioRef | null;
-  /**
-   * Open the scenario's own page — the editor pane — on top of selecting its
-   * card (specs/ui/navigation.feature.md "open a scenario link"). Deep links
-   * do; in-app navigation that merely lands on a card does not.
-   */
-  pane?: boolean;
-  /**
-   * Why the pull behind the link that asked for this feature failed, if it
-   * did — a miss then says the feature may not have arrived, not that the
-   * link is stale (src/frontend/linkSync.ts).
-   */
-  pullProblem?: string | null;
-  /**
-   * The words a search hit matched on (specs/search.feature.md): the pane
-   * opened for the hit marks them in the scenario's body.
-   */
-  terms?: string[];
-  /**
-   * Open with the feature description editor on (specs/editor/feature-editor
-   * .feature.md "Edit feature descrition"): a just-created feature is empty,
-   * and describing it is the first thing to do.
-   */
-  editDescription?: boolean;
-}
-
-/** What /api/features returns: the flat feature list, the folder list, and
-    the project's settings (src/server/members.ts) — the members a feature
-    can be assigned to, and the code repo a session runs in (null: the data
-    repo). */
-export interface Listing {
-  features: FeatureListing[];
-  folders: string[];
-  /** Folder path → what its display-name.txt says (specs/ui/folders.feature.md "describe a folder"). */
-  folderDescriptions: Record<string, string>;
-  /** Folder path → its subfolders in order, from its folder-order.txt ("order folders"); `specs` for the top level. */
-  folderOrders: Record<string, string[]>;
-  /** Folder path → its features' file names in order, from its feature-order.txt ("order features"). */
-  featureOrders: Record<string, string[]>;
-  members: ProjectMember[];
-  codeRepo: string | null;
-  /** Every code repo the project names, the default first (specs/app/project-settings.feature.md). */
-  codeRepos: string[];
-  /** Whether the repo writes authorship into its feature files
-      (specs/app/specs-authorship.feature.md, `authors-in-markdown`). */
-  authorsInMarkdown: boolean;
-  /** The GitHub repo the code repo pushes to — whose issues the Issues tab shows. */
-  issuesRepo: GitHubRepo | null;
-  /** The data repo's custom-attributes.txt (specs/app/custom-attributes.feature.md); empty when it has none. */
-  customAttributes: string;
-  /** Why saved changes are not reaching the remote (git-operations.md); null while they are. */
-  syncProblem: string | null;
-  /** Why the folder is read only (src/frontend/repoReadOnly.ts); null while it may be edited. */
-  readOnlyRepo: RepoReadOnly | null;
 }
 
 /**

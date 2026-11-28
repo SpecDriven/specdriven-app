@@ -7,6 +7,7 @@
 
 import type { Feature, Scenario } from "../../server/parser";
 import { titleFromFileName } from "../../server/parser";
+import type { ScenarioRef } from "../route";
 import { pageScenario, type EditState } from "./scenarioEdit";
 import { createStore } from "./store";
 
@@ -39,6 +40,41 @@ export interface OpenFeatureState {
    * the terms of the search hit that opened it, gone when the pane closes.
    */
   searchTerms: string[] | null;
+}
+
+/** How a feature is opened (App.tsx openFeature). */
+export interface OpenOptions {
+  /** Push a history entry for the opened feature (deliberate navigation). */
+  push?: boolean;
+  /**
+   * Deep-link target (specs/ui/navigation.feature.md): select this scenario, or
+   * clear the selection when null. Undefined keeps the same-file selection
+   * preservation used by sync/cron refreshes.
+   */
+  scenario?: ScenarioRef | null;
+  /**
+   * Open the scenario's own page — the editor pane — on top of selecting its
+   * card (specs/ui/navigation.feature.md "open a scenario link"). Deep links
+   * do; in-app navigation that merely lands on a card does not.
+   */
+  pane?: boolean;
+  /**
+   * Why the pull behind the link that asked for this feature failed, if it
+   * did — a miss then says the feature may not have arrived, not that the
+   * link is stale (src/frontend/linkSync.ts).
+   */
+  pullProblem?: string | null;
+  /**
+   * The words a search hit matched on (specs/search.feature.md): the pane
+   * opened for the hit marks them in the scenario's body.
+   */
+  terms?: string[];
+  /**
+   * Open with the feature description editor on (specs/editor/feature-editor
+   * .feature.md "Edit feature descrition"): a just-created feature is empty,
+   * and describing it is the first thing to do.
+   */
+  editDescription?: boolean;
 }
 
 const store = createStore<OpenFeatureState>(() => ({
