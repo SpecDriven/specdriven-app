@@ -10,18 +10,25 @@
 // a piece at a time (specs/app/plugins.feature.md "Specs is a built-in
 // plugin"). Each later move takes a field off it.
 
-import type { ReactNode, RefObject } from "react";
+import type { MouseEvent, ReactNode, RefObject } from "react";
 import type { OpenViewOptions, TabShortcut } from "../../plugins/client/tabs";
 import type { SpecsView } from "../../plugins/builtin/specs/route";
 import type { AttributeDefinitions, KnownAttributes } from "../../server/customAttributes";
+import type { FeatureListing } from "../../server/features";
+import type { ProjectMember } from "../../server/members";
 import type {
+  ExternalLink as TicketLink,
+  Feature,
+  FeatureFlag,
   PullRequestLink,
   ResourceLink,
   Scenario,
   ScenarioFile,
   ScenarioTarget,
+  SpecAttribute,
 } from "../../server/parser";
 import type { ResourceLinkKind } from "../../server/resourceLinks";
+import type { Crumb } from "../Breadcrumbs";
 import type { LinkDraft } from "../externallinks";
 import type { ScenarioRow, scenarioNeighbors } from "../tree";
 
@@ -82,6 +89,63 @@ export interface SpecsActions {
   saveResourceLinks(target: ScenarioTarget | null, kind: ResourceLinkKind, links: ResourceLink[]): Promise<void>;
   uploadScenarioFiles(target: ScenarioTarget | null, listed: ScenarioFile[], chosen: File[], replacing?: string): Promise<void>;
   saveScenarioFileList(target: ScenarioTarget | null, files: ScenarioFile[]): Promise<void>;
+
+  // The feature page's.
+  /** The folder cannot be written: the read-only site, or a spec folder with nowhere to push. */
+  locked: boolean;
+  /** The shell's: the demo, the hosted app, code gen sessions offered at all. */
+  demo: boolean;
+  hosted: boolean;
+  codeGen: boolean;
+  /** Confluence is switched on, and this is neither the demo nor the hosted app. */
+  confluenceEnabled: boolean;
+  /** A code gen session is starting, and how many specs and scenarios one would take. */
+  sessionRunning: boolean;
+  sessionCount: number;
+  startSession(): void;
+  /** A click that stays in the app unless a modifier asks for a new tab. */
+  spaClick(e: MouseEvent, go: () => void): void;
+  /** The crumbs a module hangs on a feature (an Event Model's slice names its model). */
+  pluginCrumbs(fileName: string): Crumb[];
+  /** The name field's draft and the description's last saved text, as the latest render had them. */
+  renameDraftRef: RefObject<string | null>;
+  descSaved: RefObject<string | null>;
+  /** The description editor's box, measured while its height is dragged. */
+  descPaneRef: RefObject<HTMLDivElement | null>;
+  /** The scenario cards, by index, for scrolling the highlighted one into view. */
+  scenarioRefs: RefObject<(HTMLElement | null)[]>;
+  renameSelected(): Promise<void>;
+  renameFile(fileName: string): Promise<void>;
+  moveFeaturePrompt(fileName?: string | null): Promise<void>;
+  removeFeature(f: FeatureListing): Promise<void>;
+  openDescriptionEditor(file: string, text: string): void;
+  closeDescriptionEditor(): Promise<void>;
+  newScenario(insertAt?: number): Promise<void>;
+  reorderScenario(index: number, delta: -1 | 1): Promise<void>;
+  toggleScenarioPolarityAt(index: number): Promise<void>;
+  /** Publish the feature's proposed scenarios, or one of them. */
+  publish(scenario?: ScenarioTarget, over?: Feature, file?: string | null): Promise<void>;
+  openQtestPublish(f: Feature): Promise<void>;
+  assignableMembers(): ProjectMember[];
+  saveAssigned(name: string): Promise<void>;
+  saveFeatureTickets(links: TicketLink[]): Promise<void>;
+  saveFeatureQtest(): Promise<void>;
+  saveFeatureFlags(flags: FeatureFlag[]): Promise<void>;
+  saveFeatureAttributes(attributes: SpecAttribute[]): Promise<void>;
+  // A scenario card dragged among the cards, or onto another feature in the tree.
+  endScenarioDrag(): void;
+  dropTreeScenario(
+    file: string,
+    dragged: { name: string; version: number },
+    target: { name: string; version: number },
+    after: boolean,
+  ): Promise<void>;
+  moveScenarioToFeature(
+    file: string,
+    s: { name: string; version: number },
+    to: string,
+    at?: { name: string; version: number; after: boolean },
+  ): Promise<void>;
 }
 
 export interface SpecsHost {
