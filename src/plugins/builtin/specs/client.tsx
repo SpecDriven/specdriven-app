@@ -83,6 +83,11 @@ const plugin: Plugin<Context> = {
   inject: ["tabs"],
   apply(ctx) {
     ctx.effect(() => ctx.need("tabs").add(specsTab as TabPlugin));
+    // A data folder switch: the open scenario's and the description's last
+    // saves land in the folder they were typed in, as every tab's do.
+    ctx.on("data/leaving", async () => {
+      await specsHost()?.land();
+    });
   },
 };
 

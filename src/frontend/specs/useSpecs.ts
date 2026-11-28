@@ -19,6 +19,7 @@ import { useEditorEffects } from "./editorEffects";
 import { useFeatureCommands } from "./featureCommands";
 import { useFeatureFields } from "./featureFields";
 import { useFeatureOps } from "./featureOps";
+import { setDescEdit } from "./featurePageState";
 import { type Listing } from "./listing";
 import { useOpenFeatureActions } from "./openActions";
 import { useFeaturePageKeys } from "./pageKeys";
@@ -405,6 +406,23 @@ export function useSpecs(deps: SpecsShell) {
     reorderFeature,
     reorderFolder,
   });
+  /**
+   * A data folder switch (the plugin's `data/leaving`): what the scenario
+   * editor and the description editor hold lands in the folder it was typed
+   * in. Each queue is awaited after its tick — a boolean in-flight flag
+   * would make the tick a no-op while a PUT is already away, and that PUT
+   * would then land in the folder that comes next (the server resolves the
+   * data folder per request). The description's own cleanup tick would only
+   * run once the selection empties, after the switch, so it lands here and
+   * the editor is emptied so no later tick can.
+   */
+  const landSpecsEditors = async () => {
+    await editorRef.current.close();
+    await scenarioSaveQueue.current.idle();
+    await descTick.current();
+    await descSaveQueue.current.idle();
+    setDescEdit(null);
+  };
   return {
     addTest,
     assignableMembers,
@@ -430,9 +448,7 @@ export function useSpecs(deps: SpecsShell) {
     deleteTreeScenario,
     descEditRef,
     descPaneRef,
-    descSaveQueue,
     descSaved,
-    descTick,
     describeSelection,
     dismissConflict,
     draftVersion,
@@ -443,6 +459,7 @@ export function useSpecs(deps: SpecsShell) {
     endScenarioDrag,
     folderMenuKey,
     knownAttributes,
+    landSpecsEditors,
     markSaved,
     moveFeaturePrompt,
     moveFeatureTo,
@@ -489,7 +506,6 @@ export function useSpecs(deps: SpecsShell) {
     scenarioLink,
     scenarioNav,
     scenarioRefs,
-    scenarioSaveQueue,
     selectionLabel,
     sessionBundle,
     sessionCount,

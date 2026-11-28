@@ -248,7 +248,6 @@ import {
 } from "./specs/editorState";
 import {
   resetFeaturePageState,
-  setDescEdit,
   setFeatureAttributesOpen,
   setFeatureFlagsOpen,
   setFeaturePrsOpen,
@@ -2196,28 +2195,19 @@ export function App() {
     // Await the queue after the tick — a boolean in-flight flag would make
     // the tick a no-op while a PUT is already away, and that PUT would then
     // land in the folder that comes next (the server re-reads dataRepo per
-    // request). The same for an open scenario editor.
+    // request).
     await readmeTick.current();
     await readmeSaveQueue.current.idle();
     readmeText.current = null;
     setReadme(null);
-    await editorRef.current.close();
-    await scenarioSaveQueue.current.idle();
-    // So does whatever a plugin's view holds — an open roadmap page, an
-    // Event Model's canvas, a code repository's file, say:
-    // its last save goes out there, and the plugin seals the view on its way
-    // out. The unmount below lands in a later React commit that nothing here
-    // awaits, so the seal — not the ordering — is what keeps its parting save
-    // from writing into the new folder.
+    // So does whatever a plugin's view holds — an open scenario or a feature
+    // description (src/frontend/specs/useSpecs.ts landEditors), a roadmap
+    // page, an Event Model's canvas, a code repository's file, say: its last
+    // save goes out there, and the plugin seals the view on its way out. The
+    // unmount below lands in a later React commit that nothing here awaits,
+    // so the seal — not the ordering — is what keeps its parting save from
+    // writing into the new folder.
     await client.serial("data/leaving");
-    // A feature description belongs to the folder it was typed in too. Its
-    // own cleanup tick would only run once the selection empties below —
-    // after the switch — and the server resolves the data folder per request,
-    // so that late PUT would write these words into the folder that comes
-    // next. Land it here, awaited, and empty the editor so no later tick can.
-    await descTick.current();
-    await descSaveQueue.current.idle();
-    setDescEdit(null);
   };
 
   // Switch to another data dir — typed into the prompt above or picked from
@@ -4170,9 +4160,7 @@ export function App() {
     deleteTreeScenario,
     descEditRef,
     descPaneRef,
-    descSaveQueue,
     descSaved,
-    descTick,
     describeSelection,
     dismissConflict,
     draftVersion,
@@ -4183,6 +4171,7 @@ export function App() {
     endScenarioDrag,
     folderMenuKey,
     knownAttributes,
+    landSpecsEditors,
     markSaved,
     moveFeaturePrompt,
     moveFeatureTo,
@@ -4229,7 +4218,6 @@ export function App() {
     scenarioLink,
     scenarioNav,
     scenarioRefs,
-    scenarioSaveQueue,
     selectionLabel,
     sessionBundle,
     sessionCount,
@@ -4273,6 +4261,7 @@ export function App() {
   // What the Specs tab's `c` and its own commands read (src/plugins/
   // builtin/specs/client.tsx), published before they are read below.
   provideSpecsHost({
+    land: landSpecsEditors,
     createFeature: () => void createFeature(),
     // Imports into the selected spec folder (specs/external-links/aha-import
     // .feature.md, OpenSpec's likewise), while their switches are on.

@@ -184,6 +184,8 @@ export interface SpecsHost {
   actions: SpecsActions | null;
   /** Open a feature, or a scenario's page when the view names one. */
   open(view: SpecsView, opts: OpenViewOptions): void;
+  /** A data folder switch: land what the scenario and description editors hold, in the folder it was typed in. */
+  land(): Promise<void>;
   /** `c` from the tree: a new feature, in the folder selected. */
   createFeature(): void;
   /** `c` on an open feature: a new scenario. */
@@ -196,6 +198,7 @@ const NO_HOST: SpecsHost = {
   sidebar: null,
   actions: null,
   open: () => {},
+  land: async () => {},
   createFeature: () => {},
   createInView: null,
   shortcuts: [],
