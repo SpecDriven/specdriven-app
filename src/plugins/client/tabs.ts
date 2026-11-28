@@ -160,6 +160,14 @@ export interface TabPlugin<V = unknown> {
    */
   open?(view: V, opts: OpenViewOptions): boolean;
   /**
+   * The pane is being given to something else — another tab's view, an app
+   * page, home. A tab that holds an open view of its own lets go of it here:
+   * its editor's last save goes out, and the view is forgotten. Called on
+   * every tab but the one whose view is about to take the pane, whether or
+   * not the tab had it.
+   */
+  leave?(): void;
+  /**
    * The tab's own "new" — a task, a case, an issue: what `c` creates while
    * the tab is the sidebar, so the key never makes a feature from there.
    * Absent, `c` is quiet on the tab.
