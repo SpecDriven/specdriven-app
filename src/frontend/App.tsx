@@ -8,12 +8,8 @@ import type {
 import {
   scenarioNumbers,
   slugify,
-  titleFromFileName,
 } from "../server/parser";
-import type {
-  Scenario,
-  ScenarioPick,
-} from "../server/parser";
+import type { ScenarioPick } from "../server/parser";
 import { RESOURCE_LINK_KINDS, RESOURCE_LINK_TOOLS } from "../server/resourceLinks";
 import type { ResourceLinkKind } from "../server/resourceLinks";
 import type { FeatureListing } from "../server/features";
@@ -32,7 +28,6 @@ import {
   AppWindow,
   Activity,
   Import,
-  Pencil,
   Timer,
   Plus,
   RefreshCw,
@@ -41,7 +36,6 @@ import {
   ExternalLink,
   FolderInput,
   Home,
-  Tag,
   Keyboard,
   Link,
   Menu as MenuIcon,
@@ -51,11 +45,8 @@ import {
   Puzzle,
   Settings,
   Sun,
-  Trash2,
   UserRound,
   X,
-  ArrowDown,
-  ArrowUp,
   Bot,
   KeyRound,
   LogOut,
@@ -85,7 +76,7 @@ import {
   type ReadOnlyProjectInfo,
 } from "./readOnlyProject";
 import { SaveIndicator, Toaster, toast } from "./Toasts";
-import { missedFeatureNote, pullProblemOf, syncForLink } from "./linkSync";
+import { pullProblemOf, syncForLink } from "./linkSync";
 import { currentSyncProblem, pushHint, setSyncProblem, syncProblemMessage, useSyncProblem } from "./syncProblem";
 import { currentRepoReadOnly, parseRepoReadOnly, readOnlySummary, setRepoReadOnly, useRepoReadOnly } from "./repoReadOnly";
 import type { RepoReadOnly } from "./repoReadOnly";
@@ -102,7 +93,7 @@ import { PageSkeleton } from "./Skeleton";
 import { AppOutdated, watchDataTooNew } from "./AppOutdated";
 import { useModalPrompts } from "./ModalPrompts";
 import { PluginUpdatesDialog, dismissPluginUpdates, usePluginUpdatesOffer } from "./PluginUpdatesDialog";
-import { cleanLine, cleanSegments } from "../server/text";
+import { cleanLine } from "../server/text";
 import { AppPageLayout, PageSection } from "./AppPage";
 import { PluginsPage } from "./PluginsPage";
 import { askToCloneCodeRepo, codeReposToOffer, ProjectSettingsPage } from "./ProjectSettingsPage";
@@ -113,7 +104,7 @@ import { WhatsNewPage, hasUnseenNotes, markNotesSeen } from "./WhatsNewPage";
 import { UpdatesPage } from "./UpdatesPage";
 import type { MarketplaceRef } from "../plugins/marketplace";
 import type { PromptOptions } from "./ModalPrompts";
-import { StartSessionDialog, aiTabState, hostedSessionPick, sessionSelection } from "./StartSessionDialog";
+import { StartSessionDialog, aiTabState, hostedSessionPick } from "./StartSessionDialog";
 import { pomodoro, titlePrefix, usePomodoro } from "./pomodoro";
 import { PomodoroBar, PomodoroToggle } from "./PomodoroBar";
 import { applyPomodoroEnabled, applyPomodoroShown, usePomodoroEnabled } from "./pomodoroPref";
@@ -163,18 +154,14 @@ import {
   isFiltering,
 } from "./treeFilter";
 import { CustomAttributesEditor } from "./CustomAttributesEditor";
-import { knownNames, parseAttributeDefinitions } from "../server/customAttributes";
-import { linkDraftOf } from "./externallinks";
 import {
   appPagePath,
   featurePath,
   isLinkEntry,
-  latestScenarioPath,
   matchAppPage,
   pagePath,
   parseRoute,
   repoDisplayName,
-  resolveScenario,
   scenarioPath,
   splitRepoPath,
 } from "./route";
@@ -182,20 +169,7 @@ import type { AppPage } from "./route";
 import {
   testLinkTarget,
   openTestInIdea,
-  type TestDraft,
 } from "./testlinks";
-import {
-  buildTree,
-  folderLabel,
-  revealed,
-  folderOptions,
-  scenarioNeighbors,
-  scenarioRows,
-  treeScenarioKey,
-  scenarioSequence,
-  withOpenScenarios,
-} from "./tree";
-import type { FolderNode, ScenarioRow } from "./tree";
 import { useFocusTrap } from "./useFocusTrap";
 import {
   FOLDER_KIND_LABEL,
@@ -227,7 +201,6 @@ import { SignedCommits } from "./SignedCommits";
 import { ConfluenceTokens, fetchConfluenceTokens, type ConfluenceWiki } from "./ConfluenceToken";
 import { JiraTokens, fetchJiraTokens, type JiraSite } from "./JiraToken";
 import { AgentModelList, agentModelsOf, agentsWithoutSection, type AgentModels } from "./AgentModels";
-import { type FolderFeature } from "./ConfluenceFolderPublishDialog";
 import { QtestTokens, fetchQtestTokens, type QtestSite } from "./QtestToken";
 import { AhaTokens, fetchAhaTokens, type AhaSite } from "./AhaToken";
 import { ExtractSpecsDialog, type ExtractCreated } from "./ExtractSpecsDialog";
@@ -248,7 +221,6 @@ import { ClaudeWebNote } from "./ClaudeWebNote";
 import { openWebLink } from "./weblinks";
 import {
   cardOfScenario,
-  featureFromResponse,
   insertAfterScenario,
   isCardControl,
   landedScenario,
@@ -271,18 +243,7 @@ import {
 } from "./specs/editorHeight";
 import {
   resetEditorState,
-  setConflict,
-  setLinkDraft,
-  setLinkError,
-  setQtestDraft,
-  setQtestError,
-  setResolving,
   setSaving,
-  setTestDraft,
-  setTestEdit,
-  setTestNameDraft,
-  setTestNameHint,
-  setTestsError,
   useEditorState,
 } from "./specs/editorState";
 import {
@@ -294,7 +255,6 @@ import {
   setFeatureQtestDraft,
   setFeatureResourceOpen,
   setFeatureTicketsOpen,
-  setRenameDraft,
   useFeaturePageState,
 } from "./specs/featurePageState";
 import {
@@ -326,6 +286,8 @@ import { useSessionSelection } from "./specs/sessionSelection";
 import { useFeaturePageKeys } from "./specs/pageKeys";
 import { useFeatureCommands } from "./specs/featureCommands";
 import { useSpecsDerived } from "./specs/derived";
+import { useSpecsPaletteActions } from "./specs/paletteActions";
+import { useSpecsShortcuts } from "./specs/specsShortcuts";
 import { provideSpecsHost, type SpecsActions } from "./specs/host";
 import {
   DEFAULT_PROJECT_MANAGEMENT_TOOL,
@@ -350,29 +312,20 @@ import {
 } from "./specs/settings";
 import {
   resetSpecSelection,
-  scenarioKey,
   setSpecSelection,
   toggleSpecSelected,
   useSpecSelection,
 } from "./specs/selection";
 import {
   resetOpenFeature,
-  setDirty,
-  setEditing,
   setFeature,
-  setFeatureLoading,
-  setPaneRequest,
-  setSearchTerms,
   setSelected,
   setSelectedScenario,
   useOpenFeature,
-  type OpenOptions,
 } from "./specs/openFeature";
 import { SpecsSidebar, type SpecsSidebarProps } from "./specs/SpecsSidebar";
 import {
   resetTreeState,
-  setCollapsed,
-  setOutlined,
   setSelectedFolder,
   useTreeState,
 } from "./specs/treeState";
@@ -1124,11 +1077,11 @@ export function App() {
     resetSpecsDialogs();
     resetSpecsSettings();
   });
-  const { features, folders, folderDescriptions, folderOrders, featureOrders } = useSpecsListing();
+  const { features } = useSpecsListing();
   // The open feature — its file, what was read of it, the card highlighted
   // and the scenario in the editor — lives in a store the Specs tab reads
   // too (src/frontend/specs/openFeature.ts); set here under the same names.
-  const { featureLoading, selected, feature, selectedScenario, dirty, editing, paneRequest } = useOpenFeature();
+  const { featureLoading, selected, feature, dirty, editing } = useOpenFeature();
   // What the editor pane and the feature page hold of their own — menus,
   // drafts, heights, a save or a publish under way — likewise
   // (src/frontend/specs/editorState.ts, featurePageState.ts).
@@ -1139,13 +1092,6 @@ export function App() {
     resolving,
     saving,
     savedAt,
-    publishing,
-    testDraft,
-    testNameDraft,
-    testEdit,
-    testEditDraft,
-    linkDraft,
-    qtestDraft,
   } = useEditorState();
   const {
     featureMenuOpen,
@@ -1159,7 +1105,6 @@ export function App() {
     featureFlagsOpen,
     featureAttributesOpen,
     featureResourceOpen,
-    descEdit,
   } = useFeaturePageState();
   // The switches of Settings the tree, the feature page and the editor read
   // (src/frontend/specs/settings.ts), set from /api/state further down.
@@ -4518,6 +4463,21 @@ export function App() {
         ? { label: "New scenario", run: () => void newScenario() }
         : null,
   });
+  const {
+    specsShortcuts,
+  } = useSpecsShortcuts({
+    moveScenarioSelection,
+    onFeaturePage,
+    openSelectedScenario,
+    proposeScenario,
+    publish,
+    publishScenario,
+    quiet,
+    quietBehindPalette,
+    reorderScenario,
+    scenarioNav,
+    stepScenario,
+  });
   // `c` (specs/app/plugins.feature.md): what the open view makes — a
   // scenario on a feature's page — else the shown tab's own "new": a
   // feature from the tree, a task from the Tasks tab, a case from Tests.
@@ -4762,86 +4722,8 @@ export function App() {
       palette: () => pomodoroOn && !quietBehindPalette && editing === null && pom.timer === null,
       run: () => startPomodoro(),
     },
-    {
-      id: "next",
-      keys: ["j", "arrowdown"],
-      label: "Next scenario",
-      group: "Scenarios",
-      when: () => !quiet && onFeaturePage && feature !== null && feature.scenarios.length > 0,
-      run: (e) => moveScenarioSelection(e, 1),
-    },
-    {
-      id: "prev",
-      keys: ["k", "arrowup"],
-      label: "Previous scenario",
-      group: "Scenarios",
-      when: () => !quiet && onFeaturePage && feature !== null && feature.scenarios.length > 0,
-      run: (e) => moveScenarioSelection(e, -1),
-    },
-    {
-      id: "move-up",
-      keys: "alt+arrowup",
-      label: "Move the selected scenario up",
-      group: "Scenarios",
-      when: () => !quiet && onFeaturePage && editing === null && selectedScenario !== null,
-      run: () => void reorderScenario(selectedScenario!, -1),
-    },
-    {
-      id: "move-down",
-      keys: "alt+arrowdown",
-      label: "Move the selected scenario down",
-      group: "Scenarios",
-      when: () => !quiet && onFeaturePage && editing === null && selectedScenario !== null,
-      run: () => void reorderScenario(selectedScenario!, 1),
-    },
-    {
-      id: "open",
-      keys: ["enter", "e", "o"],
-      label: "Open the selected scenario",
-      group: "Scenarios",
-      when: () => !quiet && onFeaturePage && selectedScenario !== null,
-      run: openSelectedScenario,
-    },
-    {
-      id: "editor-prev",
-      keys: ["<", "k"],
-      label: "Previous scenario (in the scenario editor)",
-      group: "Scenarios",
-      when: () => !quiet && editing !== null && scenarioNav.prev !== null,
-      run: () => stepScenario(-1),
-    },
-    {
-      id: "editor-next",
-      keys: [">", "j"],
-      label: "Next scenario (in the scenario editor)",
-      group: "Scenarios",
-      when: () => !quiet && editing !== null && scenarioNav.next !== null,
-      run: () => stepScenario(1),
-    },
-    {
-      id: "publish",
-      keys: "mod+enter",
-      label: editing
-        ? editing.scenario.status === "draft"
-          ? "Propose the scenario"
-          : "Publish the scenario"
-        : "Publish all",
-      group: "Publish",
-      inFields: true,
-      when: () => !quiet && (editing !== null || onFeaturePage),
-      palette: () => !quietBehindPalette && (editing !== null || onFeaturePage),
-      run: () => {
-        if (publishing !== null) return false;
-        if (editing) {
-          if (editing.scenario.status === "published" || !editing.scenario.name.trim())
-            return false;
-          if (editing.scenario.status === "draft") void proposeScenario();
-          else void publishScenario();
-          return;
-        }
-        void publish();
-      },
-    },
+    // The feature page's and the editor's own keys, in their place in the sheet.
+    ...specsShortcuts,
     {
       id: "copy-link",
       keys: "mod+shift+c",
@@ -4943,7 +4825,20 @@ export function App() {
     run: () => void,
     extra: Partial<PaletteItem> = {},
   ): PaletteItem => ({ id: `action:${id}`, group: "Actions", label, text: label, icon, run, ...extra });
-  const listing = selected ? features.find((f) => f.fileName === selected) : undefined;
+  const {
+    specsFeatureActions,
+    specsFolderActions,
+  } = useSpecsPaletteActions({
+    action,
+    editFolderDisplayName,
+    moveFeaturePrompt,
+    moveFolderPrompt,
+    removeFeature,
+    removeFolder,
+    renameFolder,
+    reorderFeature,
+    reorderFolder,
+  });
   const paletteActions: PaletteItem[] = [
     shortcutAction(
       "create",
@@ -4958,60 +4853,10 @@ export function App() {
     shortcutAction("extract-specs", <Sparkles size={14} />),
     shortcutAction("link-tests", <Sparkles size={14} />),
     shortcutAction("publish-folder", <Import size={14} />),
-    ...(selectedFolder
-      ? [
-          action("rename-folder", `Rename folder “${selectedFolder.split("/").pop()}”`, <Pencil size={14} />, () =>
-            void renameFolder(selectedFolder),
-          ),
-          action(
-            "folder-display-name",
-            `Edit display name of folder “${selectedFolder.split("/").pop()}”`,
-            <Tag size={14} />,
-            () => void editFolderDisplayName(selectedFolder),
-          ),
-          action(
-            "move-folder",
-            `Move folder “${selectedFolder.split("/").pop()}” to folder…`,
-            <FolderInput size={14} />,
-            () => void moveFolderPrompt(selectedFolder),
-          ),
-          action("move-folder-up", `Move folder “${selectedFolder.split("/").pop()}” up`, <ArrowUp size={14} />, () =>
-            reorderFolder(selectedFolder, -1),
-          ),
-          action(
-            "move-folder-down",
-            `Move folder “${selectedFolder.split("/").pop()}” down`,
-            <ArrowDown size={14} />,
-            () => reorderFolder(selectedFolder, 1),
-          ),
-          action("delete-folder", `Delete folder “${selectedFolder.split("/").pop()}”`, <Trash2 size={14} />, () =>
-            void removeFolder(selectedFolder),
-          ),
-        ]
-      : []),
+    ...specsFolderActions,
     shortcutAction("publish", <StatusIcon status="published" size={14} />),
     shortcutAction("copy-link", <Link size={14} />),
-    ...(selected && feature
-      ? [
-          action("rename", "Rename feature", <Pencil size={14} />, () =>
-            setRenameDraft(feature.name || titleFromFileName(selected)),
-          ),
-          action("move", "Move feature to folder…", <FolderInput size={14} />, () =>
-            void moveFeaturePrompt(),
-          ),
-          action("move-feature-up", "Move feature up", <ArrowUp size={14} />, () => reorderFeature(selected, -1)),
-          action("move-feature-down", "Move feature down", <ArrowDown size={14} />, () =>
-            reorderFeature(selected, 1),
-          ),
-          ...(listing
-            ? [
-                action("delete", "Delete feature", <Trash2 size={14} />, () =>
-                  void removeFeature(listing),
-                ),
-              ]
-            : []),
-        ]
-      : []),
+    ...specsFeatureActions,
     ...(codeGen && sessionCount > 0 && !sessionRunning
       ? [action("session", hosted ? "Open Prompt in Claude Code" : "Start AI Session", <StartSessionIcon size={14} />, () => startSession())]
       : []),
