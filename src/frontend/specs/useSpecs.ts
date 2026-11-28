@@ -15,12 +15,15 @@ import { type ConfirmOptions, type PickOptions, type PromptOptions } from "../Mo
 import { type AppPage } from "../route";
 import { useSpecsDerived } from "./derived";
 import { useDescriptionEditor } from "./descriptionEditor";
+import { useEditorState } from "./editorState";
 import { useEditorEffects } from "./editorEffects";
 import { useFeatureCommands } from "./featureCommands";
 import { useFeatureFields } from "./featureFields";
 import { useFeatureOps } from "./featureOps";
+import { setDescEdit, useFeaturePageState } from "./featurePageState";
 import { type Listing } from "./listing";
 import { useOpenFeatureActions } from "./openActions";
+import { setFeature, setSelected, setSelectedScenario, useOpenFeature } from "./openFeature";
 import { useFeaturePageKeys } from "./pageKeys";
 import { useSpecsPaletteActions } from "./paletteActions";
 import { usePublish } from "./publish";
@@ -62,6 +65,9 @@ export interface SpecsShell {
 }
 
 export function useSpecs(deps: SpecsShell) {
+  const { selected, dirty, editing } = useOpenFeature();
+  const { conflict } = useEditorState();
+  const { renameDraft } = useFeaturePageState();
   const {
     action,
     activeTab,
@@ -405,6 +411,63 @@ export function useSpecs(deps: SpecsShell) {
     reorderFeature,
     reorderFolder,
   });
+  /**
+   * A data folder switch (the plugin's `data/leaving`): what the scenario
+   * editor and the description editor hold lands in the folder it was typed
+   * in. Each queue is awaited after its tick — a boolean in-flight flag
+   * would make the tick a no-op while a PUT is already away, and that PUT
+   * would then land in the folder that comes next (the server resolves the
+   * data folder per request). The description's own cleanup tick would only
+   * run once the selection empties, after the switch, so it lands here and
+   * the editor is emptied so no later tick can.
+   */
+  /**
+   * The pane is given to something else (the tab's `leave`): an open editor
+   * pane leaves the way `<` does — its last save goes out before the
+   * selection drops (specs/editor/spec-editor.feature.md "Spec editor pane")
+   * — and no feature is open.
+   */
+  const leaveFeature = () => {
+    editorRef.current.close();
+    setSelected(null);
+    setFeature(null);
+    setSelectedScenario(null);
+  };
+  /**
+   * The reload tick (the plugin's `reload/tick`): the open feature as the
+   * folder now has it, without clobbering an in-progress edit or conflict
+   * resolution.
+   */
+  const refreshOpenFeature = async (): Promise<void> => {
+    const loads: Promise<unknown>[] = [];
+    // The description editor holding an edit that hasn't landed yet keeps
+    // its feature as is.
+    const descPending =
+      descEditRef.current !== null && descEditRef.current.text !== descSaved.current;
+    // Nor while the header's feature name is being edited in place
+    // (specs/ui/ui.feature.md "Main page"): re-opening the feature would
+    // close the field mid-typing and drop the new name.
+    if (selected && !dirty && !editing && !conflict && !descPending && renameDraft === null) {
+      loads.push(openFeature(selected));
+    }
+    // The public specs site re-reads the open page too (specs/app/
+    // public-specs-site.feature.md "A change pushed to the spec repo shows up
+    // on the site"), and a scenario's page there is the editor pane — which
+    // the rule above leaves alone so a refresh cannot clobber an edit. Nothing
+    // is edited on that site, so the pane re-opens on the scenario as the
+    // server now has it, once the feature changed.
+    if (locked && selected && editing && editing.index !== null && !editing.isNew) {
+      loads.push(refreshReadOnlyPane(selected, editing.scenario));
+    }
+    await Promise.all(loads);
+  };
+  const landSpecsEditors = async () => {
+    await editorRef.current.close();
+    await scenarioSaveQueue.current.idle();
+    await descTick.current();
+    await descSaveQueue.current.idle();
+    setDescEdit(null);
+  };
   return {
     addTest,
     assignableMembers,
@@ -428,11 +491,8 @@ export function useSpecs(deps: SpecsShell) {
     deletePickedScenarios,
     deleteScenario,
     deleteTreeScenario,
-    descEditRef,
     descPaneRef,
-    descSaveQueue,
     descSaved,
-    descTick,
     describeSelection,
     dismissConflict,
     draftVersion,
@@ -443,6 +503,8 @@ export function useSpecs(deps: SpecsShell) {
     endScenarioDrag,
     folderMenuKey,
     knownAttributes,
+    landSpecsEditors,
+    leaveFeature,
     markSaved,
     moveFeaturePrompt,
     moveFeatureTo,
@@ -468,7 +530,7 @@ export function useSpecs(deps: SpecsShell) {
     publish,
     publishScenario,
     qtestPublished,
-    refreshReadOnlyPane,
+    refreshOpenFeature,
     removeFeature,
     removeFolder,
     removeTest,
@@ -489,7 +551,6 @@ export function useSpecs(deps: SpecsShell) {
     scenarioLink,
     scenarioNav,
     scenarioRefs,
-    scenarioSaveQueue,
     selectionLabel,
     sessionBundle,
     sessionCount,

@@ -184,6 +184,12 @@ export interface SpecsHost {
   actions: SpecsActions | null;
   /** Open a feature, or a scenario's page when the view names one. */
   open(view: SpecsView, opts: OpenViewOptions): void;
+  /** A data folder switch: land what the scenario and description editors hold, in the folder it was typed in. */
+  land(): Promise<void>;
+  /** The pane goes to something else: the editor pane leaves the way `<` does, and the feature is no longer open. */
+  leave(): void;
+  /** The reload tick: read the open feature again, unless something on its page is being edited. */
+  refresh(): Promise<void>;
   /** `c` from the tree: a new feature, in the folder selected. */
   createFeature(): void;
   /** `c` on an open feature: a new scenario. */
@@ -196,6 +202,9 @@ const NO_HOST: SpecsHost = {
   sidebar: null,
   actions: null,
   open: () => {},
+  land: async () => {},
+  leave: () => {},
+  refresh: async () => {},
   createFeature: () => {},
   createInView: null,
   shortcuts: [],

@@ -214,6 +214,24 @@ export class Context {
     }
   }
 
+  /**
+   * Like `emit` — every listener called in order, an error logged and never
+   * thrown — and awaited: it resolves once each listener that answered a
+   * promise has finished. For a tick the caller shows progress for: one
+   * plugin that fails neither stops the others nor fails the caller.
+   */
+  async settle<K extends EventKey>(event: K, ...args: Args<K>): Promise<void> {
+    await Promise.all(
+      this.rows(event).map(async (listener) => {
+        try {
+          await listener(...args);
+        } catch (e) {
+          report(event, e);
+        }
+      }),
+    );
+  }
+
   /** Every listener awaited in registration order. */
   async serial<K extends EventKey>(event: K, ...args: Args<K>): Promise<void> {
     for (const listener of this.rows(event)) await listener(...args);

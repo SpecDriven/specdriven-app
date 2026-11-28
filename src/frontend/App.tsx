@@ -248,7 +248,6 @@ import {
 } from "./specs/editorState";
 import {
   resetFeaturePageState,
-  setDescEdit,
   setFeatureAttributesOpen,
   setFeatureFlagsOpen,
   setFeaturePrsOpen,
@@ -1065,7 +1064,7 @@ export function App() {
   // The open feature — its file, what was read of it, the card highlighted
   // and the scenario in the editor — lives in a store the Specs tab reads
   // too (src/frontend/specs/openFeature.ts); set here under the same names.
-  const { featureLoading, selected, feature, dirty, editing } = useOpenFeature();
+  const { featureLoading, selected, feature, editing } = useOpenFeature();
   // What the editor pane and the feature page hold of their own — menus,
   // drafts, heights, a save or a publish under way — likewise
   // (src/frontend/specs/editorState.ts, featurePageState.ts).
@@ -1082,7 +1081,6 @@ export function App() {
     cardMenu,
     assigneeMenuOpen,
     publishMenuOpen,
-    renameDraft,
     featureTicketsOpen,
     featureQtestDraft,
     featurePrsOpen,
@@ -1714,25 +1712,6 @@ export function App() {
   // tab) refreshes on Sync too, not only on the next tick (issue #288).
   const refreshView = async (): Promise<void> => {
     const loads: Promise<unknown>[] = [loadFeatures()];
-    // The description editor holding an edit that hasn't landed yet keeps
-    // its feature as is, like the README below.
-    const descPending =
-      descEditRef.current !== null && descEditRef.current.text !== descSaved.current;
-    // Nor while the header's feature name is being edited in place
-    // (specs/ui/ui.feature.md "Main page"): re-opening the feature would
-    // close the field mid-typing and drop the new name.
-    if (selected && !dirty && !editing && !conflict && !descPending && renameDraft === null) {
-      loads.push(openFeature(selected));
-    }
-    // The public specs site re-reads the open page too (specs/app/
-    // public-specs-site.feature.md "A change pushed to the spec repo shows up
-    // on the site"), and a scenario's page there is the editor pane — which
-    // the rule above leaves alone so a refresh cannot clobber an edit. Nothing
-    // is edited on that site, so the pane re-opens on the scenario as the
-    // server now has it, once the feature changed.
-    if (locked && selected && editing && editing.index !== null && !editing.isNew) {
-      loads.push(refreshReadOnlyPane(selected, editing.scenario));
-    }
     // A pulled README shows up too — unless the home editor holds an edit
     // that hasn't landed yet.
     if (!selected && !pluginViewRef.current && readmeText.current === readmeSaved.current) {
@@ -1740,8 +1719,11 @@ export function App() {
     }
     // The plugins follow the same rule — each refreshes its own store (the
     // special folders their page lists), and what is open on screen only
-    // while its editor holds nothing unsaved.
-    client.emit("reload/tick", pluginViewRef.current);
+    // while its editor holds nothing unsaved: the Specs tab the open
+    // feature (src/frontend/specs/useSpecs.ts refreshOpenFeature). What a
+    // listener answers as a promise is waited for, so Sync's progress covers
+    // it; one that fails is logged and the rest go on.
+    loads.push(client.settle("reload/tick", pluginViewRef.current));
     await Promise.all(loads);
   };
   const refreshViewRef = useRef(refreshView);
@@ -2196,28 +2178,19 @@ export function App() {
     // Await the queue after the tick — a boolean in-flight flag would make
     // the tick a no-op while a PUT is already away, and that PUT would then
     // land in the folder that comes next (the server re-reads dataRepo per
-    // request). The same for an open scenario editor.
+    // request).
     await readmeTick.current();
     await readmeSaveQueue.current.idle();
     readmeText.current = null;
     setReadme(null);
-    await editorRef.current.close();
-    await scenarioSaveQueue.current.idle();
-    // So does whatever a plugin's view holds — an open roadmap page, an
-    // Event Model's canvas, a code repository's file, say:
-    // its last save goes out there, and the plugin seals the view on its way
-    // out. The unmount below lands in a later React commit that nothing here
-    // awaits, so the seal — not the ordering — is what keeps its parting save
-    // from writing into the new folder.
+    // So does whatever a plugin's view holds — an open scenario or a feature
+    // description (src/frontend/specs/useSpecs.ts landEditors), a roadmap
+    // page, an Event Model's canvas, a code repository's file, say: its last
+    // save goes out there, and the plugin seals the view on its way out. The
+    // unmount below lands in a later React commit that nothing here awaits,
+    // so the seal — not the ordering — is what keeps its parting save from
+    // writing into the new folder.
     await client.serial("data/leaving");
-    // A feature description belongs to the folder it was typed in too. Its
-    // own cleanup tick would only run once the selection empties below —
-    // after the switch — and the server resolves the data folder per request,
-    // so that late PUT would write these words into the folder that comes
-    // next. Land it here, awaited, and empty the editor so no later tick can.
-    await descTick.current();
-    await descSaveQueue.current.idle();
-    setDescEdit(null);
   };
 
   // Switch to another data dir — typed into the prompt above or picked from
@@ -2501,6 +2474,16 @@ export function App() {
   });
 
   /**
+   * The pane is being given to something else — another tab's view, an app
+   * page, home: every tab lets go of the view it holds, saving what its
+   * editor has (src/plugins/client/tabs.ts `leave`). `taking` is the tab
+   * whose view is about to take the pane, which keeps its own.
+   */
+  const leaveViews = (taking?: string) => {
+    for (const tab of tabs.list()) if (tab.id !== taking) tab.leave?.();
+  };
+
+  /**
    * Home — the data folder's README editor (app-startup.md
    * "The data folder name links to the README"). Drops the feature selection
    * and pushes `/`, so Back returns to the feature that was open. The README
@@ -2512,13 +2495,10 @@ export function App() {
   const goHome = () => {
     // A code repository's home is the Files tab's (its README.md, if any).
     if (codeRepoRef.current && openPluginView(FILES_TAB, FILES_HOME, { push: true })) return;
-    editorRef.current.close();
+    leaveViews();
     setPluginView(null);
     setAppPage(null);
     setSelectedFolder(null);
-    setSelected(null);
-    setFeature(null);
-    setSelectedScenario(null);
     if (location.pathname !== "/") history.pushState(null, "", "/");
   };
 
@@ -2558,10 +2538,7 @@ export function App() {
     // A tab that loads its views itself — Specs reads the feature first —
     // takes it from here, the leaving and the url included.
     if (owner.open) return owner.open(view, opts);
-    editorRef.current.close();
-    setSelected(null);
-    setFeature(null);
-    setSelectedScenario(null);
+    leaveViews(tab);
     setSelectedFolder(null);
     selectSidebarTab(tab);
     setAppPage(null);
@@ -2588,11 +2565,8 @@ export function App() {
    * closing either returns to what was open before both.
    */
   const openAppPage = (page: AppPage, opts: { push?: boolean } = { push: true }) => {
-    editorRef.current.close();
+    leaveViews();
     setPluginView(null);
-    setSelected(null);
-    setFeature(null);
-    setSelectedScenario(null);
     setSelectedFolder(null);
     setDrawerOpen(false);
     setSettingsError(null);
@@ -2972,13 +2946,11 @@ export function App() {
       // .ts): with Specs off it matches nothing and reads as home.
       if (!openPluginView(pluginHit.tab.id, pluginHit.view, { pullProblem })) goHome();
     } else {
-      // Back to home while the editor pane is open: it leaves the way `<`
-      // does (specs/editor/spec-editor.feature.md "Spec editor pane").
-      editorRef.current.close();
+      // Back to home while a tab's view is open: it lets go of it — the
+      // editor pane leaves the way `<` does (specs/editor/spec-editor
+      // .feature.md "Spec editor pane").
+      leaveViews();
       setPluginView(null);
-      setSelected(null);
-      setFeature(null);
-      setSelectedScenario(null);
     }
   };
 
@@ -4168,11 +4140,8 @@ export function App() {
     deletePickedScenarios,
     deleteScenario,
     deleteTreeScenario,
-    descEditRef,
     descPaneRef,
-    descSaveQueue,
     descSaved,
-    descTick,
     describeSelection,
     dismissConflict,
     draftVersion,
@@ -4183,6 +4152,8 @@ export function App() {
     endScenarioDrag,
     folderMenuKey,
     knownAttributes,
+    landSpecsEditors,
+    leaveFeature,
     markSaved,
     moveFeaturePrompt,
     moveFeatureTo,
@@ -4208,7 +4179,7 @@ export function App() {
     publish,
     publishScenario,
     qtestPublished,
-    refreshReadOnlyPane,
+    refreshOpenFeature,
     removeFeature,
     removeFolder,
     removeTest,
@@ -4229,7 +4200,6 @@ export function App() {
     scenarioLink,
     scenarioNav,
     scenarioRefs,
-    scenarioSaveQueue,
     selectionLabel,
     sessionBundle,
     sessionCount,
@@ -4273,6 +4243,9 @@ export function App() {
   // What the Specs tab's `c` and its own commands read (src/plugins/
   // builtin/specs/client.tsx), published before they are read below.
   provideSpecsHost({
+    land: landSpecsEditors,
+    leave: leaveFeature,
+    refresh: refreshOpenFeature,
     createFeature: () => void createFeature(),
     // Imports into the selected spec folder (specs/external-links/aha-import
     // .feature.md, OpenSpec's likewise), while their switches are on.

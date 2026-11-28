@@ -160,6 +160,14 @@ export interface TabPlugin<V = unknown> {
    */
   open?(view: V, opts: OpenViewOptions): boolean;
   /**
+   * The pane is being given to something else — another tab's view, an app
+   * page, home. A tab that holds an open view of its own lets go of it here:
+   * its editor's last save goes out, and the view is forgotten. Called on
+   * every tab but the one whose view is about to take the pane, whether or
+   * not the tab had it.
+   */
+  leave?(): void;
+  /**
    * The tab's own "new" — a task, a case, an issue: what `c` creates while
    * the tab is the sidebar, so the key never makes a feature from there.
    * Absent, `c` is quiet on the tab.
@@ -378,8 +386,10 @@ declare module "../kernel" {
     /** The data folder changed: forget the old one's data and load the new. */
     "data/changed": () => void | Promise<void>;
     /** The reload tick, with the plugin view that has the pane: refresh what
-        is on screen, unless an editor is dirty. */
-    "reload/tick": (open: PluginView | null) => void;
+        is on screen, unless an editor is dirty. A listener that answers a
+        promise is waited for — Sync's progress lasts until it has finished —
+        and one that fails is logged, without stopping the others. */
+    "reload/tick": (open: PluginView | null) => void | Promise<void>;
     /** The app's settings changed (`GET /api/state`'s payload) — a switch a
         module reads beside its own, the Google Calendar one say. */
     "settings/changed": (state: Record<string, unknown>) => void;
