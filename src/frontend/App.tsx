@@ -323,6 +323,7 @@ import { useSpecsRefs } from "./specs/refs";
 import { useEditorEffects } from "./specs/editorEffects";
 import { useOpenFeatureActions } from "./specs/openActions";
 import { useSessionSelection } from "./specs/sessionSelection";
+import { useFeaturePageKeys } from "./specs/pageKeys";
 import { provideSpecsHost, type SpecsActions } from "./specs/host";
 import {
   DEFAULT_PROJECT_MANAGEMENT_TOOL,
@@ -3604,12 +3605,6 @@ export function App() {
     setCopied(path);
     window.setTimeout(() => setCopied((p) => (p === path ? null : p)), 2000);
   };
-  // The scenario url "Copy link" shares. The public specs site hands links to
-  // people outside the team, so there it is the versionless url, which still
-  // opens after the scenario gets a new version (specs/app/public-specs-site
-  // .feature.md "copies a deep link"); everywhere else, the versioned one.
-  const scenarioLink = (fileName: string, s: Pick<Scenario, "name" | "version">) =>
-    readOnly ? latestScenarioPath(fileName, s) : scenarioPath(fileName, s);
 
   const {
     draftVersion,
@@ -4533,7 +4528,6 @@ export function App() {
    * command palette").
    */
   const quietBehindPalette = quiet && palette === null;
-  const onFeaturePage = selected !== null && feature !== null && editing === null;
   // On a small screen "[" and the sidebar buttons work the drawer instead of
   // the rail; the rail preference is left alone for the next big window.
   const toggleSidebar = () => {
@@ -4559,59 +4553,21 @@ export function App() {
   useEffect(() => {
     setDrawerOpen(false);
   }, [compact, selected, pluginViewKey, editing !== null]);
-  // specs/editor/spec-editor.feature.md "Adding Scanarios": a small dialog
-  // asks for the scenario's name first; the editor pane opens with it. A
-  // new scenario starts as a draft: autosave
-  // (specs/editor/editor-autosave.feature.md) writes the editor out every few
-  // seconds, and a draft stays in the document. Proposing it — into the
-  // .feature.md — takes the editor's Propose button, an explicit act.
-  const newScenario = async (insertAt?: number) => {
-    const name = await prompt({
-      title: "New scenario",
-      placeholder: "Scenario name",
-      confirmLabel: "Create",
-    });
-    if (!name || !cleanLine(name)) return;
-    // At `insertAt` — "New scenario below" on a card — or at the end.
-    saveOnOpen.current = true;
-    setEditing(newScenarioDraft(name, insertAt));
-  };
-  // specs/ui/ui.feature.md "Select scenarios via up and down keys": the
-  // highlight walks the cards; Enter opens the highlighted one in the editor
-  // pane.
-  const moveScenarioSelection = (e: KeyboardEvent, delta: 1 | -1) => {
-    if (!feature) return;
-    const count = feature.scenarios.length;
-    // Steal focus from a clicked button (e.g. the feature just opened in the
-    // sidebar) so a following Enter edits the highlighted scenario instead
-    // of re-activating that button.
-    if (e.target instanceof HTMLElement) e.target.blur();
-    setSelectedScenario((i) =>
-      delta > 0
-        ? i === null
-          ? 0
-          : Math.min(i + 1, count - 1)
-        : i === null
-          ? count - 1
-          : Math.max(i - 1, 0),
-    );
-  };
-  const openSelectedScenario = (e: KeyboardEvent): void | false => {
-    if (!feature || selectedScenario === null) return false;
-    const t = e.target;
-    if (e.key === "Enter") {
-      // A focused button or link keeps its native Enter activation — except
-      // the highlighted card's own title link, which a click left focused:
-      // Enter there edits the scenario rather than re-selecting it.
-      const titleLink = scenarioRefs.current[selectedScenario]?.querySelector(
-        ".scenario-title > a",
-      );
-      if (t instanceof HTMLButtonElement) return false;
-      if (t instanceof HTMLAnchorElement && t !== titleLink) return false;
-    }
-    const s = feature.scenarios[selectedScenario];
-    if (s) setEditing({ index: selectedScenario, scenario: { ...s } });
-  };
+  const {
+    moveScenarioSelection,
+    newScenario,
+    onFeaturePage,
+    openSelectedScenario,
+    scenarioLink,
+    scenarioNav,
+    stepScenario,
+  } = useFeaturePageKeys({
+    openScenarioRow,
+    prompt,
+    readOnly,
+    saveOnOpen,
+    scenarioRefs,
+  });
   // ESC closes whatever is on top (specs/ui/ui.feature.md "Dialogs"): a dialog;
   // then the editor pane — its way back, leaving the scenario autosaved
   // (specs/editor/spec-editor.feature.md "Spec editor pane") — unless the
@@ -4664,28 +4620,6 @@ export function App() {
     if (isTypingTarget(e.target)) return false;
     if (selectedFolder !== null) return setSelectedFolder(null);
     return false;
-  };
-  // The scenario editor's `<` / `>` and their keys: step to the scenario
-  // before or after the open one, through every scenario in the tree in the
-  // order the sidebar lists them — across features too. The same way the
-  // tree's own rows switch scenarios (openScenarioRow), so the open pane
-  // autosaves on the way out. Located by the scenario as last saved, not by
-  // a name still being typed; a new scenario not yet saved has no place in
-  // the walk, so both ways are off until it does.
-  const editedEntry =
-    editing !== null && editing.index !== null ? (feature?.scenarios[editing.index] ?? null) : null;
-  const scenarioNav =
-    selected && editedEntry
-      ? scenarioNeighbors(
-          scenarioSequence(buildTree(folders, features, folderDescriptions, folderOrders, featureOrders), selected, feature),
-          selected,
-          editedEntry,
-        )
-      : { prev: null, next: null };
-  const stepScenario = (step: -1 | 1): void | false => {
-    const to = step < 0 ? scenarioNav.prev : scenarioNav.next;
-    if (!to) return false;
-    openScenarioRow(to.file, to.scenario);
   };
   // What the Specs tab's `c` and its own commands read (src/plugins/
   // builtin/specs/client.tsx), published before they are read below.
