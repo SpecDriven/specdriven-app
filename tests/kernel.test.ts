@@ -127,6 +127,46 @@ test("events: emit isolates errors, serial keeps order, bail stops at the first 
   expect(await ctx.bail("kernel-test/ask", "again")).toBeUndefined();
 });
 
+test("events: settle waits for every listener, in order, and logs the one that fails", async () => {
+  const ctx = new Context();
+  const seen: string[] = [];
+  const a = ctx.plugin({
+    name: "a",
+    apply(c) {
+      c.on("kernel-test/ping", async (n) => {
+        seen.push(`slow starts ${n}`);
+        await new Promise((r) => setTimeout(r, 20));
+        seen.push(`slow ends ${n}`);
+      });
+      c.on("kernel-test/ping", () => {
+        throw new Error("boom");
+      });
+      c.on("kernel-test/ping", async () => {
+        throw new Error("late boom");
+      });
+      c.on("kernel-test/ping", (n) => {
+        seen.push(`plain ${n}`);
+      });
+    },
+  });
+  await a.ready;
+  const quiet = console.error;
+  const logged: unknown[] = [];
+  console.error = (...args: unknown[]) => void logged.push(args);
+  try {
+    const done = ctx.settle("kernel-test/ping", 1);
+    // Every listener was called at once, in order, as emit calls them.
+    expect(seen).toEqual(["slow starts 1", "plain 1"]);
+    await done;
+  } finally {
+    console.error = quiet;
+  }
+  // The slow one was waited for; neither failure stopped the others or threw.
+  expect(seen).toEqual(["slow starts 1", "plain 1", "slow ends 1"]);
+  expect(logged.length).toBe(2);
+  await a.dispose();
+});
+
 test("a plugin that throws in apply fails alone, its partial effects unwound", async () => {
   const ctx = new Context();
   const log: string[] = [];

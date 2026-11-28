@@ -88,6 +88,9 @@ const plugin: Plugin<Context> = {
     ctx.on("data/leaving", async () => {
       await specsHost()?.land();
     });
+    // The reload tick: the open feature as the folder now has it. Answered
+    // as a promise, so Sync's progress lasts until it is read.
+    ctx.on("reload/tick", () => specsHost()?.refresh());
   },
 };
 

@@ -73,6 +73,7 @@ import { App } from "../src/frontend/App";
 import { handleApi, reloader, syncedOnStart } from "../src/server/api";
 import { syncPlugins } from "../src/plugins/host/loader";
 import { syncClientPlugins } from "../src/plugins/client/loader";
+import { syncDataDir } from "../src/server/reload";
 import { writeState } from "../src/server/state";
 
 const ENTRY = "# Chose the queue\n\n**Author:** Dana\n**Date:** 2026-11-20\n**Kind:** decision\n\nWe went with the queue.\n";
@@ -493,6 +494,29 @@ describe("The Specs tab's behaviour, kept through its move into the plugin", () 
     expect(readmeOpen()).toBe(true);
     expect(featureOpen()).toBe(false);
   });
+
+  test("a reload tick shows the open feature as the folder now has it, and nothing of it with Specs off", async () => {
+    await setUp(BOTH);
+    expect((await putState({ reloadFrequencySeconds: 1 })).status).toBe(200);
+    await open("/features/quotes");
+    await until(() => (host!.textContent ?? "").includes("Given a quote"), "the feature's page");
+    await Bun.write(join(data, "specs/quotes.feature.md"), FEATURE.replace("Given a quote", "Given a renewed quote"));
+    await syncDataDir(data);
+    await until(() => (host!.textContent ?? "").includes("Given a renewed quote"), "the change, after a tick");
+    expect(location.pathname).toBe("/features/quotes");
+    await unmount();
+
+    // Switched off, the tab has no feature open and its handler is gone: a
+    // tick opens nothing.
+    expect((await putState({ plugins: { enabled: ["notebook"] } })).status).toBe(200);
+    await open("/features/quotes");
+    await until(() => readmeOpen(), "home");
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 1500));
+    });
+    expect(featureOpen()).toBe(false);
+    expect(readmeOpen()).toBe(true);
+  }, 20_000);
 
   test("a link to a feature that is not there says so and opens home", async () => {
     await setUp(BOTH);

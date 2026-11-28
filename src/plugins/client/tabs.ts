@@ -378,8 +378,10 @@ declare module "../kernel" {
     /** The data folder changed: forget the old one's data and load the new. */
     "data/changed": () => void | Promise<void>;
     /** The reload tick, with the plugin view that has the pane: refresh what
-        is on screen, unless an editor is dirty. */
-    "reload/tick": (open: PluginView | null) => void;
+        is on screen, unless an editor is dirty. A listener that answers a
+        promise is waited for — Sync's progress lasts until it has finished —
+        and one that fails is logged, without stopping the others. */
+    "reload/tick": (open: PluginView | null) => void | Promise<void>;
     /** The app's settings changed (`GET /api/state`'s payload) — a switch a
         module reads beside its own, the Google Calendar one say. */
     "settings/changed": (state: Record<string, unknown>) => void;
