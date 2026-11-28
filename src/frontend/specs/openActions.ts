@@ -14,7 +14,7 @@ import { type AppPage, featurePath, resolveScenario } from "../route";
 import { toast } from "../Toasts";
 import { setConflict } from "./editorState";
 import { setRenameDraft } from "./featurePageState";
-import { type Listing, useSpecsListing } from "./listing";
+import { type Listing } from "./listing";
 import {
   type OpenOptions,
   setDirty,
@@ -40,7 +40,6 @@ export interface OpenFeatureActionsDeps {
 
 export function useOpenFeatureActions(deps: OpenFeatureActionsDeps) {
   const { feature, selected } = useOpenFeature();
-  const { features } = useSpecsListing();
   const {
     editorRef,
     loadFeatures,
