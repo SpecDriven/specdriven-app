@@ -127,7 +127,7 @@ test("events: emit isolates errors, serial keeps order, bail stops at the first 
   expect(await ctx.bail("kernel-test/ask", "again")).toBeUndefined();
 });
 
-test("events: settle waits for every listener, in order, and logs the one that fails", async () => {
+test("settle waits for every listener, in order, and logs the one that fails", async () => {
   const ctx = new Context();
   const seen: string[] = [];
   const a = ctx.plugin({
