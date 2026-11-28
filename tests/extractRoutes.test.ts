@@ -509,6 +509,7 @@ describe("the routes", () => {
       "GET /api/extract/refine/:id",
       "DELETE /api/extract/refine/:id",
       "POST /api/extract/repo",
+      "POST /api/extract/prompt",
       "POST /api/extract/publish",
       "GET /api/extract/github",
       "POST /api/extract/draft/cancel",

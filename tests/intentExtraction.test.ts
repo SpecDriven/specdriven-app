@@ -23,6 +23,9 @@ import {
   startExtraction,
   WAS_CLOSED,
 } from "../src/server/intentExtraction";
+import { DRAFT_SYSTEM_PROMPT } from "../src/server/intentDraft";
+import { DRAFT_INSTRUCTIONS, DRAFT_RULES, MAX_INSTRUCTIONS_CHARS } from "../src/server/intentDraftPrompt";
+import { EXTRACT_PROMPT_FILE } from "../src/server/intentPromptFile";
 import { parseFeature } from "../src/server/parser";
 import { writeState } from "../src/server/state";
 import { fakeProvider } from "./helpers/fakeAgent";
@@ -211,6 +214,79 @@ describe("drafting", () => {
     await extractionSettled(data);
     const { job } = await status();
     expect(job.folders[0].error).toBe("Claude did not answer with a title and scenarios");
+  });
+});
+
+describe("the drafting prompt", () => {
+  const promptFile = () => join(data, EXTRACT_PROMPT_FILE);
+  const saved = async () => readFile(promptFile(), "utf8").catch(() => null);
+
+  test("without instructions the agent is told the built-in prompt, and the folder keeps no file", async () => {
+    await start();
+    await extractionSettled(data);
+    expect(asked.map((req) => req.systemPrompt)).toEqual([DRAFT_SYSTEM_PROMPT, DRAFT_SYSTEM_PROMPT]);
+    expect((await status()).job.instructions).toBeUndefined();
+    expect(await saved()).toBeNull();
+  });
+
+  test("instructions sent with the request are what the agent is told, with the app's rules after them, and are kept in the folder", async () => {
+    const started = await start({ instructions: "  Write every scenario in German.  " });
+    expect(started.status).toBe(202);
+    expect(started.body.job.instructions).toBe("Write every scenario in German.");
+    await extractionSettled(data);
+    expect(asked).toHaveLength(2);
+    for (const req of asked) expect(req.systemPrompt).toBe(`Write every scenario in German.\n\n${DRAFT_RULES}`);
+    // The files still arrive in the turn itself, as before.
+    expect(asked[0]!.prompt).toContain("=== packages/api/src/server.ts ===");
+    expect(await saved()).toBe("Write every scenario in German.\n");
+  });
+
+  test("a folder's own prompt is used when the request sends none", async () => {
+    await writeFile(promptFile(), "Name every scenario as a question.\n");
+    await start();
+    await extractionSettled(data);
+    expect(asked[0]!.systemPrompt).toBe(`Name every scenario as a question.\n\n${DRAFT_RULES}`);
+    expect(await saved()).toBe("Name every scenario as a question.\n");
+  });
+
+  test("the built-in instructions sent with the request take the folder's file away", async () => {
+    await writeFile(promptFile(), "Name every scenario as a question.\n");
+    const started = await start({ instructions: DRAFT_INSTRUCTIONS });
+    expect(started.body.job.instructions).toBeUndefined();
+    await extractionSettled(data);
+    expect(asked[0]!.systemPrompt).toBe(DRAFT_SYSTEM_PROMPT);
+    expect(await saved()).toBeNull();
+  });
+
+  test("a retry asks as the run began, whatever the folder's file says by then", async () => {
+    turn = async (req) => (moduleOf(req) === "Web" ? { text: "rate limited", isError: true } : drafted(req));
+    await start({ instructions: "Write every scenario in German." });
+    await extractionSettled(data);
+    await writeFile(promptFile(), "Something else entirely.\n");
+
+    turn = async (req) => drafted(req);
+    await call("POST", "/api/extract/draft/retry", { folder: "web" });
+    await extractionSettled(data);
+    expect(asked.map(moduleOf)).toEqual(["API", "Web", "Web"]);
+    expect(asked[2]!.systemPrompt).toBe(`Write every scenario in German.\n\n${DRAFT_RULES}`);
+  });
+
+  test("a prompt that is too long or not text is refused, and nothing is drafted or saved", async () => {
+    expect((await start({ instructions: "x".repeat(MAX_INSTRUCTIONS_CHARS + 1) })).status).toBe(400);
+    const notText = await start({ instructions: 7 });
+    expect(notText.status).toBe(400);
+    expect(notText.body.error).toBe("The prompt must be text");
+    expect((await status()).job).toBeNull();
+    expect(await saved()).toBeNull();
+    expect(asked).toEqual([]);
+  });
+
+  test("the wizard is told a folder's own prompt before anything is made, and null where there is none", async () => {
+    expect((await call("POST", "/api/extract/prompt", { folder: data })).body).toEqual({ saved: null });
+    await writeFile(promptFile(), "Name every scenario as a question.\n");
+    expect((await call("POST", "/api/extract/prompt", { folder: data })).body).toEqual({ saved: "Name every scenario as a question." });
+    expect((await call("POST", "/api/extract/prompt", { folder: "https://github.com/acme/specs-shop" })).body).toEqual({ saved: null });
+    expect((await call("POST", "/api/extract/prompt", {})).body).toEqual({ saved: null });
   });
 });
 

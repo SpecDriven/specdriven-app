@@ -6,15 +6,22 @@ import type { RefineJob } from "../server/intentRefine";
 import type { ChosenFolder, CreatedSpecs, TargetState } from "../server/intentRepo";
 import type { TestLinking } from "../server/intentTestUrl";
 import { LANGUAGE_LABEL, repoNameProblem } from "../server/intentNames";
+import { DRAFT_INSTRUCTIONS, DRAFT_RULES, instructionsProblem, tidyInstructions } from "../server/intentDraftPrompt";
 import { ModelSelect, chosenModel, type AgentModels, type ModelRow } from "./AgentModels";
 import { useAgentChoices } from "./agentChat";
 import { modelProblem, oneShotAgents } from "./ImportFromJiraWikiDialog";
 import {
+  builtInPrompt,
   chosen,
   flatten,
   folderCounts,
+  hasFolderPrompt,
   move,
   moveTargets,
+  promptChanged,
+  promptFor,
+  promptReviewNote,
+  promptToSend,
   proposalSummary,
   rename,
   reviewFolders,
@@ -22,13 +29,17 @@ import {
   reviewSummary,
   setAllSelected,
   setSelected,
+  type PromptDraft,
+  type PromptReview,
   type ReviewFolder,
 } from "./extractSpecs";
 
 // "Extract specs from a code project" (specs/app/extract-specs-from-code.
 // feature.md): choose the project's folder; review the folders its module
 // structure suggests — tick, rename, nest, or have an agent regroup them by
-// business area; then say where they go: a new specification folder, made
+// business area; read, and change, what the agent is told when it drafts
+// their specs ("The drafting prompt is shown before anything is made");
+// then say where they go: a new specification folder, made
 // beside the project with a repository on GitHub, or one that already
 // exists, which they are added to. Create (or Add) does it, opens the
 // folder in this window, and starts an agent drafting proposed specs for
@@ -76,6 +87,26 @@ export interface ExtractCreated {
   model?: string;
   /** Go on, once the specs are drafted, to link the project's tests to them. */
   linkTests?: boolean;
+  /** The writing instructions to draft with, when the user changed them on the prompt step. */
+  instructions?: string;
+}
+
+/** The file a specification folder keeps its own drafting prompt in. */
+const PROMPT_FILE = ".specdriven/extract-prompt.md";
+
+/** The drafting prompt a specification folder on this computer keeps, or null: it has none, or cannot be asked. */
+async function savedPrompt(folder: string): Promise<string | null> {
+  try {
+    const res = await fetch("/api/extract/prompt", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ folder }),
+    });
+    const data = (await res.json()) as { saved?: string | null };
+    return res.ok && typeof data.saved === "string" ? data.saved : null;
+  } catch {
+    return null;
+  }
 }
 
 const AGENT_KEY = "specdriven.importAgent";
@@ -175,7 +206,7 @@ export function ReviewTree({
   );
 }
 
-type Step = "project" | "review" | "repo";
+type Step = "project" | "review" | "prompt" | "repo";
 
 export function ExtractSpecsDialog({
   codeDir: initialDir,
@@ -230,7 +261,11 @@ export function ExtractSpecsDialog({
   const [model, setModel] = useState("");
   /** Whether the project's tests are linked to the scenarios once they are drafted. */
   const [linkTests, setLinkTests] = useState(true);
-  const [busy, setBusy] = useState<"analyse" | "create" | null>(null);
+  /** The writing instructions the agent drafts with, as the prompt step shows them. */
+  const [prompt, setPrompt] = useState<PromptDraft>(builtInPrompt);
+  /** Why the wizard came back to the prompt step: the folder named after it drafts with another prompt. */
+  const [promptReview, setPromptReview] = useState<PromptReview | null>(null);
+  const [busy, setBusy] = useState<"analyse" | "prompt" | "create" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [existing, setExisting] = useState<string | null>(null);
   /**
@@ -359,6 +394,29 @@ export function ExtractSpecsDialog({
   /** Linking needs specs to link to, an agent to match them, tests, and somewhere on github.com for the links to point. */
   const canLink = Boolean(tests && !tests.problem && chosenAgent && drafted > 0);
 
+  /** The prompt is shown only when it will be used: an agent drafts at least one folder. */
+  const showsPrompt = Boolean(chosenAgent) && drafted > 0;
+  const promptProblem = instructionsProblem(prompt.text);
+  /** Whether the folder named keeps a prompt of its own, which is what the step started from. */
+  const folderPrompt = hasFolderPrompt(prompt);
+  const isBuiltIn = tidyInstructions(prompt.text) === DRAFT_INSTRUCTIONS;
+  const reviewNote = promptReviewNote(prompt, promptReview);
+  /** The existing folder whose prompt applies; "" for a new one, which keeps none yet. */
+  const promptFolder = toExisting ? existingFolder.trim() : "";
+
+  /** From the folders to the prompt — the named folder's own, when it keeps one — or past it when nothing is drafted. */
+  const toPrompt = async () => {
+    if (!showsPrompt) return setStep("repo");
+    if (busy) return;
+    if (promptFolder !== prompt.loadedFor) {
+      setBusy("prompt");
+      const saved = promptFolder ? await savedPrompt(promptFolder) : null;
+      setPrompt(promptFor(prompt, promptFolder, saved).prompt);
+      setBusy(null);
+    }
+    setStep("prompt");
+  };
+
   /** Whether the folders were changed by hand since they were proposed. */
   const edited =
     analysis !== null && refineNote === null && JSON.stringify(tree) !== JSON.stringify(reviewFolders(analysis.proposal.folders));
@@ -400,12 +458,27 @@ export function ExtractSpecsDialog({
   const create = async (agreed: string | null = setUpAgreed) => {
     if (busy || !analysis || problem || badModel) return;
     if (toExisting ? !existingFolder.trim() : nameProblem !== null) return;
+    if (showsPrompt && promptProblem) return setStep("prompt");
     setBusy("create");
     setError(null);
     setExisting(null);
     setSetUpOffer(null);
     const initialize = agreed !== null && agreed === existingFolder.trim();
     try {
+      // The folder was named after the prompt was shown: what it drafts with
+      // is looked up now, and anything the user has not seen is shown first.
+      let asked = prompt;
+      if (showsPrompt && promptFolder !== prompt.loadedFor) {
+        const next = promptFor(prompt, promptFolder, promptFolder ? await savedPrompt(promptFolder) : null);
+        asked = next.prompt;
+        setPrompt(asked);
+        if (next.review) {
+          setPromptReview(next.review);
+          setStep("prompt");
+          return;
+        }
+      }
+      const instructions = showsPrompt ? promptToSend(asked) : undefined;
       const res = await fetch("/api/extract/repo", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -450,6 +523,7 @@ export function ExtractSpecsDialog({
         ...(chosenAgent ? { agent: chosenAgent.id } : {}),
         ...(sentModel ? { model: sentModel } : {}),
         ...(canLink && linkTests ? { linkTests: true } : {}),
+        ...(instructions ? { instructions } : {}),
       });
     } catch {
       setError(NO_SERVER);
@@ -517,7 +591,7 @@ export function ExtractSpecsDialog({
             className="modal-form"
             onSubmit={(e) => {
               e.preventDefault();
-              if (!problem) setStep("repo");
+              if (!problem) void toPrompt();
             }}
           >
             <h3>Folders for {analysis.proposal.project}</h3>
@@ -594,7 +668,98 @@ export function ExtractSpecsDialog({
                   Back
                 </button>
               )}
-              <button type="submit" className="btn btn-primary" disabled={problem !== null || refining !== null}>
+              <button type="submit" className="btn btn-primary" disabled={problem !== null || refining !== null || busy !== null}>
+                Next
+              </button>
+            </div>
+          </form>
+        )}
+        {step === "prompt" && analysis && (
+          <form
+            className="modal-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (promptProblem) return;
+              setPromptReview(null);
+              setStep("repo");
+            }}
+          >
+            <h3>Drafting prompt</h3>
+            <p>
+              This is what {chosenAgent?.label ?? "the agent"} is told when it drafts specs for{" "}
+              <strong>{analysis.proposal.project}</strong>. Change how the specs are written here; each folder’s turn
+              also carries the project’s name, the folder’s name and its files.
+            </p>
+            {reviewNote && <p className="extract-prompt-note">{reviewNote}</p>}
+            <label>
+              How the specs are written
+              <textarea
+                className="extract-prompt"
+                aria-label="Drafting prompt"
+                rows={12}
+                spellCheck={false}
+                autoFocus
+                value={prompt.text}
+                onChange={(e) => setPrompt((p) => ({ ...p, text: e.target.value }))}
+              />
+            </label>
+            <div className="extract-tools">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={isBuiltIn}
+                onClick={() => setPrompt((p) => ({ ...p, text: DRAFT_INSTRUCTIONS }))}
+              >
+                Reset to default
+              </button>
+              {folderPrompt && (
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={!promptChanged(prompt)}
+                  onClick={() => setPrompt((p) => ({ ...p, text: p.loaded }))}
+                >
+                  Back to the folder’s prompt
+                </button>
+              )}
+            </div>
+            {promptProblem ? (
+              <p className="error">{promptProblem}</p>
+            ) : (
+              <p className="hint">
+                {folderPrompt && !promptChanged(prompt) ? (
+                  <>
+                    This is the specification folder’s own prompt, kept in <code>{PROMPT_FILE}</code>.
+                  </>
+                ) : !promptChanged(prompt) ? (
+                  <>
+                    The built-in prompt. Changed, it is saved in the specification folder as <code>{PROMPT_FILE}</code> and
+                    used by everyone who drafts specs into it.
+                  </>
+                ) : folderPrompt && isBuiltIn ? (
+                  <>
+                    The built-in prompt. The folder’s own, in <code>{PROMPT_FILE}</code>, is removed when the drafting starts.
+                  </>
+                ) : (
+                  <>
+                    Saved in the specification folder as <code>{PROMPT_FILE}</code> when the drafting starts, and used by
+                    everyone who drafts specs into it.
+                  </>
+                )}
+              </p>
+            )}
+            <div className="extract-rules" role="group" aria-label="Always added by the app">
+              <p className="hint">Always added by the app</p>
+              <p>{DRAFT_RULES}</p>
+            </div>
+            <div className="dialog-actions">
+              <button type="button" className="btn btn-secondary" onClick={onClose}>
+                Cancel
+              </button>
+              <button type="button" className="btn btn-secondary" onClick={() => setStep("review")}>
+                Back
+              </button>
+              <button type="submit" className="btn btn-primary" disabled={promptProblem !== null}>
                 Next
               </button>
             </div>
@@ -866,7 +1031,12 @@ export function ExtractSpecsDialog({
               <button type="button" className="btn btn-secondary" onClick={onClose}>
                 Cancel
               </button>
-              <button type="button" className="btn btn-secondary" disabled={busy !== null} onClick={() => setStep("review")}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={busy !== null}
+                onClick={() => setStep(showsPrompt ? "prompt" : "review")}
+              >
                 Back
               </button>
               <button

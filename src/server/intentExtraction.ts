@@ -32,7 +32,6 @@ import { repoPath } from "./files";
 import { BATCH_CHARS, FILE_CHARS, planBatches, renderBatch, unreadable, type DigestFile } from "./intentDigest";
 import {
   DRAFT_SCHEMA,
-  DRAFT_SYSTEM_PROMPT,
   draftFromResult,
   draftPrompt,
   extractedRoots,
@@ -40,6 +39,7 @@ import {
   sourceFiles,
   type Draft,
 } from "./intentDraft";
+import { draftSystemPrompt, isDefaultInstructions } from "./intentDraftPrompt";
 import { isTestPath, moduleFiles, ROOT_ID, type ModuleFiles, type RepoSnapshot } from "./intentModules";
 import { ExtractError, type ChosenFolder } from "./intentRepo";
 import { scanProject } from "./intentScan";
@@ -138,6 +138,12 @@ export interface ExtractionJob {
   /** The agent asked for; none means whichever answers one-shot turns first. */
   agent?: string;
   model?: string;
+  /**
+   * The writing instructions the run drafts with, when they are not the
+   * built-in ones: kept here so a retry or a resume asks as the run began,
+   * whatever the folder's own prompt says by then.
+   */
+  instructions?: string;
   state: JobState;
   /** Why it is interrupted. */
   problem?: string;
@@ -318,7 +324,7 @@ async function draftPass(entry: Running, abort: AbortController): Promise<boolea
             // The specification folder, never the project: an agent that can read
             // files where it runs is shown the project only through this prompt.
             cwd: job.dataDir,
-            systemPrompt: DRAFT_SYSTEM_PROMPT,
+            systemPrompt: draftSystemPrompt(job.instructions),
             prompt: draftPrompt(
               {
                 project: job.project,
@@ -624,6 +630,8 @@ export interface StartOptions {
   folders: readonly ChosenFolder[];
   agent?: string;
   model?: string;
+  /** The writing instructions to draft with, in place of the built-in ones. */
+  instructions?: string;
   /** Go on, once the specs are drafted, to link the project's tests to their scenarios. */
   linkTests?: boolean;
 }
@@ -649,6 +657,7 @@ export async function startExtraction(options: StartOptions): Promise<Extraction
     project: basename(resolve(options.codeDir)),
     ...(options.agent ? { agent: options.agent } : {}),
     ...(options.model ? { model: options.model } : {}),
+    ...(options.instructions && !isDefaultInstructions(options.instructions) ? { instructions: options.instructions } : {}),
     state: "running",
     kind: "draft",
     ...(target?.base ? { tests: { base: target.base, repo: target.repo } } : {}),
