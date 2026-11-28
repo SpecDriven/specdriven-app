@@ -4,7 +4,8 @@
 // record remembers the version it replaced, "Roll back to v…" asks the
 // server for that version; a plugin that is fine, one with no previous
 // version, and the hosted demo offer nothing. A held plugin says so beside
-// its version.
+// its version. Its arrows move the plugins on, but never Specs, which while
+// it is on is always first ("Specs is a built-in plugin").
 //
 // As tests/pluginMarketplacePage.test.tsx does, only the handful of globals
 // React needs are taken from happy-dom and given back after.
@@ -166,4 +167,18 @@ test("a held plugin says so beside its version, and the hosted demo offers no ro
     { demo: true },
   );
   expect(rollback(rowOf(demo, "broken"))).toBeNull();
+});
+
+test("Specs has no arrows and nothing moves above it; the others move", async () => {
+  const container = await mount([plugin("specs", { builtin: true }), plugin("notebook"), plugin("tests")]);
+  const arrows = (id: string) =>
+    [...rowOf(container, id).querySelectorAll<HTMLButtonElement>("button.plugin-row-move")].map((b) => b.disabled);
+  expect(arrows("specs")).toEqual([]);
+  // [up, down]: the row under Specs cannot go up, the last cannot go down.
+  expect(arrows("notebook")).toEqual([true, false]);
+  expect(arrows("tests")).toEqual([false, true]);
+  // Without Specs on, the first row is free to be first.
+  const off = await mount([plugin("notebook"), plugin("tests"), plugin("specs", { builtin: true, enabled: false })]);
+  const first = [...rowOf(off, "notebook").querySelectorAll<HTMLButtonElement>("button.plugin-row-move")];
+  expect(first.map((b) => b.disabled)).toEqual([true, false]);
 });

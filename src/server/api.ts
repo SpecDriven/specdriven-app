@@ -379,6 +379,7 @@ import {
   readProfile,
   sameProfile,
   startFolderLists,
+  specsFirst,
   storedProfile,
   withPlugin,
   writeProfile,
@@ -1920,7 +1921,8 @@ const putState: Handler = async (req) => {
       if (!Array.isArray(list) || !list.every((id) => typeof id === "string" && id.length > 0)) {
         return json({ error: "plugins.enabled must be a list of plugin ids" }, 400);
       }
-      enabled = storedProfile({ plugins: { enabled: list } }) ?? [];
+      // Specs, when on, is always first (specsFirst).
+      enabled = specsFirst(storedProfile({ plugins: { enabled: list } }) ?? []);
     }
     // The explicit plugin folders (specs/app/plugins.feature.md "A plugin
     // loads from a local folder"): absolute paths, taken whole.
