@@ -2,11 +2,12 @@
 // plugin"): the tab, registered while the plugin is on in the open folder,
 // so it stands in the tab bar and on the rail where the profile's order
 // puts it and goes when the plugin is switched off. Its views are the
-// features' urls (./route.ts). The feature tree, the feature page and the
-// editor are still built inside App.tsx, which hands them to this tab
-// through src/frontend/specs/host.ts; the tab renders them, and opens a
-// feature through it. The palette's search and Recent entries, and the
-// window title, it reads from the stores in src/frontend/specs/.
+// features' urls (./route.ts). Its pane — the feature's page, a scenario's
+// editor or page — and its dialogs are components of src/frontend/specs/
+// that read the stores there. The feature tree is still built inside
+// App.tsx, and the handlers still live there: App hands both to this tab
+// through src/frontend/specs/host.ts, and the tab opens a feature through
+// it.
 
 import { FileText } from "lucide-react";
 import type { Context, Plugin } from "../../kernel";
@@ -15,6 +16,8 @@ import { SPECS_PLUGIN } from "../../profile";
 import { specsHost } from "../../../frontend/specs/host";
 import { openFeatureTitle } from "../../../frontend/specs/openFeature";
 import { recentSpec, searchSpecs } from "../../../frontend/specs/palette";
+import { SpecsDialogs } from "../../../frontend/specs/SpecsDialogs";
+import { SpecsPane } from "../../../frontend/specs/SpecsPane";
 import { titleFromFileName } from "../../../server/parser";
 import { manifest } from "./manifest";
 import { matchSpecsRoute, specsPath, type SpecsView } from "./route";
@@ -67,7 +70,12 @@ export const specsTab: TabPlugin<SpecsView> = {
     return specsHost()?.shortcuts ?? [];
   },
   Sidebar: () => <>{specsHost()?.sidebar ?? null}</>,
-  Pane: () => <>{specsHost()?.pane ?? null}</>,
+  Pane: ({ app }) => <SpecsPane app={app} />,
+  // The merge conflict, publish and import dialogs.
+  Overlay: ({ app }) => {
+    const actions = specsHost()?.actions;
+    return actions ? <SpecsDialogs app={app} actions={actions} /> : null;
+  },
 };
 
 const plugin: Plugin<Context> = {

@@ -1,10 +1,10 @@
 // What App.tsx hands the Specs tab (src/plugins/builtin/specs/client.tsx)
-// while the tree, the feature page and the editor are still built inside App:
-// the elements to render and the handlers that act on App's state. App
-// publishes a fresh host on every render, before its children render, so the
-// tab's Sidebar and Pane — rendered as App's children — always read this
-// render's elements, and the tab's create and shortcut hooks read this
-// render's handlers when they run.
+// while the tree is still built inside App and the handlers of the feature
+// page and the editor still live there: the tree's element, and the
+// handlers that act on App's state. App publishes a fresh host on every
+// render, before its children render, so the tab's Sidebar, Pane and
+// Overlay — rendered as App's children — always read this render's, and the
+// tab's create and shortcut hooks read this render's handlers when they run.
 //
 // Not part of the plugin SDK: a seam for moving the Specs tab out of App.tsx
 // a piece at a time (specs/app/plugins.feature.md "Specs is a built-in
@@ -14,6 +14,7 @@ import type { MouseEvent, ReactNode, RefObject } from "react";
 import type { OpenViewOptions, TabShortcut } from "../../plugins/client/tabs";
 import type { SpecsView } from "../../plugins/builtin/specs/route";
 import type { AttributeDefinitions, KnownAttributes } from "../../server/customAttributes";
+import type { AgentDescriptor } from "../../server/agentTypes";
 import type { FeatureListing } from "../../server/features";
 import type { ProjectMember } from "../../server/members";
 import type {
@@ -28,7 +29,14 @@ import type {
   SpecAttribute,
 } from "../../server/parser";
 import type { ResourceLinkKind } from "../../server/resourceLinks";
+import type { AgentModels } from "../AgentModels";
+import type { AhaSite } from "../AhaToken";
 import type { Crumb } from "../Breadcrumbs";
+import type { ConfluencePublishResult } from "../ConfluencePublishDialog";
+import type { ConfluenceWiki } from "../ConfluenceToken";
+import type { JiraSite } from "../JiraToken";
+import type { QtestPublishResult } from "../QtestPublishDialog";
+import type { QtestSite } from "../QtestToken";
 import type { LinkDraft } from "../externallinks";
 import type { ScenarioRow, scenarioNeighbors } from "../tree";
 
@@ -146,13 +154,34 @@ export interface SpecsActions {
     to: string,
     at?: { name: string; version: number; after: boolean },
   ): Promise<void>;
+
+  // The dialogs' (./SpecsDialogs.tsx).
+  /** A merge conflict: publish one side or the manual edit, or leave it. */
+  resolveWith(which: "ours" | "theirs" | "draft", resolved: string): Promise<void>;
+  dismissConflict(): void;
+  /** The header's Saved indicator, after a save that landed. */
+  markSaved(): void;
+  /** What a publish to Confluence or qTest answered, written into the open feature. */
+  confluencePublished(data: ConfluencePublishResult): void;
+  qtestPublished(data: QtestPublishResult): void;
+  /** The Observability page, on a service's log. */
+  openObservability(component?: string): void;
+  /** The sites this device holds a token for, and the last qTest parent module. */
+  confluenceWikis: ConfluenceWiki[];
+  qtestSites: QtestSite[];
+  qtestParentUrl: string;
+  ahaSites: AhaSite[];
+  jiraSites: JiraSite[];
+  /** The coding agents and their models, for an import an agent drafts. */
+  agents: AgentDescriptor[];
+  agentModels: AgentModels;
 }
 
 export interface SpecsHost {
   /** The tree: the Specs tab's sidebar panel. */
   sidebar: ReactNode;
-  /** The open feature's page, its scenario's page or the editor. */
-  pane: ReactNode;
+  /** What the tab's page components and dialogs still call in App. */
+  actions: SpecsActions | null;
   /** Open a feature, or a scenario's page when the view names one. */
   open(view: SpecsView, opts: OpenViewOptions): void;
   /** `c` from the tree: a new feature, in the folder selected. */
@@ -165,7 +194,7 @@ export interface SpecsHost {
 
 const NO_HOST: SpecsHost = {
   sidebar: null,
-  pane: null,
+  actions: null,
   open: () => {},
   createFeature: () => {},
   createInView: null,

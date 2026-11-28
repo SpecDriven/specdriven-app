@@ -262,16 +262,12 @@ import { accessShown, GitAccessChoice, type GitAccess } from "./GitAccessChoice"
 import { SignedCommits } from "./SignedCommits";
 import { ConfluenceTokens, fetchConfluenceTokens, type ConfluenceWiki } from "./ConfluenceToken";
 import { JiraTokens, fetchJiraTokens, type JiraSite } from "./JiraToken";
-import { ImportFromJiraWikiDialog } from "./ImportFromJiraWikiDialog";
 import { AgentModelList, agentModelsOf, agentsWithoutSection, type AgentModels } from "./AgentModels";
-import { ConfluencePublishDialog, type ConfluencePublishResult } from "./ConfluencePublishDialog";
-import { ConfluenceFolderPublishDialog, type FolderFeature } from "./ConfluenceFolderPublishDialog";
+import { type ConfluencePublishResult } from "./ConfluencePublishDialog";
+import { type FolderFeature } from "./ConfluenceFolderPublishDialog";
 import { QtestTokens, fetchQtestTokens, type QtestSite } from "./QtestToken";
-import { QtestPublishDialog, type QtestPublishResult } from "./QtestPublishDialog";
-import { WikiQtestPublishDialog } from "./WikiQtestPublishDialog";
+import { type QtestPublishResult } from "./QtestPublishDialog";
 import { AhaTokens, fetchAhaTokens, type AhaSite } from "./AhaToken";
-import { AhaImportDialog } from "./AhaImportDialog";
-import { importSummary, OpenSpecImportDialog } from "./OpenSpecImportDialog";
 import { ExtractSpecsDialog, type ExtractCreated } from "./ExtractSpecsDialog";
 import { ExtractionProgress, PublishSpecsDialog, useExtraction } from "./ExtractionProgress";
 import { LinkTestsDialog } from "./LinkTestsDialog";
@@ -396,9 +392,6 @@ import {
   toggleSpecSelected,
   useSpecSelection,
 } from "./specs/selection";
-import { FeaturePage } from "./specs/FeaturePage";
-import { ScenarioEditor } from "./specs/ScenarioEditor";
-import { ScenarioPage } from "./specs/ScenarioPage";
 import {
   resetOpenFeature,
   setDirty,
@@ -1251,7 +1244,6 @@ export function App() {
     editorMenuOpen,
     statusMenuOpen,
     conflict,
-    conflictDraft,
     resolving,
     saving,
     savedAt,
@@ -2210,12 +2202,6 @@ export function App() {
   const userInfoTrapRef = useFocusTrap(userInfoOpen);
   const settingsFileTrapRef = useFocusTrap(settingsFileOpen);
   const tokenSignInTrapRef = useFocusTrap(tokenSignInOpen);
-  const confluenceTrapRef = useFocusTrap(confluencePublishOpen);
-  const confluenceFolderTrapRef = useFocusTrap(confluenceFolder !== null);
-  const qtestTrapRef = useFocusTrap(qtestPublishOpen);
-  const wikiQtestTrapRef = useFocusTrap(wikiQtestPublishOpen);
-  const ahaTrapRef = useFocusTrap(ahaImportOpen !== null);
-  const openSpecTrapRef = useFocusTrap(openSpecImportOpen !== null);
   const extractTrapRef = useFocusTrap(extractOpen !== null);
   // The drafting of the open folder's specs from its code, as it goes: asked
   // of the server when the folder opens and while a run is at work; each
@@ -2243,7 +2229,6 @@ export function App() {
     window.addEventListener(EXTRACT_SPECS_EVENT, onMenu);
     return () => window.removeEventListener(EXTRACT_SPECS_EVENT, onMenu);
   }, [extractSpecs, needsRepo]);
-  const importTrapRef = useFocusTrap(importOpen !== null);
   const foldersTrapRef = useFocusTrap(foldersOpen);
   // The folder dialog lists what is so now (specs/app/multiple-windows
   // .feature.md "The folder dialog and the windows"): a folder another
@@ -2274,7 +2259,6 @@ export function App() {
     };
   }, [foldersOpen]);
   const switchTrapRef = useFocusTrap(switching !== null);
-  const conflictTrapRef = useFocusTrap(conflict !== null);
   const sessionErrorTrapRef = useFocusTrap(sessionError !== null);
 
   // Also re-run when the editor pane gives the feature page back: the cards
@@ -9912,28 +9896,24 @@ export function App() {
     spaClick,
     startSession,
     toggleScenarioPolarityAt,
+    // The dialogs'.
+    agentModels,
+    agents,
+    ahaSites,
+    confluencePublished,
+    confluenceWikis,
+    dismissConflict,
+    jiraSites,
+    markSaved,
+    openObservability,
+    qtestParentUrl,
+    qtestPublished,
+    qtestSites,
+    resolveWith,
   };
-  // The open feature's page, its scenario's page or the editor: the Specs
-  // tab's pane, built here and handed to the tab like the tree.
-  const specsPane = (
-    locked && editing && selected && feature ? (
-          /* The read-only site: a scenario's page is a page, not the editor. */
-          <ScenarioPage app={tabApp} actions={specsActions} />
-        ) : editing && selected && feature ? (
-          /* specs/editor/spec-editor.feature.md "Spec editor pane": the
-             scenario editor takes the feature pane's slot — the sidebar stays
-             beside it — with a bar on top and one scrolling column below. */
-          <ScenarioEditor app={tabApp} actions={specsActions} />
-        ) : selected && feature ? (
-          <FeaturePage app={tabApp} actions={specsActions} />
-        ) : (
-          /* A feature opened by deep link, still on its way. */
-          <PageSkeleton cards={3} />
-        )
-  );
   provideSpecsHost({
     sidebar: specsSidebar,
-    pane: specsPane,
+    actions: specsActions,
   });
 
   return (
@@ -10783,226 +10763,10 @@ export function App() {
           }
         />
       )}
-      {/* crud-feature.md "Publish feature with merge conflict": a
-          dialog rather than a strip appended to the page, so the two sides
-          never push the resolutions out of view. The dialog is capped to the
-          window; each side scrolls inside its own pane and the three
-          resolutions stay pinned at the bottom (specs/ui/ui.feature.md "Merge
-          conflict dialog"). */}
-      {conflict && (
-        <div className="dialog-backdrop" {...backdropDismiss(() => resolving === null && dismissConflict())}>
-          <div
-            className="dialog conflict-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Merge conflict"
-            ref={conflictTrapRef}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3>Merge conflict</h3>
-            <p className="hint">
-              Compare the two sides, then accept one or publish an edit that combines them.
-              {conflict.message ? ` — ${conflict.message}` : ""}
-            </p>
-            <div className="conflict-panes">
-              <section className="conflict-pane">
-                <header>
-                  <h4>Yours</h4>
-                  <span className="hint">what you are publishing</span>
-                </header>
-                <pre>{conflict.ours}</pre>
-              </section>
-              <section className="conflict-pane">
-                <header>
-                  <h4>Theirs</h4>
-                  <span className="hint">what is on the remote</span>
-                </header>
-                {conflict.theirs ? (
-                  <pre>{conflict.theirs}</pre>
-                ) : (
-                  <pre className="conflict-missing">No such file on the remote.</pre>
-                )}
-              </section>
-            </div>
-            <section className="conflict-edit">
-              <header>
-                <h4>Manual edit</h4>
-                <span className="hint">
-                  Start from{" "}
-                  <button className="link" onClick={() => setConflictDraft(conflict.ours)}>
-                    yours
-                  </button>{" "}
-                  or{" "}
-                  <button className="link" onClick={() => setConflictDraft(conflict.theirs)}>
-                    theirs
-                  </button>
-                </span>
-              </header>
-              <textarea
-                className="conflict-draft"
-                value={conflictDraft}
-                onChange={(e) => setConflictDraft(e.target.value)}
-                spellCheck={spellCheckOn}
-              />
-            </section>
-            <div className="dialog-actions conflict-actions">
-              <button
-                className="btn btn-secondary"
-                onClick={dismissConflict}
-                disabled={resolving !== null}
-              >
-                Cancel
-              </button>
-              <button
-                className="btn btn-primary"
-                onClick={() => void resolveWith("ours", conflict.ours)}
-                disabled={resolving !== null}
-              >
-                {resolving === "ours" ? "Publishing…" : "Accept yours"}
-              </button>
-              <button
-                className="btn btn-primary"
-                onClick={() => void resolveWith("theirs", conflict.theirs)}
-                disabled={resolving !== null}
-              >
-                {resolving === "theirs" ? "Publishing…" : "Accept theirs"}
-              </button>
-              <button
-                className="btn btn-primary"
-                onClick={() => void resolveWith("draft", conflictDraft)}
-                disabled={resolving !== null}
-              >
-                {resolving === "draft" ? "Publishing…" : "Publish manual edit"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      {confluencePublishOpen && selected && feature && (
-        <ConfluencePublishDialog
-          file={selected}
-          featureName={feature.name}
-          linkedUrl={feature.confluence?.url}
-          initialParentUrl={feature.confluencePage?.parentUrl ?? ""}
-          wikis={confluenceWikis}
-          trapRef={confluenceTrapRef}
-          onClose={() => setConfluencePublishOpen(false)}
-          onOpenLogs={() => {
-            setConfluencePublishOpen(false);
-            openObservability("confluence");
-          }}
-          onPublished={(data) => {
-            confluencePublished(data);
-            setConfluencePublishOpen(false);
-          }}
-        />
-      )}
-      {confluenceFolder && (
-        <ConfluenceFolderPublishDialog
-          key={`${confluenceFolder.path}:${confluenceFolder.features === null ? "loading" : "ready"}`}
-          folderLabel={confluenceFolder.label}
-          features={confluenceFolder.features}
-          wikis={confluenceWikis}
-          trapRef={confluenceFolderTrapRef}
-          onClose={() => setConfluenceFolder(null)}
-          onOpenLogs={() => {
-            setConfluenceFolder(null);
-            openObservability("confluence");
-          }}
-          onPublished={(file, data) => {
-            // The open feature now links its page: show it as saved.
-            if (file !== selected) return;
-            setFeature(featureFromResponse(data, selected));
-            setDirty(false);
-            markSaved();
-          }}
-          onFinished={(results) => {
-            setConfluenceFolder(null);
-            const created = results.filter((r) => r.created).length;
-            const parts = [
-              ...(created > 0 ? [`published ${created}`] : []),
-              ...(results.length - created > 0 ? [`updated ${results.length - created}`] : []),
-            ];
-            const said = parts.join(", ");
-            toast.success(`${said.charAt(0).toUpperCase()}${said.slice(1)} in Confluence`);
-            const warnings = results.flatMap((r) => (r.warning ? [`${r.title}: ${r.warning}`] : []));
-            if (warnings.length > 0) toast.error(warnings.join(" "));
-          }}
-        />
-      )}
-      {qtestPublishOpen && selected && feature && (
-        <QtestPublishDialog
-          file={selected}
-          featureName={feature.name}
-          linkedUrl={feature.qtest?.url}
-          initialParentUrl={feature.qtestModule?.parentUrl ?? qtestParentUrl}
-          sites={qtestSites}
-          trapRef={qtestTrapRef}
-          onClose={() => setQtestPublishOpen(false)}
-          onOpenLogs={() => {
-            setQtestPublishOpen(false);
-            openObservability("qtest");
-          }}
-          onPublished={(data) => {
-            qtestPublished(data);
-            // A test case qTest refused keeps the dialog open on it, with its details.
-            if (!data.failure) setQtestPublishOpen(false);
-          }}
-        />
-      )}
-      {wikiQtestPublishOpen && selected && feature && (
-        <WikiQtestPublishDialog
-          file={selected}
-          featureName={feature.name}
-          linkedPageUrl={feature.confluence?.url}
-          linkedModuleUrl={feature.qtest?.url}
-          initialParentPageUrl={feature.confluencePage?.parentUrl ?? ""}
-          initialParentModuleUrl={feature.qtestModule?.parentUrl ?? qtestParentUrl}
-          wikis={confluenceWikis}
-          sites={qtestSites}
-          trapRef={wikiQtestTrapRef}
-          onClose={() => setWikiQtestPublishOpen(false)}
-          onOpenLogs={(service) => {
-            setWikiQtestPublishOpen(false);
-            openObservability(service);
-          }}
-          onPagePublished={confluencePublished}
-          onCasesPublished={(data) => {
-            qtestPublished(data);
-            if (!data.failure) setWikiQtestPublishOpen(false);
-          }}
-        />
-      )}
-      {ahaImportOpen !== null && (
-        <AhaImportDialog
-          folder={ahaImportOpen.folder}
-          sites={ahaSites}
-          trapRef={ahaTrapRef}
-          onClose={() => setAhaImportOpen(null)}
-          onImported={(data) => {
-            const { folder } = ahaImportOpen;
-            setAhaImportOpen(null);
-            // The import switched Aha! links on server-side, so the chips show.
-            if (data.ahaLinks) setResourceLinksOn((prev) => ({ ...prev, aha: true }));
-            // Reveal the new feature: a selected folder may be collapsed.
-            if (folder) {
-              setCollapsed((prev) => {
-                const next = new Set(prev);
-                next.delete(folder);
-                return next;
-              });
-            }
-            void (async () => {
-              await loadFeatures();
-              await openFeature(data.fileName, { push: true });
-            })();
-            const open = { label: "Open in Aha!", run: () => window.open(data.url, "_blank", "noreferrer") };
-            const what = data.scenarios > 0 ? ` with ${data.scenarios} scenario${data.scenarios === 1 ? "" : "s"}` : "";
-            toast.success(`Imported “${data.title}” from Aha!${what}`, { action: open });
-            if (data.warning) toast.error(data.warning);
-          }}
-        />
-      )}
+      {/* Each tab's own dialogs, whatever the pane shows (src/plugins/client/
+          tabs.ts Overlay): the Specs tab's merge conflict, publish and import
+          dialogs among them. */}
+      {barTabs.map((tab) => tab.Overlay && <tab.Overlay key={tab.id} app={tabApp} />)}
       {publishOpen && (
         <PublishSpecsDialog
           onClose={() => setPublishOpen(false)}
@@ -11039,60 +10803,6 @@ export function App() {
           trapRef={extractTrapRef}
           onClose={() => setExtractOpen(null)}
           onCreated={(result) => void afterExtract(result)}
-        />
-      )}
-      {openSpecImportOpen !== null && (
-        <OpenSpecImportDialog
-          folder={openSpecImportOpen.folder}
-          trapRef={openSpecTrapRef}
-          onClose={() => setOpenSpecImportOpen(null)}
-          onImported={(data) => {
-            const { folder } = openSpecImportOpen;
-            setOpenSpecImportOpen(null);
-            // Reveal the new features: a selected folder may be collapsed.
-            if (folder) {
-              setCollapsed((prev) => {
-                const next = new Set(prev);
-                next.delete(folder);
-                return next;
-              });
-            }
-            void (async () => {
-              await loadFeatures();
-              await openFeature(data.created[0]!.fileName, { push: true });
-            })();
-            if (data.failed.length > 0) toast.error(importSummary(data));
-            else toast.success(importSummary(data));
-          }}
-        />
-      )}
-      {importOpen !== null && (
-        <ImportFromJiraWikiDialog
-          folder={importOpen.folder}
-          mode={importOpen.mode}
-          jiraSites={jiraSites}
-          wikis={confluenceWikis}
-          agents={agents}
-          agentModels={agentModels}
-          trapRef={importTrapRef}
-          onClose={() => setImportOpen(null)}
-          onCreated={(data) => {
-            const { folder } = importOpen;
-            setImportOpen(null);
-            // Reveal the new feature: a selected folder may be collapsed.
-            if (folder) {
-              setCollapsed((prev) => {
-                const next = new Set(prev);
-                next.delete(folder);
-                return next;
-              });
-            }
-            void (async () => {
-              await loadFeatures();
-              await openFeature(data.fileName, { push: true });
-            })();
-            toast.success(`Imported “${data.title}” with ${data.scenarios} scenario${data.scenarios === 1 ? "" : "s"}`);
-          }}
         />
       )}
       {tokenSignInOpen && (
