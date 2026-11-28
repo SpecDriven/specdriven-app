@@ -325,6 +325,7 @@ import { useOpenFeatureActions } from "./specs/openActions";
 import { useSessionSelection } from "./specs/sessionSelection";
 import { useFeaturePageKeys } from "./specs/pageKeys";
 import { useFeatureCommands } from "./specs/featureCommands";
+import { useSpecsDerived } from "./specs/derived";
 import { provideSpecsHost, type SpecsActions } from "./specs/host";
 import {
   DEFAULT_PROJECT_MANAGEMENT_TOOL,
@@ -1199,20 +1200,6 @@ export function App() {
   // repo's definitions as written, from the listing; null until one has been
   // read, so Settings offers the editor only for a folder.
   const [customAttributesText, setCustomAttributesText] = useState<string | null>(null);
-  const attributeDefs = useMemo(
-    () => parseAttributeDefinitions(customAttributesText ?? ""),
-    [customAttributesText],
-  );
-  /**
-   * Project-wide status rollup for the Specs section head: how many scenarios
-   * are draft / proposed / published across every feature. Always the full
-   * totals — independent of any active filter.
-   */
-  const statusTotals = useMemo(() => {
-    const t = { draft: 0, proposed: 0, published: 0 };
-    for (const f of features) for (const s of f.scenarios) t[s.status]++;
-    return t;
-  }, [features]);
   // The tree's own state (src/frontend/specs/treeState.ts): folds, outlines,
   // the folder picked, drags, the row menu, scenario picks and the filter.
   const {
@@ -1273,19 +1260,13 @@ export function App() {
   const compact = useMediaQuery(COMPACT_QUERY);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const drawerTrapRef = useFocusTrap(compact && drawerOpen);
-  // What the data repo's attributes use, for the chips' checks and the
-  // editor's suggestions (specs/app/custom-attributes.feature.md): every
-  // listed feature, and the open one as it stands — its drafts and an edit
-  // the listing has not caught up with included.
-  const knownAttributes = useMemo(
-    () =>
-      knownNames([
-        ...features.flatMap((f) => [f.attributes, ...f.scenarios.map((s) => s.attributes)]),
-        feature?.attributes,
-        ...(feature?.scenarios.map((s) => s.attributes) ?? []),
-      ]),
-    [features, feature],
-  );
+  const {
+    attributeDefs,
+    knownAttributes,
+    statusTotals,
+  } = useSpecsDerived({
+    customAttributesText,
+  });
   const {
     autosaveInFlight,
     autosaved,
