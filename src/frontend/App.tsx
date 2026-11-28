@@ -321,6 +321,7 @@ import { usePublish } from "./specs/publish";
 import { useFeatureOps } from "./specs/featureOps";
 import { useSpecsRefs } from "./specs/refs";
 import { useEditorEffects } from "./specs/editorEffects";
+import { useOpenFeatureActions } from "./specs/openActions";
 import { provideSpecsHost, type SpecsActions } from "./specs/host";
 import {
   DEFAULT_PROJECT_MANAGEMENT_TOOL,
@@ -1864,20 +1865,6 @@ export function App() {
   const refreshViewRef = useRef(refreshView);
   refreshViewRef.current = refreshView;
 
-  /**
-   * The read-only site's tick for an open scenario page: the feature as the
-   * server has it now, and when it differs from the one on screen, the same
-   * scenario's page opened again on it — by name and version, the way its
-   * link resolves, so a scenario that is gone says so and closes.
-   */
-  const refreshReadOnlyPane = async (file: string, open: Scenario): Promise<void> => {
-    const res = await fetch(`/api/features/${encodeURIComponent(file)}`).catch(() => null);
-    if (!res?.ok) return;
-    const fresh = featureFromResponse(await res.json(), file);
-    if (JSON.stringify(fresh) === JSON.stringify(feature)) return;
-    await openFeature(file, { scenario: { slug: slugify(open.name), version: open.version }, pane: true });
-  };
-
   // Mirror the server's cron reload: refresh on the same cadence so pulled
   // changes show up.
   // Not for a code repository, which nothing syncs: its tree refreshes when
@@ -2625,95 +2612,21 @@ export function App() {
     }
   };
 
-  const openFeature = async (file: string, opts: OpenOptions = {}) => {
-    setFeatureLoading(true);
-    const res = await fetch(`/api/features/${encodeURIComponent(file)}`).finally(() =>
-      setFeatureLoading(false),
-    );
-    if (res.ok) {
-      const data = await res.json();
-      const parsed = featureFromResponse(data, file);
-      // An open editor pane leaves the way `<` does — its last save goes out
-      // now (specs/editor/spec-editor.feature.md "Spec editor pane"). Before
-      // the selection moves on: the save places its scenario in the feature
-      // it belongs to with a synchronous setFeature, which the feature opened
-      // here must land on top of, not under. And not before the fetch, or
-      // the old feature page would show for the duration of the request.
-      editorRef.current.close();
-      // A move / rename-file sealed the editors so the close above could not
-      // PUT the retired path after git-mv. This is a live feature again.
-      unsealFeatureEditors();
-      // Opening a feature leaves the open plugin view — a page saves what
-      // its editor still holds as it unmounts, the same courtesy the README
-      // editor gets. An app page — Settings, Plugins — leaves too.
-      setPluginView(null);
-      setAppPage(null);
-      // A new feature shows up in the tree, so the sidebar turns to the Specs
-      // tab; a same-file refresh (sync, cron) leaves the tab where it is.
-      if (file !== selected) selectSidebarTab(SPECS_TAB);
-      setSelected(file);
-      setFeature(parsed);
-      let missingScenario: string | null = null;
-      if (opts.scenario !== undefined) {
-        // Deep link (specs/ui/navigation.feature.md): resolve slug (+ version)
-        // to a card; a miss opens the feature with no selection and a note.
-        const idx = opts.scenario === null ? null : resolveScenario(parsed.scenarios, opts.scenario);
-        if (opts.scenario !== null && idx === null) missingScenario = opts.scenario.slug;
-        setSelectedScenario(idx);
-        // A scenario link opens that scenario's page
-        // (specs/ui/navigation.feature.md "open a scenario link") — the whole
-        // point of the card's "Copy link".
-        setPaneRequest(
-          opts.pane && idx !== null
-            ? { scenario: parsed.scenarios[idx]!, terms: opts.terms ?? null }
-            : null,
-        );
-      } else {
-        // Keep the keyboard highlight across a same-file refresh (sync, cron);
-        // drop it when switching files or when the list shrank past it.
-        setSelectedScenario((prev) =>
-          file === selected && prev !== null && prev < parsed.scenarios.length ? prev : null,
-        );
-      }
-      if (opts.push && location.pathname !== featurePath(file)) {
-        history.pushState(null, "", featurePath(file));
-      }
-      setDirty(false);
-      // A same-file refresh keeps a feature name being edited in the header.
-      if (file !== selected) setRenameDraft(null);
-      setConflict(null);
-      if (opts.editDescription) openDescriptionEditor(file, parsed.description);
-      if (missingScenario) {
-        toast.error(
-          `Scenario "${missingScenario}" not found — it may have been renamed or deleted.`,
-        );
-      }
-    } else {
-      // The file is gone — deleted, renamed by the `.feature.md` migration, or
-      // a stale deep link. Drop a stale selection rather than re-fetching it
-      // on every reload tick; a link or click that misses leaves a note.
-      unsealFeatureEditors();
-      if (file === selected) {
-        // The file is gone, so an editor open on it has nothing to save into.
-        setEditing(null);
-        setSelected(null);
-        setFeature(null);
-        setSelectedScenario(null);
-      }
-      if (opts.push || opts.scenario !== undefined) {
-        // Said by what the app knows (linkSync.ts): "stale" only for a file
-        // that is not there in a folder that was pulled.
-        const body = (await res.json().catch(() => null)) as { error?: unknown } | null;
-        toast.error(
-          missedFeatureNote(file, res.status, {
-            pullProblem: opts.pullProblem ?? null,
-            error: typeof body?.error === "string" ? body.error : null,
-          }),
-        );
-      }
-      await loadFeatures();
-    }
-  };
+  const {
+    openFeature,
+    refreshReadOnlyPane,
+  } = useOpenFeatureActions({
+    editorRef,
+    loadFeatures,
+    // Declared further down: called through, not passed.
+    openDescriptionEditor: (file, text) => openDescriptionEditor(file, text),
+    // Declared further down: called through, not passed.
+    selectSidebarTab: (tab) => selectSidebarTab(tab),
+    setAppPage,
+    setPluginView,
+    // Declared further down: called through, not passed.
+    unsealFeatureEditors: () => unsealFeatureEditors(),
+  });
 
   // How the Specs tab opens a feature from its url (src/plugins/builtin/
   // specs/client.tsx) — a link, Back, a palette hit: published here, before
