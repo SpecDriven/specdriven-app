@@ -271,23 +271,7 @@ import {
   setWikiQtestPublishOpen,
   useSpecsDialogs,
 } from "./specs/dialogs";
-import { useDescriptionEditor } from "./specs/descriptionEditor";
-import { useTreeScenarios } from "./specs/treeScenarios";
-import { useScenarioOps } from "./specs/scenarioOps";
-import { useTestLinks } from "./specs/testLinks";
-import { useFeatureFields } from "./specs/featureFields";
-import { useScenarioSave } from "./specs/scenarioSave";
-import { usePublish } from "./specs/publish";
-import { useFeatureOps } from "./specs/featureOps";
-import { useSpecsRefs } from "./specs/refs";
-import { useEditorEffects } from "./specs/editorEffects";
-import { useOpenFeatureActions } from "./specs/openActions";
-import { useSessionSelection } from "./specs/sessionSelection";
-import { useFeaturePageKeys } from "./specs/pageKeys";
-import { useFeatureCommands } from "./specs/featureCommands";
-import { useSpecsDerived } from "./specs/derived";
-import { useSpecsPaletteActions } from "./specs/paletteActions";
-import { useSpecsShortcuts } from "./specs/specsShortcuts";
+import { useSpecs } from "./specs/useSpecs";
 import { provideSpecsHost, type SpecsActions } from "./specs/host";
 import {
   DEFAULT_PROJECT_MANAGEMENT_TOOL,
@@ -1205,39 +1189,6 @@ export function App() {
   const compact = useMediaQuery(COMPACT_QUERY);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const drawerTrapRef = useFocusTrap(compact && drawerOpen);
-  const {
-    attributeDefs,
-    knownAttributes,
-    statusTotals,
-  } = useSpecsDerived({
-    customAttributesText,
-  });
-  const {
-    autosaveInFlight,
-    autosaved,
-    bodyFieldRef,
-    deletingScenario,
-    descEditRef,
-    descPaneRef,
-    descSaveQueue,
-    descSaved,
-    editorRef,
-    editorSession,
-    featureEditorsRetiring,
-    featureEditorsSealed,
-    nameFieldRef,
-    renameDraftRef,
-    renamingRef,
-    revealPending,
-    saveOnOpen,
-    scenarioRefs,
-    scenarioSaveQueue,
-    selectedRef,
-    testEditOpened,
-    testLookup,
-    treePickAnchor,
-    treeRef,
-  } = useSpecsRefs();
   /** The `?` keyboard cheat sheet. */
   const [sheetOpen, setSheetOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -1394,6 +1345,8 @@ export function App() {
   // The scenario whose page is open goes in the view, so its url and its
   // Recent entry are the scenario's.
   const viewScenario = pageScenario(editing, feature?.scenarios);
+  /** The same, as the url and the title effects name it. */
+  const paneScenario = viewScenario;
   const pluginView = useMemo<PluginView | null>(
     () =>
       tabView ??
@@ -1810,19 +1763,6 @@ export function App() {
 
   /** Whether the url already stands for an open scenario page. */
   const panePushed = useRef(false);
-  const {
-    editingOpen,
-    paneScenario,
-  } = useEditorEffects({
-    autosaveInFlight,
-    autosaved,
-    deletingScenario,
-    editorSession,
-    revealPending,
-    scenarioRefs,
-    testLookup,
-    treeRef,
-  });
 
   const featureLinkOpen = featureTicketsOpen;
   const featureQtestOpen = featureQtestDraft !== null;
@@ -2541,21 +2481,6 @@ export function App() {
     }
   };
 
-  const {
-    openFeature,
-    refreshReadOnlyPane,
-  } = useOpenFeatureActions({
-    editorRef,
-    loadFeatures,
-    // Declared further down: called through, not passed.
-    openDescriptionEditor: (file, text) => openDescriptionEditor(file, text),
-    // Declared further down: called through, not passed.
-    selectSidebarTab: (tab) => selectSidebarTab(tab),
-    setAppPage,
-    setPluginView,
-    // Declared further down: called through, not passed.
-    unsealFeatureEditors: () => unsealFeatureEditors(),
-  });
 
   // How the Specs tab opens a feature from its url (src/plugins/builtin/
   // specs/client.tsx) — a link, Back, a palette hit: published here, before
@@ -3069,19 +2994,6 @@ export function App() {
   }, []);
 
 
-  const {
-    checkedLabel,
-    describeSelection,
-    selectionLabel,
-    sessionBundle,
-    sessionCount,
-    sessionFiles,
-  } = useSessionSelection({
-    activeTab,
-    locked,
-    paneScenario,
-    pluginView,
-  });
   /** The target the next session dialog opens on. */
   const sessionTarget = resolveCodeGenTarget(codeGenTarget, canOpenClaudeDesktop, agents);
 
@@ -3355,61 +3267,6 @@ export function App() {
     toast.success("Pomodoro started");
   };
 
-  const {
-    createFolder,
-    createFolderIn,
-    editFeatureDisplayName,
-    editFolderDisplayName,
-    fileStem,
-    folderMenuKey,
-    moveFeatureTo,
-    moveFolder,
-    moveFolderPrompt,
-    moveFolderTo,
-    moveTo,
-    removeFolder,
-    renameFile,
-    renameFolder,
-    renameSelected,
-    reorderFeature,
-    reorderFolder,
-  } = useFeatureOps({
-    confirm,
-    descSaveQueue,
-    editorRef,
-    featureEditorsRetiring,
-    loadFeatures,
-    openFeature,
-    pick,
-    prompt,
-    renameDraftRef,
-    renamingRef,
-    scenarioSaveQueue,
-    selectedRef,
-    // Declared further down: called through, not passed.
-    unsealFeatureEditors: () => unsealFeatureEditors(),
-  });
-  const {
-    confluencePublished,
-    openQtestPublish,
-    publish,
-    qtestPublished,
-    removeFeature,
-  } = usePublish({
-    confirm,
-    descSaveQueue,
-    editorRef,
-    featureEditorsRetiring,
-    loadFeatures,
-    // Declared further down: called through, not passed.
-    markSaved: () => markSaved(),
-    openFeature,
-    scenarioSaveQueue,
-    selectedRef,
-    setQtestParentUrl,
-    // Declared further down: called through, not passed.
-    unsealFeatureEditors: () => unsealFeatureEditors(),
-  });
   // Sync button (specs/ui/ui.feature.md "Main page"): immediate data reload —
   // the server runs one reload tick (pull + push saved), then the view
   // refreshes the way the cron mirror does — open pages and plugin tabs
@@ -3462,28 +3319,6 @@ export function App() {
     window.setTimeout(() => setCopied((p) => (p === path ? null : p)), 2000);
   };
 
-  const {
-    draftVersion,
-    markSaved,
-    nextVersionFor,
-    proposeScenario,
-    publishScenario,
-    saveScenario,
-  } = useScenarioSave({
-    autosaveInFlight,
-    autosaveSeconds,
-    autosaved,
-    deletingScenario,
-    editingOpen,
-    editorSession,
-    featureEditorsRetiring,
-    featureEditorsSealed,
-    nameFieldRef,
-    publish,
-    saveOnOpen,
-    scenarioSaveQueue,
-    selectedRef,
-  });
 
   /**
    * One autosave tick of the home README editor (app-startup.md
@@ -3563,20 +3398,6 @@ export function App() {
     storeSidebarTab(tab);
   };
 
-  const {
-    closeDescriptionEditor,
-    descTick,
-    openDescriptionEditor,
-  } = useDescriptionEditor({
-    autosaveSeconds,
-    descEditRef,
-    descSaveQueue,
-    descSaved,
-    featureEditorsRetiring,
-    featureEditorsSealed,
-    markSaved,
-    selectedRef,
-  });
   // Avatar initials: from the git name when set, else the OS user name
   // (specs/user-info-settings.feature.md).
   const initials = (user?.name || user?.username || "?")
@@ -4176,73 +3997,8 @@ export function App() {
     if (!(await patchSettings({ gitAccess: access }))) setGitAccess(prev);
   };
 
-  const {
-    assignableMembers,
-    changeLinkDraft,
-    changeQtestDraft,
-    saveAssigned,
-    saveFeatureAttributes,
-    saveFeatureFlags,
-    saveFeatureQtest,
-    saveFeatureTickets,
-    savePullRequests,
-    saveResourceLinks,
-    saveScenarioFileList,
-    setTests,
-    uploadScenarioFiles,
-  } = useFeatureFields({
-    confirm,
-    markSaved,
-    members,
-    selectedRef,
-  });
 
-  const {
-    addTest,
-    cancelTestLookup,
-    commitTestEdit,
-    removeTest,
-    startTestEdit,
-    testsTable,
-  } = useTestLinks({
-    setTests,
-    testEditOpened,
-    testLookup,
-  });
 
-  const {
-    backToFeature,
-    canAddAfter,
-    closeEditor,
-    confirmScenarioDelete,
-    deleteScenario,
-    moveScenarioTo,
-    newScenarioAfterCurrent,
-    newVersion,
-    reorderScenario,
-    toggleScenarioPolarityAt,
-    unpublishScenario,
-    unsealFeatureEditors,
-  } = useScenarioOps({
-    autosaveInFlight,
-    autosaved,
-    confirm,
-    deletingScenario,
-    descSaveQueue,
-    descTick,
-    draftVersion,
-    editorRef,
-    editorSession,
-    featureEditorsRetiring,
-    featureEditorsSealed,
-    markSaved,
-    nextVersionFor,
-    prompt,
-    saveOnOpen,
-    saveScenario,
-    scenarioSaveQueue,
-    selectedRef,
-  });
 
 
   // The scenario as last saved into the feature: what a delete removes, and
@@ -4251,37 +4007,6 @@ export function App() {
   const savedEntry =
     editing !== null && editing.index !== null ? (feature?.scenarios[editing.index] ?? null) : null;
 
-  const {
-    clearTreePicks,
-    cloneTreeScenario,
-    deletePickedScenarios,
-    deleteTreeScenario,
-    dropTreeScenario,
-    endScenarioDrag,
-    moveScenarioToFeature,
-    moveTreeScenario,
-    openScenarioRow,
-    pickTreeScenario,
-    pickedTreeScenarios,
-  } = useTreeScenarios({
-    autosaveInFlight,
-    closeEditor,
-    confirm,
-    confirmScenarioDelete,
-    deleteScenario,
-    featureEditorsSealed,
-    loadFeatures,
-    markSaved,
-    moveScenarioTo,
-    openFeature,
-    paneScenario,
-    pick,
-    savedEntry,
-    scenarioSaveQueue,
-    selectedRef,
-    treePickAnchor,
-    treeRef,
-  });
 
 
   // One keyboard model (specs/ui/ui.feature.md "Design system"): every
@@ -4359,21 +4084,6 @@ export function App() {
   useEffect(() => {
     setDrawerOpen(false);
   }, [compact, selected, pluginViewKey, editing !== null]);
-  const {
-    moveScenarioSelection,
-    newScenario,
-    onFeaturePage,
-    openSelectedScenario,
-    scenarioLink,
-    scenarioNav,
-    stepScenario,
-  } = useFeaturePageKeys({
-    openScenarioRow,
-    prompt,
-    readOnly,
-    saveOnOpen,
-    scenarioRefs,
-  });
   // ESC closes whatever is on top (specs/ui/ui.feature.md "Dialogs"): a dialog;
   // then the editor pane — its way back, leaving the scenario autosaved
   // (specs/editor/spec-editor.feature.md "Spec editor pane") — unless the
@@ -4427,6 +4137,139 @@ export function App() {
     if (selectedFolder !== null) return setSelectedFolder(null);
     return false;
   };
+  /** A palette action that is not a key's: its id, label, icon and what it runs. */
+  const action = (
+    id: string,
+    label: string,
+    icon: ReactNode,
+    run: () => void,
+    extra: Partial<PaletteItem> = {},
+  ): PaletteItem => ({ id: `action:${id}`, group: "Actions", label, text: label, icon, run, ...extra });
+  const {
+    addTest,
+    assignableMembers,
+    attributeDefs,
+    backToFeature,
+    bodyFieldRef,
+    canAddAfter,
+    cancelTestLookup,
+    changeLinkDraft,
+    changeQtestDraft,
+    checkedLabel,
+    clearTreePicks,
+    cloneTreeScenario,
+    closeDescriptionEditor,
+    commitTestEdit,
+    confluencePublished,
+    createFeature,
+    createFeatureIn,
+    createFolder,
+    createFolderIn,
+    deletePickedScenarios,
+    deleteScenario,
+    deleteTreeScenario,
+    descEditRef,
+    descPaneRef,
+    descSaveQueue,
+    descSaved,
+    descTick,
+    describeSelection,
+    dismissConflict,
+    draftVersion,
+    dropTreeScenario,
+    editFeatureDisplayName,
+    editFolderDisplayName,
+    editorRef,
+    endScenarioDrag,
+    folderMenuKey,
+    knownAttributes,
+    markSaved,
+    moveFeaturePrompt,
+    moveFeatureTo,
+    moveFolder,
+    moveFolderPrompt,
+    moveFolderTo,
+    moveScenarioToFeature,
+    moveTo,
+    moveTreeScenario,
+    nameFieldRef,
+    newScenario,
+    newScenarioAfterCurrent,
+    newVersion,
+    onFeaturePage,
+    openConfluenceFolder,
+    openDescriptionEditor,
+    openFeature,
+    openQtestPublish,
+    openScenarioRow,
+    pickTreeScenario,
+    pickedTreeScenarios,
+    proposeScenario,
+    publish,
+    publishScenario,
+    qtestPublished,
+    refreshReadOnlyPane,
+    removeFeature,
+    removeFolder,
+    removeTest,
+    renameDraftRef,
+    renameFile,
+    renameFolder,
+    renameSelected,
+    reorderScenario,
+    resolveWith,
+    saveAssigned,
+    saveFeatureAttributes,
+    saveFeatureFlags,
+    saveFeatureQtest,
+    saveFeatureTickets,
+    savePullRequests,
+    saveResourceLinks,
+    saveScenarioFileList,
+    scenarioLink,
+    scenarioNav,
+    scenarioRefs,
+    scenarioSaveQueue,
+    selectionLabel,
+    sessionBundle,
+    sessionCount,
+    sessionFiles,
+    specsFeatureActions,
+    specsFolderActions,
+    specsShortcuts,
+    startTestEdit,
+    statusTotals,
+    stepScenario,
+    testsTable,
+    toggleFolder,
+    toggleOutline,
+    toggleScenarioPolarityAt,
+    treePickAnchor,
+    treeRef,
+    unpublishScenario,
+    uploadScenarioFiles,
+  } = useSpecs({
+    action,
+    activeTab,
+    autosaveSeconds,
+    confirm,
+    customAttributesText,
+    loadFeatures,
+    locked,
+    members,
+    paneScenario,
+    pick,
+    pluginView,
+    prompt,
+    quiet,
+    quietBehindPalette,
+    readOnly,
+    savedEntry,
+    selectSidebarTab,
+    setAppPage,
+    setPluginView,
+    setQtestParentUrl,
+  });
   // What the Specs tab's `c` and its own commands read (src/plugins/
   // builtin/specs/client.tsx), published before they are read below.
   provideSpecsHost({
@@ -4462,21 +4305,6 @@ export function App() {
       : onFeaturePage
         ? { label: "New scenario", run: () => void newScenario() }
         : null,
-  });
-  const {
-    specsShortcuts,
-  } = useSpecsShortcuts({
-    moveScenarioSelection,
-    onFeaturePage,
-    openSelectedScenario,
-    proposeScenario,
-    publish,
-    publishScenario,
-    quiet,
-    quietBehindPalette,
-    reorderScenario,
-    scenarioNav,
-    stepScenario,
   });
   // `c` (specs/app/plugins.feature.md): what the open view makes — a
   // scenario on a feature's page — else the shown tab's own "new": a
@@ -4801,44 +4629,6 @@ export function App() {
       run: () => void s.run(new KeyboardEvent("keydown", { key: "Enter" })),
     };
   };
-  const {
-    createFeature,
-    createFeatureIn,
-    dismissConflict,
-    moveFeaturePrompt,
-    openConfluenceFolder,
-    resolveWith,
-    toggleFolder,
-    toggleOutline,
-  } = useFeatureCommands({
-    fileStem,
-    loadFeatures,
-    moveTo,
-    openFeature,
-    pick,
-    prompt,
-  });
-  const action = (
-    id: string,
-    label: string,
-    icon: ReactNode,
-    run: () => void,
-    extra: Partial<PaletteItem> = {},
-  ): PaletteItem => ({ id: `action:${id}`, group: "Actions", label, text: label, icon, run, ...extra });
-  const {
-    specsFeatureActions,
-    specsFolderActions,
-  } = useSpecsPaletteActions({
-    action,
-    editFolderDisplayName,
-    moveFeaturePrompt,
-    moveFolderPrompt,
-    removeFeature,
-    removeFolder,
-    renameFolder,
-    reorderFeature,
-    reorderFolder,
-  });
   const paletteActions: PaletteItem[] = [
     shortcutAction(
       "create",
